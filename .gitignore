@@ -426,3 +426,22 @@ FodyWeavers.xsd
 
 # Official VS Code C# Dev Kit Extension exclusion
 #*.lscache
+# CAD/BIM project data and local runtime files
+*.dwg
+*.dws
+*.dwt
+*.dxf
+*.dwl
+*.dwl2
+*.bak
+*.sv$
+*.rvt
+*.rfa
+*.rte
+*.rft
+*.slog
+*.log
+.env
+.env.*
+/work/
+/local/

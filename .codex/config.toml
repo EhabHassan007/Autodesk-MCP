@@ -1,0 +1,8 @@
+[mcp_servers.autocad]
+command = "powershell.exe"
+args = ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", "src/autocad/autocad-bridge.ps1"]
+cwd = ".."
+startup_timeout_sec = 15
+tool_timeout_sec = 60
+enabled = true
+default_tools_approval_mode = "writes"
