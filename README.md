@@ -47,7 +47,7 @@ Any BIM-CAD MCP user can select **Review local skills** to create a local report
 
 ## Small Windows setup app
 
-Double-click `installer\Start-BIM-CAD-Setup.cmd` for a guided setup. Select AutoCAD and choose **Install / Repair**. The app downloads or updates the repository under `%LOCALAPPDATA%\BIM-CAD-MCP`, installs every saved skill, registers the version-aware AutoCAD MCP server globally in Codex, and checks the local AutoCAD connection. Use **Update** on future runs to retrieve newly published skills.
+Double-click `installer\Start-BIM-CAD-Setup.cmd` for a guided setup. Select AutoCAD and choose **Install / Repair**. The app downloads or updates the approved repository from GitHub under `%LOCALAPPDATA%\BIM-CAD-MCP`, installs every saved skill, registers the version-aware AutoCAD MCP server globally in Codex, and checks the local AutoCAD connection. Use **Update** on future runs to retrieve newly published skills. Git is optional: when it is unavailable, the setup downloads the current `main` branch as a GitHub ZIP.
 
 The AutoCAD path discovers installed ActiveX versions automatically. The Revit path targets Revit 2024 and builds a local add-in against the installed Revit 2024 API, installs its user manifest, and registers a separate `revit` MCP server. Restart Revit after installation so the add-in loads.
 

@@ -27,7 +27,7 @@ $title.Location = New-Object System.Drawing.Point(24, 20)
 $form.Controls.Add($title)
 
 $subtitle = New-Object System.Windows.Forms.Label
-$subtitle.Text = 'Install skills and connect Codex to your local CAD application.'
+$subtitle.Text = 'Download approved skills from GitHub and connect Codex to your CAD application.'
 $subtitle.AutoSize = $true
 $subtitle.ForeColor = [System.Drawing.Color]::DimGray
 $subtitle.Location = New-Object System.Drawing.Point(28, 62)

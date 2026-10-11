@@ -17,7 +17,7 @@ $ErrorActionPreference = 'Stop'
 
 function Write-Step {
     param([string]$Message)
-    Write-Output ("[{0}] {1}" -f (Get-Date -Format 'HH:mm:ss'), $Message)
+    Write-Host ("[{0}] {1}" -f (Get-Date -Format 'HH:mm:ss'), $Message)
 }
 
 function Get-RequiredCommand {
@@ -28,6 +28,14 @@ function Get-RequiredCommand {
         throw "$Name is not installed or is not available in PATH."
     }
     $command.Source
+}
+
+function Get-OptionalCommand {
+    param([string]$Name)
+
+    $command = Get-Command $Name -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($command) { return $command.Source }
+    $null
 }
 
 function Invoke-External {
@@ -55,34 +63,142 @@ function Invoke-External {
     [pscustomobject]@{ ExitCode = $exitCode; Output = @($output) }
 }
 
-function Get-Repository {
-    $git = Get-RequiredCommand 'git'
-    $manifest = Join-Path $RepositoryPath '.agents\skills'
+function Get-GitHubArchiveUrl {
+    param(
+        [string]$Url,
+        [string]$Branch = 'main'
+    )
 
-    if (Test-Path -LiteralPath (Join-Path $RepositoryPath '.git') -PathType Container) {
-        if (-not $SkipRepositoryUpdate) {
+    try { $uri = [Uri]$Url }
+    catch { throw "The repository address is not valid: $Url" }
+    if ($uri.Host -ne 'github.com') {
+        throw 'Direct download without Git currently supports github.com repositories only.'
+    }
+
+    $parts = @($uri.AbsolutePath.Trim('/') -split '/')
+    if ($parts.Count -lt 2) {
+        throw "The GitHub repository address is incomplete: $Url"
+    }
+    $owner = $parts[0]
+    $repository = $parts[1] -replace '\.git$', ''
+    if ([string]::IsNullOrWhiteSpace($owner) -or [string]::IsNullOrWhiteSpace($repository)) {
+        throw "The GitHub repository address is incomplete: $Url"
+    }
+    "https://github.com/$owner/$repository/archive/refs/heads/$([Uri]::EscapeDataString($Branch)).zip"
+}
+
+function Assert-SafeRepositoryPath {
+    $fullPath = [IO.Path]::GetFullPath($RepositoryPath).TrimEnd('\')
+    $driveRoot = [IO.Path]::GetPathRoot($fullPath).TrimEnd('\')
+    if ($fullPath -eq $driveRoot -or $fullPath -eq [IO.Path]::GetFullPath($HOME).TrimEnd('\')) {
+        throw "The installation folder is not safe to replace: $fullPath"
+    }
+}
+
+function Install-RepositoryArchive {
+    Assert-SafeRepositoryPath
+    $archiveUrl = Get-GitHubArchiveUrl -Url $RepositoryUrl
+    $temporaryRoot = Join-Path ([IO.Path]::GetTempPath()) ("bim-cad-mcp-{0}" -f [Guid]::NewGuid().ToString('N'))
+    $archivePath = Join-Path $temporaryRoot 'repository.zip'
+    $expandedPath = Join-Path $temporaryRoot 'expanded'
+    $backupPath = "$RepositoryPath.previous-$PID"
+    $repositoryMoved = $false
+
+    New-Item -ItemType Directory -Path $expandedPath -Force | Out-Null
+    try {
+        Write-Step 'Git is not installed. Downloading the current setup and skills directly from GitHub...'
+        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+        Invoke-WebRequest -Uri $archiveUrl -OutFile $archivePath -UseBasicParsing
+        if (-not (Test-Path -LiteralPath $archivePath -PathType Leaf) -or (Get-Item -LiteralPath $archivePath).Length -eq 0) {
+            throw 'GitHub returned an empty download.'
+        }
+        Expand-Archive -LiteralPath $archivePath -DestinationPath $expandedPath -Force
+
+        $downloadedRoot = Get-ChildItem -LiteralPath $expandedPath -Directory |
+            Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName '.agents\skills') -PathType Container } |
+            Select-Object -First 1
+        if (-not $downloadedRoot) {
+            throw 'The GitHub download does not contain the BIM-CAD MCP skill library.'
+        }
+
+        $parent = Split-Path -Parent ([IO.Path]::GetFullPath($RepositoryPath))
+        New-Item -ItemType Directory -Path $parent -Force | Out-Null
+        if (Test-Path -LiteralPath $backupPath) {
+            Remove-Item -LiteralPath $backupPath -Recurse -Force
+        }
+        if (Test-Path -LiteralPath $RepositoryPath) {
+            Move-Item -LiteralPath $RepositoryPath -Destination $backupPath
+            $repositoryMoved = $true
+        }
+
+        try {
+            Move-Item -LiteralPath $downloadedRoot.FullName -Destination $RepositoryPath
+            $reviewBackup = Join-Path $backupPath 'skill-review'
+            if ($repositoryMoved -and (Test-Path -LiteralPath $reviewBackup -PathType Container)) {
+                Move-Item -LiteralPath $reviewBackup -Destination (Join-Path $RepositoryPath 'skill-review')
+            }
+            [ordered]@{
+                repository = $RepositoryUrl
+                branch = 'main'
+                downloaded_utc = [DateTime]::UtcNow.ToString('o')
+                method = 'github-zip'
+            } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $RepositoryPath '.bim-cad-source.json') -Encoding UTF8
+        }
+        catch {
+            if (Test-Path -LiteralPath $RepositoryPath) {
+                Remove-Item -LiteralPath $RepositoryPath -Recurse -Force
+            }
+            if ($repositoryMoved -and (Test-Path -LiteralPath $backupPath)) {
+                Move-Item -LiteralPath $backupPath -Destination $RepositoryPath
+            }
+            throw
+        }
+
+        if ($repositoryMoved -and (Test-Path -LiteralPath $backupPath)) {
+            Remove-Item -LiteralPath $backupPath -Recurse -Force
+        }
+    }
+    catch {
+        throw "Could not download the repository from GitHub. $($_.Exception.Message)"
+    }
+    finally {
+        if (Test-Path -LiteralPath $temporaryRoot) {
+            Remove-Item -LiteralPath $temporaryRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Get-Repository {
+    $manifest = Join-Path $RepositoryPath '.agents\skills'
+    if ($SkipRepositoryUpdate) {
+        if (-not (Test-Path -LiteralPath $manifest -PathType Container)) {
+            throw "No valid BIM-CAD MCP repository exists at $RepositoryPath."
+        }
+        return (Resolve-Path -LiteralPath $RepositoryPath).Path
+    }
+
+    $git = Get-OptionalCommand 'git'
+    if ($git) {
+        if (Test-Path -LiteralPath (Join-Path $RepositoryPath '.git') -PathType Container) {
             Write-Step 'Downloading the newest setup and skills from GitHub...'
             $result = Invoke-External $git @('-C', $RepositoryPath, 'pull', '--ff-only', 'origin', 'main')
             $null = $result
         }
-    }
-    else {
-        if ($SkipRepositoryUpdate) {
-            throw "No Git repository exists at $RepositoryPath."
-        }
-        if (Test-Path -LiteralPath $RepositoryPath) {
-            $existing = @(Get-ChildItem -LiteralPath $RepositoryPath -Force -ErrorAction SilentlyContinue)
-            if ($existing.Count -gt 0) {
-                throw "The installation folder is not empty: $RepositoryPath"
-            }
-        }
-        else {
+        elseif (-not (Test-Path -LiteralPath $RepositoryPath) -or
+            @(Get-ChildItem -LiteralPath $RepositoryPath -Force -ErrorAction SilentlyContinue).Count -eq 0) {
             $parent = Split-Path -Parent $RepositoryPath
             New-Item -ItemType Directory -Path $parent -Force | Out-Null
+            Write-Step 'Downloading BIM-CAD MCP from GitHub...'
+            $result = Invoke-External $git @('clone', $RepositoryUrl, $RepositoryPath)
+            $null = $result
         }
-        Write-Step 'Downloading BIM-CAD MCP from GitHub...'
-        $result = Invoke-External $git @('clone', $RepositoryUrl, $RepositoryPath)
-        $null = $result
+        else {
+            Write-Step 'Refreshing the installed copy directly from GitHub...'
+            Install-RepositoryArchive
+        }
+    }
+    else {
+        Install-RepositoryArchive
     }
 
     if (-not (Test-Path -LiteralPath $manifest -PathType Container)) {
