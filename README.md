@@ -17,7 +17,25 @@ The live application still runs on the computer where AutoCAD is installed. GitH
 5. Fully restart Codex after the first clone or after MCP configuration changes.
 6. Ask: `Use the AutoCAD connection to read the active drawing name and layers.`
 
-The repository-scoped configuration in `.codex/config.toml` starts the included bridge with a relative path, so the clone can live anywhere. The repository-scoped skill under `.agents/skills` teaches Codex the safe read/write workflow.
+The repository-scoped configuration in `.codex/config.toml` starts the included bridge with a relative path, so the clone can live anywhere. Reusable skills live under `.agents/skills`; GitHub is their shared source of truth.
+
+## Keep skills synchronized through GitHub
+
+On every computer, clone this same repository and create or update skills inside `.agents/skills/<skill-name>`. Then run:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\sync-codex-skills.ps1" -Action Publish -Message "Update CAD skills"
+```
+
+The command validates every stored skill, commits only `.agents/skills`, rebases on `origin/main`, pushes the commit, and installs the current library into that computer's Codex user skills folder. GitHub authentication must already be configured on that computer.
+
+To download the newest skills on another computer and install them for use in every Codex project:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\sync-codex-skills.ps1" -Action Update
+```
+
+Restart Codex after installation if the new skill does not appear immediately. Chat history is outside this workflow and is never copied by the script.
 
 ## Verify the bridge without editing a live drawing
 
