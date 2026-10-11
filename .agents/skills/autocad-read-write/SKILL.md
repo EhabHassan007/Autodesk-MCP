@@ -1,6 +1,6 @@
 ---
 name: autocad-read-write
-description: Inspect and edit a live full AutoCAD 2025 drawing on Windows through the repository's local MCP bridge. Use for drawing information, entities, text, layers, connection checks, and supported write operations.
+description: Inspect and edit a live full AutoCAD drawing on Windows through the repository's version-aware local MCP bridge. Use for drawing information, entities, text, layers, connection checks, and supported write operations.
 ---
 
 # AutoCAD read/write

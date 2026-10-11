@@ -47,7 +47,38 @@ function Assert-Args($name,$a) {
     }
 }
 function Require-Arg($a,$key) { if ($null -eq $a.PSObject.Properties[$key]) { throw "Missing argument for this action: $key" } }
-function Connect-Cad { [Runtime.InteropServices.Marshal]::GetActiveObject('AutoCAD.Application.25') }
+function Get-AutoCadProgIds {
+    $ids = New-Object System.Collections.Generic.List[string]
+    try {
+        $current = (Get-ItemProperty -LiteralPath 'Registry::HKEY_CLASSES_ROOT\AutoCAD.Application\CurVer' -ErrorAction Stop).'(default)'
+        if ($current) { $ids.Add([string]$current) }
+    }
+    catch { }
+
+    try {
+        $versioned = Get-ChildItem 'Registry::HKEY_CLASSES_ROOT' -ErrorAction Stop |
+            Where-Object { $_.PSChildName -match '^AutoCAD\.Application\.\d+(?:\.\d+)?$' } |
+            ForEach-Object {
+                $suffix = $_.PSChildName.Substring('AutoCAD.Application.'.Length)
+                [pscustomobject]@{ ProgId = $_.PSChildName; Version = [version]$suffix }
+            } |
+            Sort-Object Version -Descending
+        foreach ($item in $versioned) { $ids.Add($item.ProgId) }
+    }
+    catch { }
+
+    $ids.Add('AutoCAD.Application')
+    @($ids | Select-Object -Unique)
+}
+
+function Connect-Cad {
+    $attempted = @()
+    foreach ($progId in Get-AutoCadProgIds) {
+        $attempted += $progId
+        try { return [Runtime.InteropServices.Marshal]::GetActiveObject($progId) } catch { }
+    }
+    throw "No running full AutoCAD instance was found. Start AutoCAD and open a drawing. Tried: $($attempted -join ', ')."
+}
 function Drawing-Id($doc) { if ($doc.Path) { $doc.FullName } else { $doc.Name } }
 function Assert-Target($doc,$expected) { if ((Drawing-Id $doc) -ine $expected) { throw 'Active drawing changed or expected_drawing is incorrect. Read drawing_info again.' } }
 function Read-Entity($entity) {
@@ -164,7 +195,7 @@ while ($null -ne ($line=[Console]::ReadLine())) {
     switch ($r.method) {
         'initialize' {
             $protocol='2024-11-05'; if ($r.params.protocolVersion -in @('2024-11-05','2025-03-26','2025-06-18','2025-11-25')) {$protocol=$r.params.protocolVersion}
-            $response.result=@{protocolVersion=$protocol;capabilities=@{tools=@{}};serverInfo=@{name='autocad-2025-local';version='0.2.0'};instructions='Read drawing_info before editing; use drawing_id as expected_drawing. Inspect entities before modifying their handles. Writes are enabled for any active writable drawing. Coordinates use WCS and drawing units. Each edit is an Undo group, not an atomic transaction; inspect after errors before retrying. Saving requires the separate save_drawing tool and user intent to save. Blocks and xrefs are not expanded by list_entities.'}
+            $response.result=@{protocolVersion=$protocol;capabilities=@{tools=@{}};serverInfo=@{name='autocad-windows-local';version='0.3.0'};instructions='Read drawing_info before editing; use drawing_id as expected_drawing. Inspect entities before modifying their handles. Writes are enabled for any active writable drawing. Coordinates use WCS and drawing units. Each edit is an Undo group, not an atomic transaction; inspect after errors before retrying. Saving requires the separate save_drawing tool and user intent to save. Blocks and xrefs are not expanded by list_entities.'}
         }
         'ping' {$response.result=@{}}
         'tools/list' {$response.result=@{tools=$toolList}}

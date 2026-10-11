@@ -3,15 +3,15 @@
 ## Expected environment
 
 - Windows
-- Full AutoCAD 2025, running in the same Windows user session as Codex
-- AutoCAD COM identifier `AutoCAD.Application.25`
+- Full AutoCAD for Windows with ActiveX automation, running in the same Windows user session as Codex
+- A registered version-specific AutoCAD COM identifier. The bridge discovers the current and installed ProgIDs dynamically and does not hardcode one release.
 - Repository trusted by Codex so `.codex/config.toml` is loaded
 
 The project configuration starts `src/autocad/autocad-bridge.ps1` from the repository root. It uses relative paths and should work from any clone location.
 
 ## Diagnose
 
-1. Confirm AutoCAD is open with a drawing.
+1. Confirm a full Windows AutoCAD release is open with a drawing. AutoCAD LT and AutoCAD for Mac do not expose the required ActiveX interface.
 2. In Codex, inspect `/mcp` or MCP settings for `autocad`.
 3. Restart Codex after cloning or configuration changes.
 4. Call `drawing_info` before declaring the connection broken.

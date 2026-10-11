@@ -6,3 +6,12 @@ startup_timeout_sec = 15
 tool_timeout_sec = 60
 enabled = true
 default_tools_approval_mode = "writes"
+
+[mcp_servers.revit]
+command = "powershell.exe"
+args = ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", "src/revit/revit-bridge.ps1", "-RevitVersion", "2024"]
+cwd = ".."
+startup_timeout_sec = 15
+tool_timeout_sec = 60
+enabled = true
+default_tools_approval_mode = "writes"

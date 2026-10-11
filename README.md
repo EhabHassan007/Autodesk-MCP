@@ -2,15 +2,21 @@
 
 Portable Codex connections and reusable skills for desktop CAD/BIM applications.
 
-## AutoCAD 2025 status
+## AutoCAD status
 
-The repository currently includes a tested local MCP bridge for full AutoCAD 2025 on Windows. It can inspect the active drawing and layers, inspect top-level entities, create lines/circles/text, edit supported entity properties, manage layers, and explicitly save a drawing.
+The repository includes a version-aware local MCP bridge for full AutoCAD on Windows. It discovers registered AutoCAD ActiveX ProgIDs instead of hardcoding one release. It can inspect the active drawing and layers, inspect top-level entities, create lines/circles/text, edit supported entity properties, manage layers, and explicitly save a drawing. AutoCAD 2025 is live-tested; other releases still require a compatibility test before being marked verified.
 
 The live application still runs on the computer where AutoCAD is installed. GitHub stores and synchronizes the code; it does not host the running AutoCAD session.
 
+## Revit 2024 status
+
+The repository now includes a Revit 2024 add-in, a named-pipe MCP bridge, an installer path, and a Revit-specific skill. The first tool set reads document information, levels, selected elements, and element parameters, and can set one writable parameter in a Revit transaction. It never saves or synchronizes the model.
+
+The Revit 2024 source compiles successfully against the locally installed Revit API, and MCP protocol and isolated installer tests pass. Live Revit reads and writes still need verification in a disposable project before the adapter is considered production-ready.
+
 ## Use on this or another computer
 
-1. Install Codex and full AutoCAD 2025 on Windows.
+1. Install Codex and a supported full AutoCAD release on Windows.
 2. Clone this repository.
 3. Open the cloned repository as the Codex project and mark it trusted when prompted. Codex only loads project MCP configuration from trusted projects.
 4. Start AutoCAD and open a drawing.
@@ -37,6 +43,14 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\sync-codex-sk
 
 Restart Codex after installation if the new skill does not appear immediately. Chat history is outside this workflow and is never copied by the script.
 
+Any BIM-CAD MCP user can select **Review local skills** to create a local report and ZIP package marking candidates as NEW, CHANGED, or IDENTICAL. **Submit review package** opens the package and the GitHub submission form; the contributor reviews and attaches it explicitly. Nothing is uploaded automatically or added to the approved library until the repository owner accepts that individual skill. See [skill submissions](SKILL-SUBMISSIONS.md).
+
+## Small Windows setup app
+
+Double-click `installer\Start-BIM-CAD-Setup.cmd` for a guided setup. Select AutoCAD and choose **Install / Repair**. The app downloads or updates the repository under `%LOCALAPPDATA%\BIM-CAD-MCP`, installs every saved skill, registers the version-aware AutoCAD MCP server globally in Codex, and checks the local AutoCAD connection. Use **Update** on future runs to retrieve newly published skills.
+
+The AutoCAD path discovers installed ActiveX versions automatically. The Revit path targets Revit 2024 and builds a local add-in against the installed Revit 2024 API, installs its user manifest, and registers a separate `revit` MCP server. Restart Revit after installation so the add-in loads.
+
 ## Verify the bridge without editing a live drawing
 
 Run from the repository root:
@@ -49,7 +63,7 @@ The test uses a mock AutoCAD object model. For live verification, use a disposab
 
 ## Current limitations
 
-- AutoCAD 2025 Windows only (`AutoCAD.Application.25`).
+- Full AutoCAD for Windows with ActiveX automation. AutoCAD 2025 is verified; other registered versions are discovered dynamically but need version-specific compatibility verification. AutoCAD LT and AutoCAD for Mac are not supported by this bridge.
 - The local STDIO bridge is available to Codex running on the same Windows computer and user session as AutoCAD.
 - GitHub access alone does not provide remote control of an office workstation.
 - Blocks and external references are not expanded; arbitrary AutoLISP/command execution, hatches, dimensions, plotting, and general cloning are not exposed.
@@ -58,7 +72,7 @@ The test uses a mock AutoCAD object model. For live verification, use a disposab
 ## Roadmap
 
 - Portable installer and AutoCAD `.bundle` add-in.
-- Revit adapter and Revit-specific skill.
+- Live-test the Revit 2024 adapter in a disposable project, then expand its narrow tool set based on verified workflows.
 - Versioned GitHub releases and update/rollback support.
 - Authenticated remote connector for intentionally controlled workstation access.
 
