@@ -17,7 +17,7 @@ $bool = @{type='boolean'}
 $session = @{type='string';minLength=1;description='Revit session ID returned by list_sessions. Optional only when one Revit session is running.'}
 $toolList = @(
     (New-Tool 'list_sessions' 'List running Revit sessions, their unique session IDs, active documents, and connection state. Call this first when more than one Revit window is open.' @{} @() $true),
-    (New-Tool 'connection_status' 'Read BIM-CAD MCP add-in status, session and pipe identity, active document, request count, and the last connection or error.' @{session_id=$session} @() $true),
+    (New-Tool 'connection_status' 'Read Autodesk MCP Connector add-in status, session and pipe identity, active document, request count, and the last connection or error.' @{session_id=$session} @() $true),
     (New-Tool 'document_info' 'Read active Revit document identity and state. Call before writes.' @{session_id=$session} @() $true),
     (New-Tool 'list_levels' 'Read levels in the active Revit document. Elevations are returned in Revit internal units.' @{session_id=$session} @() $true),
     (New-Tool 'list_selected' 'Read the elements currently selected in Revit.' @{session_id=$session} @() $true),
@@ -188,7 +188,7 @@ while ($null -ne ($line=[Console]::ReadLine())) {
     switch ($request.method) {
         'initialize' {
             $protocol='2024-11-05'; if ($request.params.protocolVersion -in @('2024-11-05','2025-03-26','2025-06-18','2025-11-25')) {$protocol=$request.params.protocolVersion}
-            $response.result=@{protocolVersion=$protocol;capabilities=@{tools=@{}};serverInfo=@{name='revit-2024-local';version='1.1.0'};instructions='Call list_sessions when more than one Revit process may be open, then pass session_id to every command. If one session is running, session_id may be omitted. Read document_info before writes and use document_id as expected_document. Revit API calls run through an ExternalEvent. Prefer narrow tools. execute_csharp provides controlled full Revit API access: read has no transaction, transaction supplies one project transaction, and manual is reserved for code that must manage its own transactions or family documents. Verify every write with a separate read. The connector does not save or synchronize unless explicitly commanded.'}
+            $response.result=@{protocolVersion=$protocol;capabilities=@{tools=@{}};serverInfo=@{name='Autodesk MCP Connector - Revit';version='1.2.0'};instructions='Call list_sessions when more than one Revit process may be open, then pass session_id to every command. If one session is running, session_id may be omitted. Read document_info before writes and use document_id as expected_document. Revit API calls run through an ExternalEvent. Prefer narrow tools. execute_csharp provides controlled full Revit API access: read has no transaction, transaction supplies one project transaction, and manual is reserved for code that must manage its own transactions or family documents. Verify every write with a separate read. The connector does not save or synchronize unless explicitly commanded.'}
         }
         'ping' {$response.result=@{}}
         'tools/list' {$response.result=@{tools=$toolList}}

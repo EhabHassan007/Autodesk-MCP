@@ -3,8 +3,8 @@ param(
     [ValidateSet('Status', 'Install', 'Update', 'Test', 'Collect', 'TeamStatus')]
     [string]$Action = 'Status',
 
-    [ValidateSet('AutoCAD', 'Revit')]
-    [string]$Product = 'AutoCAD',
+    [ValidateSet('All', 'AutoCAD', 'Revit')]
+    [string]$Product = 'All',
 
     [string]$RepositoryUrl = 'https://github.com/EhabHassan007/BIM-CAD---MCP.git',
 
@@ -261,7 +261,8 @@ function Register-McpServer {
     param(
         [string]$Name,
         [string]$Bridge,
-        [string[]]$BridgeArguments = @()
+        [string[]]$BridgeArguments = @(),
+        [string[]]$LegacyNames = @()
     )
 
     $codex = Get-RequiredCommand 'codex'
@@ -280,6 +281,14 @@ function Register-McpServer {
 
     Write-Step ("Registering the {0} MCP server in Codex..." -f $Name)
     try {
+        foreach ($legacyName in $LegacyNames) {
+            $legacy = Invoke-External $codex @('mcp', 'get', $legacyName) -AllowFailure
+            if ($legacy.ExitCode -eq 0) {
+                $removedLegacy = Invoke-External $codex @('mcp', 'remove', $legacyName)
+                $null = $removedLegacy
+                Write-Step ("Removed legacy MCP registration: {0}." -f $legacyName)
+            }
+        }
         $existing = Invoke-External $codex @('mcp', 'get', $Name) -AllowFailure
         if ($existing.ExitCode -eq 0) {
             $removed = Invoke-External $codex @('mcp', 'remove', $Name)
@@ -338,14 +347,6 @@ function Test-AutoCadSetup {
         Write-Step 'Full AutoCAD for Windows was not detected.'
     }
 
-    $codex = Get-OptionalCommand 'codex'
-    if ($codex) {
-        $registration = Invoke-External $codex @('mcp', 'get', 'autocad') -AllowFailure
-        if ($registration.ExitCode -eq 0) { Write-Step 'Codex has an AutoCAD MCP registration.' }
-        else { Write-Step 'The AutoCAD MCP server is not registered yet.' }
-    }
-    else { Write-Step 'Codex command was not detected.' }
-
     $cad = $null
     foreach ($progId in Get-AutoCadProgIds) {
         try { $cad = [Runtime.InteropServices.Marshal]::GetActiveObject($progId); break } catch { }
@@ -360,11 +361,25 @@ function Test-AutoCadSetup {
     else { Write-Step 'AutoCAD is not currently available for a live test. Start AutoCAD and open a drawing.' }
 }
 
+function Test-AutodeskRegistration {
+    $codex = Get-OptionalCommand 'codex'
+    if ($codex) {
+        $registration = Invoke-External $codex @('mcp','get','autodesk') -AllowFailure
+        if ($registration.ExitCode -eq 0) { Write-Step 'Codex has the Autodesk MCP Connector registration.' }
+        else { Write-Step 'Autodesk MCP Connector is not registered yet.' }
+    }
+    else { Write-Step 'Codex command was not detected.' }
+}
+
+function Test-Revit2024Installed {
+    Test-Path -LiteralPath (Join-Path $env:ProgramFiles 'Autodesk\Revit 2024\RevitAPI.dll') -PathType Leaf
+}
+
 function Install-RevitAddin {
     param([string]$Root)
 
     $revitPath = Join-Path $env:ProgramFiles 'Autodesk\Revit 2024'
-    if (-not (Test-Path -LiteralPath (Join-Path $revitPath 'RevitAPI.dll') -PathType Leaf)) {
+    if (-not (Test-Revit2024Installed)) {
         throw 'Revit 2024 was not detected. Install Revit 2024 before installing its MCP add-in.'
     }
 
@@ -391,41 +406,38 @@ function Install-RevitAddin {
 
     $manifestDirectory = Join-Path $env:APPDATA 'Autodesk\Revit\Addins\2024'
     New-Item -ItemType Directory -Path $manifestDirectory -Force | Out-Null
-    $manifestPath = Join-Path $manifestDirectory 'BimCadMcp.addin'
+    $manifestPath = Join-Path $manifestDirectory 'AutodeskMcpConnector.addin'
+    $legacyManifestPath = Join-Path $manifestDirectory 'BimCadMcp.addin'
     $escapedAssembly = [Security.SecurityElement]::Escape($assembly)
     $manifest = @"
 <?xml version="1.0" encoding="utf-8"?>
 <RevitAddIns>
   <AddIn Type="Application">
-    <Name>BIM-CAD MCP</Name>
+    <Name>Autodesk MCP Connector</Name>
     <Assembly>$escapedAssembly</Assembly>
     <AddInId>2DCE7E67-4495-4F3B-A740-3D7C9D2DA124</AddInId>
     <FullClassName>BimCadMcp.Revit.Application</FullClassName>
     <VendorId>BIMC</VendorId>
-    <VendorDescription>BIM-CAD MCP local connector</VendorDescription>
+    <VendorDescription>Autodesk MCP Connector for local Revit sessions</VendorDescription>
   </AddIn>
 </RevitAddIns>
 "@
     Set-Content -LiteralPath $manifestPath -Value $manifest -Encoding UTF8
+    if (Test-Path -LiteralPath $legacyManifestPath -PathType Leaf) {
+        Remove-Item -LiteralPath $legacyManifestPath -Force
+    }
     Write-Step ("Installed Revit add-in {0} and manifest {1}. Restart Revit to load it." -f (Split-Path -Leaf $assembly), $manifestPath)
 }
 
 function Test-RevitSetup {
-    $installed = Test-Path -LiteralPath (Join-Path $env:ProgramFiles 'Autodesk\Revit 2024\RevitAPI.dll')
+    $installed = Test-Revit2024Installed
     if ($installed) { Write-Step 'Revit 2024 installation detected.' }
     else { Write-Step 'Revit 2024 was not detected.' }
 
-    $manifest = Join-Path $env:APPDATA 'Autodesk\Revit\Addins\2024\BimCadMcp.addin'
-    if (Test-Path -LiteralPath $manifest -PathType Leaf) { Write-Step 'Revit 2024 MCP add-in manifest is installed.' }
-    else { Write-Step 'Revit 2024 MCP add-in manifest is not installed yet.' }
-
-    $codex = Get-OptionalCommand 'codex'
-    if ($codex) {
-        $registration = Invoke-External $codex @('mcp','get','revit') -AllowFailure
-        if ($registration.ExitCode -eq 0) { Write-Step 'Codex has a Revit MCP registration.' }
-        else { Write-Step 'The Revit MCP server is not registered yet.' }
-    }
-    else { Write-Step 'Codex command was not detected.' }
+    $manifest = Join-Path $env:APPDATA 'Autodesk\Revit\Addins\2024\AutodeskMcpConnector.addin'
+    if (Test-Path -LiteralPath $manifest -PathType Leaf) { Write-Step 'Autodesk MCP Connector add-in is installed for Revit 2024.' }
+    else { Write-Step 'Autodesk MCP Connector add-in is not installed for Revit 2024 yet.' }
+    if ($installed) { Write-Step 'In Revit, open the Autodesk MCP Connector ribbon tab and click Connection Status.' }
 
     $pipeName = 'BimCadMcp.Revit.2024'
     $sessionDirectory = Join-Path $env:LOCALAPPDATA 'BIM-CAD-MCP\runtime\revit-sessions'
@@ -452,7 +464,7 @@ function Test-RevitSetup {
 }
 
 try {
-    Write-Step ("BIM-CAD MCP Setup - {0} / {1}" -f $Product, $Action)
+    Write-Step ("Autodesk MCP Connector - {0}" -f $Action)
 
     if ($Action -eq 'Collect') {
         $root = Get-Repository
@@ -482,39 +494,42 @@ try {
 
     switch ($Action) {
         'Status' {
-            if ($Product -eq 'AutoCAD') { Test-AutoCadSetup } else { Test-RevitSetup }
+            if ($Product -in @('All','AutoCAD')) { Test-AutoCadSetup }
+            if ($Product -in @('All','Revit')) { Test-RevitSetup }
+            Test-AutodeskRegistration
         }
         'Test' {
-            if ($Product -eq 'AutoCAD') { Test-AutoCadSetup } else { Test-RevitSetup }
+            if ($Product -in @('All','AutoCAD')) { Test-AutoCadSetup }
+            if ($Product -in @('All','Revit')) { Test-RevitSetup }
+            Test-AutodeskRegistration
         }
         'Install' {
             $null = Get-RequiredCommand 'codex'
             $root = Get-Repository
             Install-Skills $root
-            if ($Product -eq 'AutoCAD') {
-                Register-McpServer 'autocad' (Join-Path $root 'src\autocad\autocad-bridge.ps1')
-                Test-AutoCadSetup
-                Write-Step 'Setup complete. Restart Codex, then open AutoCAD and a drawing.'
-            }
-            else {
+            if ($Product -in @('All','Revit') -and (Test-Revit2024Installed)) {
                 Install-RevitAddin $root
-                Register-McpServer 'revit' (Join-Path $root 'src\revit\revit-bridge.ps1') @('-RevitVersion','2024')
-                Test-RevitSetup
-                Write-Step 'Setup complete. Restart Codex and Revit 2024, then open a project.'
             }
+            elseif ($Product -in @('All','Revit')) {
+                Write-Step 'Revit 2024 was not detected, so its add-in was skipped.'
+            }
+            Register-McpServer 'autodesk' (Join-Path $root 'src\autodesk\autodesk-bridge.ps1') @('-RevitVersion','2024') @('autocad','revit')
+            if ($Product -in @('All','AutoCAD')) { Test-AutoCadSetup }
+            if ($Product -in @('All','Revit')) { Test-RevitSetup }
+            Test-AutodeskRegistration
+            Write-Step 'Setup complete. Restart Codex and any running Revit session, then open AutoCAD or Revit.'
         }
         'Update' {
             $root = Get-Repository
             Install-Skills $root
-            if ($Product -eq 'AutoCAD') {
-                Register-McpServer 'autocad' (Join-Path $root 'src\autocad\autocad-bridge.ps1')
-                Write-Step 'Skills and AutoCAD MCP configuration are up to date. Restart Codex.'
-            }
-            else {
+            if ($Product -in @('All','Revit') -and (Test-Revit2024Installed)) {
                 Install-RevitAddin $root
-                Register-McpServer 'revit' (Join-Path $root 'src\revit\revit-bridge.ps1') @('-RevitVersion','2024')
-                Write-Step 'Skills and Revit 2024 MCP configuration are up to date. Restart Codex and Revit.'
             }
+            elseif ($Product -in @('All','Revit')) {
+                Write-Step 'Revit 2024 was not detected, so its add-in was skipped.'
+            }
+            Register-McpServer 'autodesk' (Join-Path $root 'src\autodesk\autodesk-bridge.ps1') @('-RevitVersion','2024') @('autocad','revit')
+            Write-Step 'Skills and Autodesk MCP Connector are up to date. Restart Codex and any running Revit session.'
         }
     }
 }

@@ -137,7 +137,7 @@ namespace BimCadMcp.Revit
             }
             catch (Exception exception)
             {
-                System.Diagnostics.Debug.WriteLine("BIM-CAD MCP session registration error: " + exception);
+                System.Diagnostics.Debug.WriteLine("Autodesk MCP Connector session registration error: " + exception);
             }
         }
 
@@ -150,7 +150,7 @@ namespace BimCadMcp.Revit
             }
             catch (Exception exception)
             {
-                System.Diagnostics.Debug.WriteLine("BIM-CAD MCP session cleanup error: " + exception);
+                System.Diagnostics.Debug.WriteLine("Autodesk MCP Connector session cleanup error: " + exception);
             }
         }
     }
@@ -161,22 +161,26 @@ namespace BimCadMcp.Revit
         {
             try
             {
-                RibbonPanel panel = application.GetRibbonPanels().FirstOrDefault(item => item.Name == "BIM-CAD MCP");
-                if (panel == null) panel = application.CreateRibbonPanel("BIM-CAD MCP");
+                const string tabName = "Autodesk MCP Connector";
+                try { application.CreateRibbonTab(tabName); }
+                catch (Autodesk.Revit.Exceptions.ArgumentException) { }
+
+                RibbonPanel panel = application.GetRibbonPanels(tabName).FirstOrDefault(item => item.Name == "Connection");
+                if (panel == null) panel = application.CreateRibbonPanel(tabName, "Connection");
 
                 string assemblyPath = Assembly.GetExecutingAssembly().Location;
                 PushButtonData data = new PushButtonData(
                     "BimCadMcpConnectionStatus",
-                    "MCP\nConnection",
+                    "Connection\nStatus",
                     assemblyPath,
                     typeof(ConnectionStatusCommand).FullName);
-                data.ToolTip = "Check whether the BIM-CAD MCP Revit bridge is ready and whether Codex has connected recently.";
+                data.ToolTip = "Check whether Autodesk MCP Connector is ready and whether Codex has connected recently.";
                 PushButton button = panel.AddItem(data) as PushButton;
                 if (button != null) button.LargeImage = CreateConnectionIcon();
             }
             catch (Exception exception)
             {
-                System.Diagnostics.Debug.WriteLine("BIM-CAD MCP ribbon error: " + exception);
+                System.Diagnostics.Debug.WriteLine("Autodesk MCP Connector ribbon error: " + exception);
             }
         }
 
@@ -211,7 +215,7 @@ namespace BimCadMcp.Revit
             UIDocument uiDocument = commandData.Application.ActiveUIDocument;
             string documentName = uiDocument == null ? "No project open" : uiDocument.Document.Title;
 
-            TaskDialog dialog = new TaskDialog("BIM-CAD MCP Connection");
+            TaskDialog dialog = new TaskDialog("Autodesk MCP Connector");
             dialog.MainInstruction = snapshot.ServerRunning
                 ? (recent ? "Connected to Codex" : "MCP server is ready")
                 : "MCP server is stopped";
@@ -345,7 +349,7 @@ namespace BimCadMcp.Revit
             string resultText;
             if (mode == "transaction")
             {
-                using (Transaction transaction = new Transaction(document, "BIM-CAD MCP: " + transactionName))
+                using (Transaction transaction = new Transaction(document, "Autodesk MCP Connector: " + transactionName))
                 {
                     transaction.Start();
                     try
