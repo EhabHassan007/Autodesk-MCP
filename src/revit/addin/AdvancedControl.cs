@@ -161,13 +161,17 @@ namespace BimCadMcp.Revit
         {
             try
             {
-                RibbonPanel panel = application.GetRibbonPanels().FirstOrDefault(item => item.Name == "Autodesk MCP Connector");
-                if (panel == null) panel = application.CreateRibbonPanel("Autodesk MCP Connector");
+                const string tabName = "Autodesk MCP Connector";
+                try { application.CreateRibbonTab(tabName); }
+                catch (Autodesk.Revit.Exceptions.ArgumentException) { }
+
+                RibbonPanel panel = application.GetRibbonPanels(tabName).FirstOrDefault(item => item.Name == "Connection");
+                if (panel == null) panel = application.CreateRibbonPanel(tabName, "Connection");
 
                 string assemblyPath = Assembly.GetExecutingAssembly().Location;
                 PushButtonData data = new PushButtonData(
                     "BimCadMcpConnectionStatus",
-                    "MCP\nConnection",
+                    "Connection\nStatus",
                     assemblyPath,
                     typeof(ConnectionStatusCommand).FullName);
                 data.ToolTip = "Check whether Autodesk MCP Connector is ready and whether Codex has connected recently.";

@@ -46,47 +46,42 @@ $product.ForeColor = [System.Drawing.Color]::DimGray
 $product.Location = New-Object System.Drawing.Point(28, 130)
 $form.Controls.Add($product)
 
+$toolTip = New-Object System.Windows.Forms.ToolTip
+
 $installButton = New-Object System.Windows.Forms.Button
 $installButton.Text = 'Install / Repair'
 $installButton.Location = New-Object System.Drawing.Point(370, 123)
 $installButton.Size = New-Object System.Drawing.Size(130, 34)
 $form.Controls.Add($installButton)
+$toolTip.SetToolTip($installButton, 'Install or repair the connector, skills, and detected Revit add-in.')
 
 $updateButton = New-Object System.Windows.Forms.Button
 $updateButton.Text = 'Update'
 $updateButton.Location = New-Object System.Drawing.Point(510, 123)
 $updateButton.Size = New-Object System.Drawing.Size(130, 34)
 $form.Controls.Add($updateButton)
+$toolTip.SetToolTip($updateButton, 'Download and install the latest approved version from the private repository.')
 
 $testButton = New-Object System.Windows.Forms.Button
 $testButton.Text = 'Test connection'
 $testButton.Location = New-Object System.Drawing.Point(28, 174)
 $testButton.Size = New-Object System.Drawing.Size(140, 34)
 $form.Controls.Add($testButton)
+$toolTip.SetToolTip($testButton, 'Check the MCP registration and any currently running AutoCAD or Revit session.')
 
 $folderButton = New-Object System.Windows.Forms.Button
 $folderButton.Text = 'Install folder'
 $folderButton.Location = New-Object System.Drawing.Point(518, 174)
 $folderButton.Size = New-Object System.Drawing.Size(122, 34)
 $form.Controls.Add($folderButton)
-
-$collectButton = New-Object System.Windows.Forms.Button
-$collectButton.Text = 'Review local skills'
-$collectButton.Location = New-Object System.Drawing.Point(178, 174)
-$collectButton.Size = New-Object System.Drawing.Size(160, 34)
-$form.Controls.Add($collectButton)
-
-$submitButton = New-Object System.Windows.Forms.Button
-$submitButton.Text = 'Submit review package'
-$submitButton.Location = New-Object System.Drawing.Point(348, 174)
-$submitButton.Size = New-Object System.Drawing.Size(160, 34)
-$form.Controls.Add($submitButton)
+$toolTip.SetToolTip($folderButton, 'Open the local connector installation folder.')
 
 $teamButton = New-Object System.Windows.Forms.Button
-$teamButton.Text = 'Team collection check'
+$teamButton.Text = 'Team knowledge setup (optional)'
 $teamButton.Location = New-Object System.Drawing.Point(28, 220)
-$teamButton.Size = New-Object System.Drawing.Size(190, 34)
+$teamButton.Size = New-Object System.Drawing.Size(250, 34)
 $form.Controls.Add($teamButton)
+$toolTip.SetToolTip($teamButton, 'Check private-repository access before enabling daily team knowledge collection in Codex.')
 
 $statusLabel = New-Object System.Windows.Forms.Label
 $statusLabel.Text = 'Status'
@@ -114,7 +109,7 @@ function Invoke-SetupAction {
 
     $status.Text = "Working...`r`n"
     $form.UseWaitCursor = $true
-    foreach ($button in @($installButton, $updateButton, $testButton, $collectButton, $submitButton, $teamButton)) { $button.Enabled = $false }
+    foreach ($button in @($installButton, $updateButton, $testButton, $teamButton)) { $button.Enabled = $false }
     [System.Windows.Forms.Application]::DoEvents()
 
     try {
@@ -134,27 +129,14 @@ function Invoke-SetupAction {
     }
     finally {
         $form.UseWaitCursor = $false
-        foreach ($button in @($installButton, $updateButton, $testButton, $collectButton, $submitButton, $teamButton)) { $button.Enabled = $true }
+        foreach ($button in @($installButton, $updateButton, $testButton, $teamButton)) { $button.Enabled = $true }
     }
 }
 
 $installButton.Add_Click({ Invoke-SetupAction 'Install' })
 $updateButton.Add_Click({ Invoke-SetupAction 'Update' })
 $testButton.Add_Click({ Invoke-SetupAction 'Test' })
-$collectButton.Add_Click({ Invoke-SetupAction 'Collect' })
 $teamButton.Add_Click({ Invoke-SetupAction 'TeamStatus' })
-$submitButton.Add_Click({
-    $reviewRoot = Join-Path $env:LOCALAPPDATA 'BIM-CAD-MCP\skill-review'
-    $package = Get-ChildItem -LiteralPath $reviewRoot -Filter 'skill-review-*.zip' -File -ErrorAction SilentlyContinue |
-        Sort-Object LastWriteTime -Descending | Select-Object -First 1
-    if (-not $package) {
-        [System.Windows.Forms.MessageBox]::Show('Choose Review local skills first.', 'Autodesk MCP Connector') | Out-Null
-        return
-    }
-    Start-Process explorer.exe -ArgumentList ("/select,`"{0}`"" -f $package.FullName)
-    Start-Process 'https://github.com/EhabHassan007/BIM-CAD---MCP/issues/new?template=skill-submission.yml'
-    [System.Windows.Forms.MessageBox]::Show('Review the ZIP, then attach it to the GitHub submission form. Nothing is uploaded automatically.', 'Autodesk MCP Connector') | Out-Null
-})
 $folderButton.Add_Click({
     if (Test-Path -LiteralPath $RepositoryPath) {
         Start-Process explorer.exe -ArgumentList $RepositoryPath

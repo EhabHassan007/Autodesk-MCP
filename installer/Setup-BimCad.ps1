@@ -437,6 +437,7 @@ function Test-RevitSetup {
     $manifest = Join-Path $env:APPDATA 'Autodesk\Revit\Addins\2024\AutodeskMcpConnector.addin'
     if (Test-Path -LiteralPath $manifest -PathType Leaf) { Write-Step 'Autodesk MCP Connector add-in is installed for Revit 2024.' }
     else { Write-Step 'Autodesk MCP Connector add-in is not installed for Revit 2024 yet.' }
+    if ($installed) { Write-Step 'In Revit, open the Autodesk MCP Connector ribbon tab and click Connection Status.' }
 
     $pipeName = 'BimCadMcp.Revit.2024'
     $sessionDirectory = Join-Path $env:LOCALAPPDATA 'BIM-CAD-MCP\runtime\revit-sessions'
