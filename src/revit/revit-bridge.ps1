@@ -1,7 +1,8 @@
 param(
     [switch]$LibraryOnly,
     [ValidatePattern('^\d{4}$')]
-    [string]$RevitVersion = '2024'
+    [string]$RevitVersion = '2024',
+    [string]$SessionDirectory = (Join-Path $env:LOCALAPPDATA 'BIM-CAD-MCP\runtime\revit-sessions')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -9,13 +10,20 @@ $ErrorActionPreference = 'Stop'
 function New-Tool($name, $description, $properties, $required, [bool]$readOnly) {
     @{ name=$name; description=$description; inputSchema=@{type='object';properties=$properties;required=@($required);additionalProperties=$false}; annotations=@{readOnlyHint=$readOnly;openWorldHint=$false;destructiveHint=(!$readOnly);idempotentHint=$readOnly} }
 }
+
 $str = @{type='string';minLength=1}
+$plainString = @{type='string'}
+$bool = @{type='boolean'}
+$session = @{type='string';minLength=1;description='Revit session ID returned by list_sessions. Optional only when one Revit session is running.'}
 $toolList = @(
-    (New-Tool 'document_info' 'Read active Revit document identity and state. Call before writes.' @{} @() $true),
-    (New-Tool 'list_levels' 'Read levels in the active Revit document. Elevations are returned in Revit internal units.' @{} @() $true),
-    (New-Tool 'list_selected' 'Read the elements currently selected in Revit.' @{} @() $true),
-    (New-Tool 'get_element' 'Read an element and up to 200 parameters by integer element id.' @{element_id=$str} @('element_id') $true),
-    (New-Tool 'set_parameter' 'Set one writable element parameter in a Revit transaction. Numeric values use Revit internal units. Does not save or synchronize.' @{expected_document=$str;element_id=$str;parameter=$str;value=@{type='string'}} @('expected_document','element_id','parameter','value') $false)
+    (New-Tool 'list_sessions' 'List running Revit sessions, their unique session IDs, active documents, and connection state. Call this first when more than one Revit window is open.' @{} @() $true),
+    (New-Tool 'connection_status' 'Read BIM-CAD MCP add-in status, session and pipe identity, active document, request count, and the last connection or error.' @{session_id=$session} @() $true),
+    (New-Tool 'document_info' 'Read active Revit document identity and state. Call before writes.' @{session_id=$session} @() $true),
+    (New-Tool 'list_levels' 'Read levels in the active Revit document. Elevations are returned in Revit internal units.' @{session_id=$session} @() $true),
+    (New-Tool 'list_selected' 'Read the elements currently selected in Revit.' @{session_id=$session} @() $true),
+    (New-Tool 'get_element' 'Read an element and up to 200 parameters by integer element id.' @{session_id=$session;element_id=$str} @('element_id') $true),
+    (New-Tool 'set_parameter' 'Set one writable element parameter in a Revit transaction. Numeric values use Revit internal units. Does not save or synchronize.' @{session_id=$session;expected_document=$str;element_id=$str;parameter=$str;value=@{type='string'}} @('expected_document','element_id','parameter','value') $false),
+    (New-Tool 'execute_csharp' 'Execute controlled Revit 2024 C# against the active document. Use read for inspection, transaction for writes inside one automatic transaction, and manual only for workflows that must manage their own transactions or family documents. Read document_info first. Code must return a string. Model changes require allow_model_changes=true. Does not save or synchronize unless the supplied manual code explicitly does so.' @{session_id=$session;expected_document=$str;execution_mode=@{type='string';enum=@('read','transaction','manual')};allow_model_changes=$bool;code=@{type='string';minLength=1;maxLength=100000};parameters_json=$plainString;transaction_name=$str} @('expected_document','execution_mode','allow_model_changes','code','parameters_json','transaction_name') $false)
 )
 
 function Assert-Args($name,$arguments) {
@@ -29,19 +37,28 @@ function Assert-Args($name,$arguments) {
         if (!$tool.inputSchema.properties[$property.Name]) { throw "Unknown argument: $($property.Name)" }
         if ($null -eq $property.Value) { throw "Null argument: $($property.Name)" }
         if ($tool.inputSchema.properties[$property.Name].type -eq 'string' -and $property.Value -isnot [string]) { throw "Invalid string: $($property.Name)" }
+        if ($tool.inputSchema.properties[$property.Name].type -eq 'boolean' -and $property.Value -isnot [bool]) { throw "Invalid boolean: $($property.Name)" }
         if ($tool.inputSchema.properties[$property.Name].minLength -and [string]::IsNullOrWhiteSpace($property.Value)) { throw "Empty argument: $($property.Name)" }
+        if ($tool.inputSchema.properties[$property.Name].maxLength -and ([string]$property.Value).Length -gt $tool.inputSchema.properties[$property.Name].maxLength) { throw "Argument is too long: $($property.Name)" }
+        if ($tool.inputSchema.properties[$property.Name].enum -and $property.Value -notin $tool.inputSchema.properties[$property.Name].enum) { throw "Invalid value: $($property.Name)" }
     }
+}
+
+function Get-OptionalArgument($arguments, [string]$name) {
+    if ($null -ne $arguments -and $null -ne $arguments.PSObject.Properties[$name]) { return [string]$arguments.$name }
+    ''
 }
 
 function ConvertTo-PipeField([string]$value) {
     [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($value))
 }
 
-function Invoke-RevitPipe($operation, [string[]]$arguments) {
-    $pipeName = "BimCadMcp.Revit.$RevitVersion"
+function Invoke-RevitPipeName([string]$pipeName, [string]$operation, [string[]]$arguments, [int]$connectTimeout = 1500) {
     $client = New-Object IO.Pipes.NamedPipeClientStream('.', $pipeName, [IO.Pipes.PipeDirection]::InOut)
+    $reader = $null
+    $writer = $null
     try {
-        try { $client.Connect(1500) } catch { throw "Revit $RevitVersion MCP add-in is not available. Start Revit, then restart Revit after installing the add-in." }
+        $client.Connect($connectTimeout)
         $writer = New-Object IO.StreamWriter($client, (New-Object Text.UTF8Encoding($false)), 4096, $true)
         $reader = New-Object IO.StreamReader($client, [Text.Encoding]::UTF8, $false, 4096, $true)
         $writer.AutoFlush = $true
@@ -63,14 +80,98 @@ function Invoke-RevitPipe($operation, [string[]]$arguments) {
     }
 }
 
+function Get-RegisteredSessions {
+    $sessions = @()
+    if (-not (Test-Path -LiteralPath $SessionDirectory -PathType Container)) { return @() }
+    foreach ($file in @(Get-ChildItem -LiteralPath $SessionDirectory -Filter '*.json' -File -ErrorAction SilentlyContinue)) {
+        try {
+            $record = Get-Content -LiteralPath $file.FullName -Raw | ConvertFrom-Json
+            if ([string]$record.revit_version -ne $RevitVersion) { continue }
+            $processId = [int]$record.pid
+            $null = Get-Process -Id $processId -ErrorAction Stop
+            if ([string]::IsNullOrWhiteSpace([string]$record.session_id) -or [string]::IsNullOrWhiteSpace([string]$record.pipe_name)) { continue }
+            $sessions += [pscustomobject]@{
+                session_id = [string]$record.session_id
+                process_id = $processId
+                revit_version = [string]$record.revit_version
+                pipe_name = [string]$record.pipe_name
+                started_utc = [string]$record.started_utc
+            }
+        }
+        catch { }
+    }
+    @($sessions | Sort-Object process_id)
+}
+
+function Get-RevitSessions {
+    $sessions = @(Get-RegisteredSessions)
+    $results = @()
+    foreach ($sessionRecord in $sessions) {
+        try {
+            $status = Invoke-RevitPipeName $sessionRecord.pipe_name 'connection_status' @() 500
+            $results += [pscustomobject]@{
+                session_id = $sessionRecord.session_id; process_id = $sessionRecord.process_id; revit_version = $sessionRecord.revit_version
+                document_id = [string]$status.document_id; online = $true; recent_client = [bool]$status.recent_client
+                last_operation = [string]$status.last_operation; last_error = [string]$status.last_error
+            }
+        }
+        catch {
+            $results += [pscustomobject]@{
+                session_id = $sessionRecord.session_id; process_id = $sessionRecord.process_id; revit_version = $sessionRecord.revit_version
+                document_id = ''; online = $false; recent_client = $false; last_operation = ''; last_error = $_.Exception.Message
+            }
+        }
+    }
+
+    if ($results.Count -eq 0) {
+        $legacyPipe = "BimCadMcp.Revit.$RevitVersion"
+        try {
+            $status = Invoke-RevitPipeName $legacyPipe 'connection_status' @() 250
+            $results += [pscustomobject]@{
+                session_id = "legacy-$RevitVersion"; process_id = ''; revit_version = $RevitVersion
+                document_id = [string]$status.document_id; online = $true; recent_client = [bool]$status.recent_client
+                last_operation = [string]$status.last_operation; last_error = [string]$status.last_error
+            }
+        }
+        catch { }
+    }
+    @($results)
+}
+
+function Resolve-RevitPipe([string]$sessionId) {
+    $sessions = @(Get-RegisteredSessions)
+    if (-not [string]::IsNullOrWhiteSpace($sessionId)) {
+        if ($sessionId -eq "legacy-$RevitVersion") { return "BimCadMcp.Revit.$RevitVersion" }
+        $match = @($sessions | Where-Object session_id -eq $sessionId)
+        if ($match.Count -ne 1) { throw "Revit session was not found: $sessionId. Call list_sessions again." }
+        return [string]$match[0].pipe_name
+    }
+    if ($sessions.Count -eq 1) { return [string]$sessions[0].pipe_name }
+    if ($sessions.Count -gt 1) {
+        $ids = ($sessions | ForEach-Object { $_.session_id }) -join ', '
+        throw "More than one Revit session is running ($ids). Call list_sessions and pass session_id."
+    }
+    "BimCadMcp.Revit.$RevitVersion"
+}
+
+function Invoke-RevitPipe([string]$operation, [string[]]$arguments, [string]$sessionId) {
+    $pipeName = Resolve-RevitPipe $sessionId
+    try { Invoke-RevitPipeName $pipeName $operation $arguments }
+    catch { throw "Revit $RevitVersion MCP session is not available. Start Revit or call list_sessions. $($_.Exception.Message)" }
+}
+
 function Invoke-RevitTool($name,$arguments) {
     Assert-Args $name $arguments
+    $sessionId = Get-OptionalArgument $arguments 'session_id'
     switch ($name) {
-        'document_info' { Invoke-RevitPipe 'document_info' @() }
-        'list_levels' { Invoke-RevitPipe 'list_levels' @() }
-        'list_selected' { Invoke-RevitPipe 'list_selected' @() }
-        'get_element' { Invoke-RevitPipe 'get_element' @([string]$arguments.element_id) }
-        'set_parameter' { Invoke-RevitPipe 'set_parameter' @([string]$arguments.expected_document,[string]$arguments.element_id,[string]$arguments.parameter,[string]$arguments.value) }
+        'list_sessions' { @{sessions=@(Get-RevitSessions)} }
+        'connection_status' { Invoke-RevitPipe 'connection_status' @() $sessionId }
+        'document_info' { Invoke-RevitPipe 'document_info' @() $sessionId }
+        'list_levels' { Invoke-RevitPipe 'list_levels' @() $sessionId }
+        'list_selected' { Invoke-RevitPipe 'list_selected' @() $sessionId }
+        'get_element' { Invoke-RevitPipe 'get_element' @([string]$arguments.element_id) $sessionId }
+        'set_parameter' { Invoke-RevitPipe 'set_parameter' @([string]$arguments.expected_document,[string]$arguments.element_id,[string]$arguments.parameter,[string]$arguments.value) $sessionId }
+        'execute_csharp' { Invoke-RevitPipe 'execute_csharp' @([string]$arguments.expected_document,[string]$arguments.execution_mode,[string]$arguments.allow_model_changes,[string]$arguments.code,[string]$arguments.parameters_json,[string]$arguments.transaction_name) $sessionId }
     }
 }
 
@@ -87,7 +188,7 @@ while ($null -ne ($line=[Console]::ReadLine())) {
     switch ($request.method) {
         'initialize' {
             $protocol='2024-11-05'; if ($request.params.protocolVersion -in @('2024-11-05','2025-03-26','2025-06-18','2025-11-25')) {$protocol=$request.params.protocolVersion}
-            $response.result=@{protocolVersion=$protocol;capabilities=@{tools=@{}};serverInfo=@{name='revit-2024-local';version='0.1.0'};instructions='Read document_info before writes and use document_id as expected_document. Revit API calls run through an ExternalEvent in Revit. Inspect an element before setting a parameter. Each parameter write uses a Revit transaction and does not save or synchronize the document.'}
+            $response.result=@{protocolVersion=$protocol;capabilities=@{tools=@{}};serverInfo=@{name='revit-2024-local';version='1.1.0'};instructions='Call list_sessions when more than one Revit process may be open, then pass session_id to every command. If one session is running, session_id may be omitted. Read document_info before writes and use document_id as expected_document. Revit API calls run through an ExternalEvent. Prefer narrow tools. execute_csharp provides controlled full Revit API access: read has no transaction, transaction supplies one project transaction, and manual is reserved for code that must manage its own transactions or family documents. Verify every write with a separate read. The connector does not save or synchronize unless explicitly commanded.'}
         }
         'ping' {$response.result=@{}}
         'tools/list' {$response.result=@{tools=$toolList}}
