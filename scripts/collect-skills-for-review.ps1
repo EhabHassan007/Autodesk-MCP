@@ -2,7 +2,8 @@
 param(
     [string]$RepositoryRoot = (Split-Path -Parent $PSScriptRoot),
     [string]$OutputRoot = (Join-Path $env:LOCALAPPDATA 'BIM-CAD-MCP\skill-review'),
-    [string[]]$AdditionalSkillRoots = @()
+    [string[]]$AdditionalSkillRoots = @(),
+    [switch]$OnlyAdditionalSkillRoots
 )
 
 $ErrorActionPreference = 'Stop'
@@ -42,10 +43,13 @@ function Get-SensitiveFlagCount {
 }
 
 $codexHome = if ([string]::IsNullOrWhiteSpace($env:CODEX_HOME)) { Join-Path $HOME '.codex' } else { $env:CODEX_HOME }
-$sources = @(
-    [pscustomobject]@{ Label='Codex user skills'; Path=(Join-Path $codexHome 'skills') },
-    [pscustomobject]@{ Label='Agent user skills'; Path=(Join-Path $HOME '.agents\skills') }
-)
+$userProfilePath = $env:USERPROFILE
+$sources = if ($OnlyAdditionalSkillRoots) { @() } else {
+    @(
+        [pscustomobject]@{ Label='Codex user skills'; Path=(Join-Path $codexHome 'skills') },
+        [pscustomobject]@{ Label='Agent user skills'; Path=(Join-Path $userProfilePath '.agents\skills') }
+    )
+}
 $sourceNumber = 1
 foreach ($root in $AdditionalSkillRoots) {
     if (-not [string]::IsNullOrWhiteSpace($root)) {

@@ -45,6 +45,20 @@ Restart Codex after installation if the new skill does not appear immediately. C
 
 Any BIM-CAD MCP user can select **Review local skills** to create a local report and ZIP package marking candidates as NEW, CHANGED, or IDENTICAL. **Submit review package** opens the package and the GitHub submission form; the contributor reviews and attaches it explicitly. Nothing is uploaded automatically or added to the approved library until the repository owner accepts that individual skill. See [skill submissions](SKILL-SUBMISSIONS.md).
 
+## Daily team knowledge approval
+
+The optional team workflow turns reusable lessons from each member's CAD/BIM chats into text-only skill candidates and opens a private GitHub pull request for `EhabHassan007`. It never merges or installs a candidate automatically.
+
+Each team member completes this once:
+
+1. Install Git and GitHub CLI, authenticate with `gh auth login --hostname github.com`, and obtain access to the private repository.
+2. Install or update BIM-CAD MCP, then use **Team collection check** in the setup app.
+3. In Codex ask: `Use cad-team-knowledge-approval to enable my daily team knowledge collection.`
+
+Codex creates a daily automation on that user's account. It reviews only CAD/BIM chats accessible to that signed-in user, distills reusable lessons into `%LOCALAPPDATA%\BIM-CAD-MCP\team-candidates`, removes project-specific context, and runs `scripts\submit-team-knowledge.ps1`. The script blocks common credentials, user paths, cloud model paths, email addresses, project/model files, binaries, links, and files above 256 KB. Previously submitted content hashes are skipped.
+
+Each successful run creates a `skill-intake/...` branch and pull request requesting the repository owner's review. `CODEOWNERS` and the validation workflow protect the approval boundary. Configure the `main` branch ruleset to require the **Validate team skill intake** check, require the repository owner's review, dismiss stale approvals, and block direct pushes. Automatic checks reduce accidental disclosure; the owner must still read every candidate before approval.
+
 ## Small Windows setup app
 
 Double-click `installer\Start-BIM-CAD-Setup.cmd` for a guided setup. Select AutoCAD and choose **Install / Repair**. The app downloads or updates the approved repository from GitHub under `%LOCALAPPDATA%\BIM-CAD-MCP`, installs every saved skill, registers the version-aware AutoCAD MCP server globally in Codex, and checks the local AutoCAD connection. Use **Update** on future runs to retrieve newly published skills. Git is optional: when it is unavailable, the setup downloads the current `main` branch as a GitHub ZIP.

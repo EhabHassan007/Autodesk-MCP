@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('Status', 'Install', 'Update', 'Test', 'Collect')]
+    [ValidateSet('Status', 'Install', 'Update', 'Test', 'Collect', 'TeamStatus')]
     [string]$Action = 'Status',
 
     [ValidateSet('AutoCAD', 'Revit')]
@@ -393,6 +393,24 @@ try {
         Write-Step 'Collecting local user skills for review without uploading them...'
         $collected = Invoke-External 'powershell.exe' @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',$collector,'-RepositoryRoot',$root)
         $null = $collected
+        exit 0
+    }
+
+    if ($Action -eq 'TeamStatus') {
+        $root = Get-Repository
+        $submitter = Join-Path $root 'scripts\submit-team-knowledge.ps1'
+        if (-not (Test-Path -LiteralPath $submitter -PathType Leaf)) { throw "Team submitter is missing: $submitter" }
+        $git = Get-OptionalCommand 'git'
+        $gh = Get-OptionalCommand 'gh'
+        if ($git) { Write-Step 'Git is installed.' } else { Write-Step 'Git is required for automatic team collection.' }
+        if ($gh) {
+            $auth = Invoke-External $gh @('auth','status','--hostname','github.com') -AllowFailure
+            if ($auth.ExitCode -eq 0) { Write-Step 'GitHub CLI is authenticated.' }
+            else { Write-Step 'GitHub CLI is installed but not authenticated. Run: gh auth login --hostname github.com' }
+        }
+        else { Write-Step 'GitHub CLI is required. Install it, then run: gh auth login --hostname github.com' }
+        Write-Step 'In Codex, ask: Use cad-team-knowledge-approval to enable my daily team knowledge collection.'
+        Write-Step 'Codex will create the per-user daily automation only after that user asks for it.'
         exit 0
     }
 
