@@ -23,11 +23,11 @@ function Write-Step {
 function Get-RequiredCommand {
     param([string]$Name)
 
-    $command = Get-Command $Name -ErrorAction SilentlyContinue | Select-Object -First 1
+    $command = Get-OptionalCommand $Name
     if (-not $command) {
         throw "$Name is not installed or is not available in PATH."
     }
-    $command.Source
+    $command
 }
 
 function Get-OptionalCommand {
@@ -35,6 +35,20 @@ function Get-OptionalCommand {
 
     $command = Get-Command $Name -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($command) { return $command.Source }
+    if ($Name -eq 'codex') {
+        $desktopBin = Join-Path $env:LOCALAPPDATA 'OpenAI\Codex\bin'
+        $candidates = @(
+            (Join-Path $HOME '.local\bin\codex.exe'),
+            (Join-Path $env:APPDATA 'npm\codex.cmd')
+        )
+        if (Test-Path -LiteralPath $desktopBin) {
+            $candidates += @(Get-ChildItem -LiteralPath $desktopBin -Filter codex.exe -Recurse -File |
+                Sort-Object LastWriteTime -Descending | Select-Object -ExpandProperty FullName)
+        }
+        foreach ($candidate in $candidates) {
+            if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
+        }
+    }
     $null
 }
 
@@ -58,7 +72,8 @@ function Invoke-External {
         $output | ForEach-Object { Write-Output $_ }
     }
     if (-not $AllowFailure -and $exitCode -ne 0) {
-        throw "$FilePath failed with exit code $exitCode."
+        $details = ($output | ForEach-Object { $_.ToString() }) -join "`r`n"
+        throw "$FilePath failed with exit code $exitCode.`r`n$details"
     }
     [pscustomobject]@{ ExitCode = $exitCode; Output = @($output) }
 }
@@ -169,6 +184,29 @@ function Install-RepositoryArchive {
 }
 
 function Get-Repository {
+    # A downloaded package already contains everything needed for installation.
+    # Copy it to a permanent location without requiring private GitHub access.
+    $packageRoot = Split-Path -Parent $PSScriptRoot
+    if ($Action -eq 'Install' -and -not $SkipRepositoryUpdate -and
+        (Test-Path -LiteralPath (Join-Path $packageRoot '.agents\skills') -PathType Container)) {
+        $source = [IO.Path]::GetFullPath($packageRoot).TrimEnd('\')
+        $destination = [IO.Path]::GetFullPath($RepositoryPath).TrimEnd('\')
+        if ($source -ne $destination) {
+            if ($source.StartsWith($destination + '\', [StringComparison]::OrdinalIgnoreCase) -or
+                $destination.StartsWith($source + '\', [StringComparison]::OrdinalIgnoreCase)) {
+                throw 'The installation folder cannot be inside or contain the downloaded package.'
+            }
+            Write-Step 'Installing the downloaded package to a permanent local folder...'
+            New-Item -ItemType Directory -Path $destination -Force | Out-Null
+            foreach ($entry in @('installer','scripts','src','.agents','README.md','SKILL-SUBMISSIONS.md')) {
+                $item = Join-Path $source $entry
+                if (Test-Path -LiteralPath $item) {
+                    Copy-Item -LiteralPath $item -Destination $destination -Recurse -Force
+                }
+            }
+        }
+        return $destination
+    }
     $manifest = Join-Path $RepositoryPath '.agents\skills'
     if ($SkipRepositoryUpdate) {
         if (-not (Test-Path -LiteralPath $manifest -PathType Container)) {
@@ -300,9 +338,9 @@ function Test-AutoCadSetup {
         Write-Step 'Full AutoCAD for Windows was not detected.'
     }
 
-    $codex = Get-Command 'codex' -ErrorAction SilentlyContinue | Select-Object -First 1
+    $codex = Get-OptionalCommand 'codex'
     if ($codex) {
-        $registration = Invoke-External $codex.Source @('mcp', 'get', 'autocad') -AllowFailure
+        $registration = Invoke-External $codex @('mcp', 'get', 'autocad') -AllowFailure
         if ($registration.ExitCode -eq 0) { Write-Step 'Codex has an AutoCAD MCP registration.' }
         else { Write-Step 'The AutoCAD MCP server is not registered yet.' }
     }
@@ -331,11 +369,25 @@ function Install-RevitAddin {
     }
 
     $buildScript = Join-Path $Root 'src\revit\build-revit-addin.ps1'
-    Write-Step 'Building the Revit 2024 add-in against the installed Revit API...'
-    $built = Invoke-External 'powershell.exe' @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',$buildScript,'-RevitVersion','2024')
-    $null = $built
-    $assembly = Join-Path $Root 'src\revit\bin\2024\BimCadMcp.Revit.dll'
-    if (-not (Test-Path -LiteralPath $assembly -PathType Leaf)) { throw 'The Revit add-in DLL was not produced.' }
+    $buildOutput = Join-Path ([IO.Path]::GetTempPath()) ("BimCadMcp-RevitBuild-" + [Guid]::NewGuid().ToString('N'))
+    $assemblyDirectory = Join-Path $Root 'src\revit\bin\2024'
+    New-Item -ItemType Directory -Path $assemblyDirectory -Force | Out-Null
+    try {
+        Write-Step 'Building the Revit 2024 add-in against the installed Revit API...'
+        $built = Invoke-External 'powershell.exe' @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',$buildScript,'-RevitVersion','2024','-OutputPath',$buildOutput)
+        $null = $built
+        $builtAssembly = Join-Path $buildOutput 'BimCadMcp.Revit.dll'
+        if (-not (Test-Path -LiteralPath $builtAssembly -PathType Leaf)) { throw 'The Revit add-in DLL was not produced.' }
+
+        # Revit locks loaded add-in DLLs. A content-addressed filename lets an update
+        # finish safely while Revit is open; the manifest takes effect on next start.
+        $assemblyHash = (Get-FileHash -LiteralPath $builtAssembly -Algorithm SHA256).Hash.Substring(0, 12).ToLowerInvariant()
+        $assembly = Join-Path $assemblyDirectory ("BimCadMcp.Revit.{0}.dll" -f $assemblyHash)
+        Copy-Item -LiteralPath $builtAssembly -Destination $assembly -Force
+    }
+    finally {
+        if (Test-Path -LiteralPath $buildOutput) { Remove-Item -LiteralPath $buildOutput -Recurse -Force -ErrorAction SilentlyContinue }
+    }
 
     $manifestDirectory = Join-Path $env:APPDATA 'Autodesk\Revit\Addins\2024'
     New-Item -ItemType Directory -Path $manifestDirectory -Force | Out-Null
@@ -355,7 +407,7 @@ function Install-RevitAddin {
 </RevitAddIns>
 "@
     Set-Content -LiteralPath $manifestPath -Value $manifest -Encoding UTF8
-    Write-Step ("Installed Revit add-in manifest: {0}" -f $manifestPath)
+    Write-Step ("Installed Revit add-in {0} and manifest {1}. Restart Revit to load it." -f (Split-Path -Leaf $assembly), $manifestPath)
 }
 
 function Test-RevitSetup {
@@ -367,18 +419,33 @@ function Test-RevitSetup {
     if (Test-Path -LiteralPath $manifest -PathType Leaf) { Write-Step 'Revit 2024 MCP add-in manifest is installed.' }
     else { Write-Step 'Revit 2024 MCP add-in manifest is not installed yet.' }
 
-    $codex = Get-Command 'codex' -ErrorAction SilentlyContinue | Select-Object -First 1
+    $codex = Get-OptionalCommand 'codex'
     if ($codex) {
-        $registration = Invoke-External $codex.Source @('mcp','get','revit') -AllowFailure
+        $registration = Invoke-External $codex @('mcp','get','revit') -AllowFailure
         if ($registration.ExitCode -eq 0) { Write-Step 'Codex has a Revit MCP registration.' }
         else { Write-Step 'The Revit MCP server is not registered yet.' }
     }
     else { Write-Step 'Codex command was not detected.' }
 
-    $client = New-Object IO.Pipes.NamedPipeClientStream('.', 'BimCadMcp.Revit.2024', [IO.Pipes.PipeDirection]::InOut)
+    $pipeName = 'BimCadMcp.Revit.2024'
+    $sessionDirectory = Join-Path $env:LOCALAPPDATA 'BIM-CAD-MCP\runtime\revit-sessions'
+    if (Test-Path -LiteralPath $sessionDirectory -PathType Container) {
+        foreach ($sessionFile in @(Get-ChildItem -LiteralPath $sessionDirectory -Filter '*.json' -File -ErrorAction SilentlyContinue)) {
+            try {
+                $session = Get-Content -LiteralPath $sessionFile.FullName -Raw | ConvertFrom-Json
+                if ([string]$session.revit_version -eq '2024') {
+                    $null = Get-Process -Id ([int]$session.pid) -ErrorAction Stop
+                    $pipeName = [string]$session.pipe_name
+                    break
+                }
+            }
+            catch { }
+        }
+    }
+    $client = New-Object IO.Pipes.NamedPipeClientStream('.', $pipeName, [IO.Pipes.PipeDirection]::InOut)
     try {
         $client.Connect(250)
-        Write-Step 'Live Revit 2024 add-in connection is available.'
+        Write-Step ("Live Revit 2024 add-in connection is available on {0}." -f $pipeName)
     }
     catch { Write-Step 'Live Revit connection is not available. Restart Revit 2024 after installation and open a project.' }
     finally { $client.Dispose() }
@@ -422,6 +489,7 @@ try {
             if ($Product -eq 'AutoCAD') { Test-AutoCadSetup } else { Test-RevitSetup }
         }
         'Install' {
+            $null = Get-RequiredCommand 'codex'
             $root = Get-Repository
             Install-Skills $root
             if ($Product -eq 'AutoCAD') {
@@ -452,6 +520,6 @@ try {
     }
 }
 catch {
-    Write-Error $_.Exception.Message
+    [Console]::Error.WriteLine($_.Exception.Message)
     exit 1
 }

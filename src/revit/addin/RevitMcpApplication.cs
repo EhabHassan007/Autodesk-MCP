@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.IO.Pipes;
@@ -24,6 +25,9 @@ namespace BimCadMcp.Revit
             ExternalEvent externalEvent = ExternalEvent.Create(handler);
             _host = new PipeHost(application.ControlledApplication.VersionNumber, handler, externalEvent);
             _host.Start();
+            ConnectionState.MarkServerStarted(application.ControlledApplication.VersionNumber, _host.SessionId, _host.PipeName);
+            SessionRegistry.Register(_host.SessionId, application.ControlledApplication.VersionNumber, _host.PipeName);
+            RibbonUi.Create(application);
             return Result.Succeeded;
         }
 
@@ -31,9 +35,11 @@ namespace BimCadMcp.Revit
         {
             if (_host != null)
             {
+                SessionRegistry.Unregister(_host.SessionId);
                 _host.Dispose();
                 _host = null;
             }
+            ConnectionState.MarkServerStopped();
             return Result.Succeeded;
         }
     }
@@ -91,6 +97,7 @@ namespace BimCadMcp.Revit
     internal sealed class PipeHost : IDisposable
     {
         private readonly string _pipeName;
+        private readonly string _sessionId;
         private readonly RequestHandler _handler;
         private readonly ExternalEvent _externalEvent;
         private Thread _thread;
@@ -98,9 +105,21 @@ namespace BimCadMcp.Revit
 
         internal PipeHost(string version, RequestHandler handler, ExternalEvent externalEvent)
         {
-            _pipeName = "BimCadMcp.Revit." + version;
+            int processId = Process.GetCurrentProcess().Id;
+            _sessionId = version + "-" + processId.ToString(CultureInfo.InvariantCulture);
+            _pipeName = "BimCadMcp.Revit." + version + "." + processId.ToString(CultureInfo.InvariantCulture);
             _handler = handler;
             _externalEvent = externalEvent;
+        }
+
+        internal string SessionId
+        {
+            get { return _sessionId; }
+        }
+
+        internal string PipeName
+        {
+            get { return _pipeName; }
         }
 
         internal void Start()
@@ -129,6 +148,7 @@ namespace BimCadMcp.Revit
                     {
                         pipe.WaitForConnection();
                         if (_stopping) return;
+                        ConnectionState.MarkClientConnected();
 
                         using (StreamReader reader = new StreamReader(pipe, new UTF8Encoding(false), false, 4096, true))
                         using (StreamWriter writer = new StreamWriter(pipe, new UTF8Encoding(false), 4096, true))
@@ -148,16 +168,20 @@ namespace BimCadMcp.Revit
                             _handler.Enqueue(request);
                             _externalEvent.Raise();
 
-                            if (!request.Completed.Wait(TimeSpan.FromSeconds(30)))
+                            int timeoutSeconds = String.Equals(request.Operation, "execute_csharp", StringComparison.OrdinalIgnoreCase) ? 120 : 30;
+                            if (!request.Completed.Wait(TimeSpan.FromSeconds(timeoutSeconds)))
                             {
-                                writer.WriteLine("ERR\t" + Protocol.Encode("Revit did not process the request within 30 seconds. Finish any active command or dialog and retry."));
+                                ConnectionState.MarkRequestFailed(request.Operation, "Timed out after " + timeoutSeconds.ToString(CultureInfo.InvariantCulture) + " seconds.");
+                                writer.WriteLine("ERR\t" + Protocol.Encode("Revit did not process the request within " + timeoutSeconds.ToString(CultureInfo.InvariantCulture) + " seconds. Finish any active command or dialog and retry."));
                             }
                             else if (!String.IsNullOrEmpty(request.Error))
                             {
+                                ConnectionState.MarkRequestFailed(request.Operation, request.Error);
                                 writer.WriteLine("ERR\t" + Protocol.Encode(request.Error));
                             }
                             else
                             {
+                                ConnectionState.MarkRequestSucceeded(request.Operation);
                                 writer.WriteLine("OK\t" + Protocol.Encode(request.ResultJson));
                             }
                         }
@@ -206,6 +230,9 @@ namespace BimCadMcp.Revit
     {
         internal static string Execute(UIApplication application, string operation, string[] arguments)
         {
+            if (String.Equals(operation, "connection_status", StringComparison.OrdinalIgnoreCase))
+                return AdvancedControl.ConnectionStatus(application);
+
             UIDocument uiDocument = application.ActiveUIDocument;
             if (uiDocument == null) throw new InvalidOperationException("Open a Revit project first.");
             Document document = uiDocument.Document;
@@ -224,12 +251,23 @@ namespace BimCadMcp.Revit
                 case "set_parameter":
                     RequireArguments(arguments, 4);
                     return SetParameter(document, arguments[0], arguments[1], arguments[2], arguments[3]);
+                case "execute_csharp":
+                    RequireArguments(arguments, 6);
+                    return AdvancedControl.ExecuteCSharp(
+                        application,
+                        document,
+                        arguments[0],
+                        arguments[1],
+                        arguments[2],
+                        arguments[3],
+                        arguments[4],
+                        arguments[5]);
                 default:
                     throw new InvalidOperationException("Unknown operation: " + operation);
             }
         }
 
-        private static string DocumentId(Document document)
+        internal static string DocumentId(Document document)
         {
             return String.IsNullOrWhiteSpace(document.PathName) ? document.Title : document.PathName;
         }

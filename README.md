@@ -10,9 +10,13 @@ The live application still runs on the computer where AutoCAD is installed. GitH
 
 ## Revit 2024 status
 
-The repository now includes a Revit 2024 add-in, a named-pipe MCP bridge, an installer path, and a Revit-specific skill. The first tool set reads document information, levels, selected elements, and element parameters, and can set one writable parameter in a Revit transaction. It never saves or synchronizes the model.
+The repository includes a Revit 2024 add-in, a named-pipe MCP bridge, an installer path, and Revit-specific skills. Its narrow tools read document information, levels, selected elements, and element parameters and can set one writable parameter in a Revit transaction. The guarded `execute_csharp` tool adds full Revit API access for workflows that are not covered by a narrow tool. It supports read-only execution, one automatic project transaction, or an explicit manual mode for family-document and advanced transaction workflows. Every call is tied to the expected active document, and model changes require an explicit write flag.
 
-The Revit 2024 source compiles successfully against the locally installed Revit API, and MCP protocol and isolated installer tests pass. Live Revit reads and writes still need verification in a disposable project before the adapter is considered production-ready.
+The Revit ribbon contains **BIM-CAD MCP > MCP Connection**. The button reports whether the server is running, whether a client connected recently, the active document, request count, last operation, and last error. The connector does not save or synchronize unless a manual API call explicitly requests that operation.
+
+Every Revit process registers a unique session such as `2024-12345`. `list_sessions` reports the active document in each process. Pass its `session_id` to subsequent tools when multiple Revit sessions are open; the bridge refuses to guess between them. When only one session is running, `session_id` may be omitted.
+
+The Revit 2024 source compiles successfully against the locally installed Revit API, and MCP protocol tests pass. Use a disposable project when first verifying a new write workflow.
 
 ## Use on this or another computer
 
@@ -61,9 +65,11 @@ Each successful run creates a `skill-intake/...` branch and pull request request
 
 ## Small Windows setup app
 
+Install / Repair uses the extracted package automatically and copies its runtime files to `%LOCALAPPDATA%\BIM-CAD-MCP`. It does not require a GitHub download or PowerShell commands. Setup finds Codex on PATH, in its Windows desktop installation, or in common CLI installation folders. Choose AutoCAD or Revit 2024 and click Install / Repair for each application. Restart Codex and Revit after installation. Update still requires access to the private GitHub repository; browser sign-in alone does not authenticate Git or direct ZIP downloads. Errors include the underlying command output.
+
 Double-click `installer\Start-BIM-CAD-Setup.cmd` for a guided setup. Select AutoCAD and choose **Install / Repair**. The app downloads or updates the approved repository from GitHub under `%LOCALAPPDATA%\BIM-CAD-MCP`, installs every saved skill, registers the version-aware AutoCAD MCP server globally in Codex, and checks the local AutoCAD connection. Use **Update** on future runs to retrieve newly published skills. Git is optional: when it is unavailable, the setup downloads the current `main` branch as a GitHub ZIP.
 
-The AutoCAD path discovers installed ActiveX versions automatically. The Revit path targets Revit 2024 and builds a local add-in against the installed Revit 2024 API, installs its user manifest, and registers a separate `revit` MCP server. Restart Revit after installation so the add-in loads.
+The AutoCAD path discovers installed ActiveX versions automatically. The Revit path targets Revit 2024 and builds a local add-in against the installed Revit 2024 API, installs a content-addressed DLL and user manifest, and registers a separate `revit` MCP server. This allows the updater to finish while an older DLL is loaded. Restart Revit after installation so the new add-in loads, and restart Codex after bridge-schema changes so its tool list refreshes.
 
 ## Verify the bridge without editing a live drawing
 
@@ -75,18 +81,27 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\src\autocad\work\test
 
 The test uses a mock AutoCAD object model. For live verification, use a disposable blank drawing and perform a create/read/move/read/delete cycle without saving.
 
+For the Revit bridge protocol, multi-session routing, and tool schema:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\src\revit\work\test-bridge.ps1"
+```
+
+After restarting Revit, click **MCP Connection**, call `list_sessions`, then use `document_info` for the intended session. Verify a write with a separate read.
+
 ## Current limitations
 
 - Full AutoCAD for Windows with ActiveX automation. AutoCAD 2025 is verified; other registered versions are discovered dynamically but need version-specific compatibility verification. AutoCAD LT and AutoCAD for Mac are not supported by this bridge.
 - The local STDIO bridge is available to Codex running on the same Windows computer and user session as AutoCAD.
 - GitHub access alone does not provide remote control of an office workstation.
-- Blocks and external references are not expanded; arbitrary AutoLISP/command execution, hatches, dimensions, plotting, and general cloning are not exposed.
+- AutoCAD blocks and external references are not expanded; arbitrary AutoLISP/command execution, hatches, dimensions, plotting, and general cloning are not exposed.
 - Saving is always a separate explicit tool call because it writes all unsaved changes in the active drawing.
+- Revit 2025 and newer use .NET 8 and are not built by the current Revit 2024 compiler path.
 
 ## Roadmap
 
 - Portable installer and AutoCAD `.bundle` add-in.
-- Live-test the Revit 2024 adapter in a disposable project, then expand its narrow tool set based on verified workflows.
+- Add narrow Revit tools for recurring verified workflows while retaining the guarded API runner for advanced cases.
 - Versioned GitHub releases and update/rollback support.
 - Authenticated remote connector for intentionally controlled workstation access.
 

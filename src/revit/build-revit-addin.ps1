@@ -23,10 +23,17 @@ if ([string]::IsNullOrWhiteSpace($OutputPath)) {
 
 $revitApi = Join-Path $RevitInstallPath 'RevitAPI.dll'
 $revitUiApi = Join-Path $RevitInstallPath 'RevitAPIUI.dll'
-$source = Join-Path $PSScriptRoot 'addin\RevitMcpApplication.cs'
+$sources = @(
+    (Join-Path $PSScriptRoot 'addin\RevitMcpApplication.cs'),
+    (Join-Path $PSScriptRoot 'addin\AdvancedControl.cs')
+)
 $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
+$framework = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'
+$windowsBase = Join-Path $framework 'WPF\WindowsBase.dll'
+$presentationCore = Join-Path $framework 'WPF\PresentationCore.dll'
+$microsoftCSharp = Join-Path $framework 'Microsoft.CSharp.dll'
 
-foreach ($required in @($revitApi, $revitUiApi, $source, $compiler)) {
+foreach ($required in @($revitApi, $revitUiApi, $sources[0], $sources[1], $compiler, $windowsBase, $presentationCore, $microsoftCSharp)) {
     if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
         throw "Required build file was not found: $required"
     }
@@ -39,7 +46,10 @@ $assembly = Join-Path $OutputPath 'BimCadMcp.Revit.dll'
     "/out:$assembly" `
     "/reference:$revitApi" `
     "/reference:$revitUiApi" `
-    $source
+    "/reference:$windowsBase" `
+    "/reference:$presentationCore" `
+    "/reference:$microsoftCSharp" `
+    $sources
 
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $assembly -PathType Leaf)) {
     throw 'Revit add-in compilation failed.'
