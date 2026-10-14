@@ -55,7 +55,7 @@ The optional team workflow turns reusable lessons from each member's CAD/BIM cha
 
 Each team member completes this once:
 
-1. Install Git and GitHub CLI, authenticate with `gh auth login --hostname github.com`, and obtain access to the private repository.
+1. Install Git, sign in to the private repository through Git Credential Manager, and obtain permission to push intake branches.
 2. Install or update BIM-CAD MCP, then use **Team collection check** in the setup app.
 3. In Codex ask: `Use cad-team-knowledge-approval to enable my daily team knowledge collection.`
 

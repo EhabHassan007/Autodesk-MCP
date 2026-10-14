@@ -56,7 +56,7 @@ Use narrow tools for recurring operations. Promote a repeatedly proven workflow 
 
 For each team member:
 
-1. Install the approved BIM-CAD MCP release and authenticate Git and GitHub CLI to the private repository.
+1. Install the approved BIM-CAD MCP release and authenticate Git through Git Credential Manager to the private repository.
 2. Run **Team collection check** in BIM-CAD MCP Setup.
 3. In Codex ask: `Use cad-team-knowledge-approval to enable my daily team knowledge collection.`
 4. Confirm the automation is scheduled in the correct local timezone.

@@ -9,7 +9,7 @@ Use this skill when a team member asks to enable, run, or troubleshoot shared da
 
 ## Enable collection for one team member
 
-1. Confirm that BIM-CAD MCP is installed from the private team repository and that `git` and GitHub CLI (`gh`) are authenticated for an account with permission to push intake branches.
+1. Confirm that BIM-CAD MCP is installed from the private team repository and that Git is authenticated through Git Credential Manager for an account with permission to push intake branches.
 2. Use the Codex automation tool to create one daily heartbeat named **Daily BIM team knowledge intake**, normally at 4:30 PM in that user's local timezone. The user must explicitly request this setup on their own account; never create automations for other people or claim access to their chats.
 3. Use this automation prompt:
 

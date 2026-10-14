@@ -468,14 +468,13 @@ try {
         $submitter = Join-Path $root 'scripts\submit-team-knowledge.ps1'
         if (-not (Test-Path -LiteralPath $submitter -PathType Leaf)) { throw "Team submitter is missing: $submitter" }
         $git = Get-OptionalCommand 'git'
-        $gh = Get-OptionalCommand 'gh'
-        if ($git) { Write-Step 'Git is installed.' } else { Write-Step 'Git is required for automatic team collection.' }
-        if ($gh) {
-            $auth = Invoke-External $gh @('auth','status','--hostname','github.com') -AllowFailure
-            if ($auth.ExitCode -eq 0) { Write-Step 'GitHub CLI is authenticated.' }
-            else { Write-Step 'GitHub CLI is installed but not authenticated. Run: gh auth login --hostname github.com' }
+        if ($git) {
+            Write-Step 'Git is installed.'
+            $access = Invoke-External $git @('ls-remote',$RepositoryUrl,'HEAD') -AllowFailure
+            if ($access.ExitCode -eq 0) { Write-Step 'Git authentication can access the private repository.' }
+            else { Write-Step 'Git cannot access the private repository. Sign in through Git Credential Manager and retry.' }
         }
-        else { Write-Step 'GitHub CLI is required. Install it, then run: gh auth login --hostname github.com' }
+        else { Write-Step 'Git is required for automatic team collection.' }
         Write-Step 'In Codex, ask: Use cad-team-knowledge-approval to enable my daily team knowledge collection.'
         Write-Step 'Codex will create the per-user daily automation only after that user asks for it.'
         exit 0

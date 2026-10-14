@@ -131,9 +131,6 @@ if ($DryRun) {
 }
 
 $git = Get-RequiredCommand 'git'
-$gh = Get-RequiredCommand 'gh'
-$auth = Invoke-External $gh @('auth','status','--hostname','github.com') -AllowFailure
-if ($auth.ExitCode -ne 0) { throw 'GitHub CLI is not authenticated. Run: gh auth login --hostname github.com' }
 $gitName = (Invoke-External $git @('config','--global','user.name') -AllowFailure).Output | Select-Object -First 1
 $gitEmail = (Invoke-External $git @('config','--global','user.email') -AllowFailure).Output | Select-Object -First 1
 if ([string]::IsNullOrWhiteSpace([string]$gitName) -or [string]::IsNullOrWhiteSpace([string]$gitEmail)) {
@@ -183,8 +180,48 @@ try {
     }
     Set-Content -LiteralPath $bodyPath -Value $body -Encoding UTF8
 
-    $pr = Invoke-External $gh @('pr','create','--repo',$repositorySlug,'--base',$BaseBranch,'--head',$branch,'--reviewer',$Reviewer,'--title',$title,'--body-file',$bodyPath)
-    $prUrl = [string]($pr.Output | Select-Object -Last 1)
+    $credentialQuery = "protocol=https`nhost=github.com`n`n"
+    $credentialLines = @($credentialQuery | & $git credential fill)
+    $credential = @{}
+    foreach ($line in $credentialLines) {
+        $separator = $line.IndexOf('=')
+        if ($separator -gt 0) { $credential[$line.Substring(0,$separator)] = $line.Substring($separator + 1) }
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$credential.password)) {
+        throw 'Git Credential Manager did not return GitHub credentials. Sign in to GitHub through Git, then retry.'
+    }
+    $headers = @{
+        Authorization = 'Bearer ' + [string]$credential.password
+        Accept = 'application/vnd.github+json'
+        'X-GitHub-Api-Version' = '2022-11-28'
+        'User-Agent' = 'BIM-CAD-MCP-team-intake'
+    }
+    try {
+        $owner = $repositorySlug.Split('/')[0]
+        $repository = $repositorySlug.Split('/')[1]
+        $existingUri = "https://api.github.com/repos/$owner/$repository/pulls?state=open&head=$owner`:$branch"
+        $existing = @(Invoke-RestMethod -Method Get -Uri $existingUri -Headers $headers | Where-Object { $null -ne $_ -and $_.html_url })
+        if ($existing.Count -gt 0) {
+            $prUrl = [string]$existing[0].html_url
+        }
+        else {
+            $payload = @{title=$title;head=$branch;base=$BaseBranch;body=(Get-Content -LiteralPath $bodyPath -Raw);draft=$false} | ConvertTo-Json -Depth 5
+            $created = Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$owner/$repository/pulls" -Headers $headers -ContentType 'application/json' -Body $payload
+            $prUrl = [string]$created.html_url
+            if (-not [string]::IsNullOrWhiteSpace($Reviewer)) {
+                $reviewPayload = @{reviewers=@($Reviewer)} | ConvertTo-Json -Depth 3
+                try {
+                    $null = Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$owner/$repository/pulls/$($created.number)/requested_reviewers" -Headers $headers -ContentType 'application/json' -Body $reviewPayload
+                }
+                catch { }
+            }
+        }
+    }
+    finally {
+        $headers.Authorization = $null
+        $credential.Clear()
+        $credentialLines = $null
+    }
 
     foreach ($candidate in $selected) { $submitted[$candidate.Hash] = $prUrl }
     $temporaryLedger = $ledgerPath + '.tmp'
