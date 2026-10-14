@@ -476,7 +476,13 @@ try {
     }
 
     if ($Action -eq 'TeamStatus') {
-        $root = Get-Repository
+        $installedManifest = Join-Path $RepositoryPath '.agents\skills'
+        if (Test-Path -LiteralPath $installedManifest -PathType Container) {
+            $root = (Resolve-Path -LiteralPath $RepositoryPath).Path
+        }
+        else {
+            $root = Get-Repository
+        }
         $submitter = Join-Path $root 'scripts\submit-team-knowledge.ps1'
         if (-not (Test-Path -LiteralPath $submitter -PathType Leaf)) { throw "Team submitter is missing: $submitter" }
         $git = Get-OptionalCommand 'git'
