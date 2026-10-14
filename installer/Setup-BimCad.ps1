@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('Status', 'Install', 'Update', 'Test', 'Collect', 'TeamStatus')]
+    [ValidateSet('Status', 'Install', 'Update', 'Test', 'Collect', 'TeamStatus', 'CheckUpdate', 'EnableNotifications', 'DisableNotifications')]
     [string]$Action = 'Status',
 
     [ValidateSet('All', 'AutoCAD', 'Revit')]
@@ -14,6 +14,9 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$updateStateDirectory = Join-Path $env:LOCALAPPDATA 'AutodeskMcpConnector'
+$updateStatePath = Join-Path $updateStateDirectory 'update-state.json'
+$updateTaskName = 'Autodesk MCP Connector Update Alerts'
 
 function Write-Step {
     param([string]$Message)
@@ -76,6 +79,110 @@ function Invoke-External {
         throw "$FilePath failed with exit code $exitCode.`r`n$details"
     }
     [pscustomobject]@{ ExitCode = $exitCode; Output = @($output) }
+}
+
+function Read-UpdateState {
+    if (-not (Test-Path -LiteralPath $updateStatePath -PathType Leaf)) {
+        return [pscustomobject]@{
+            repository = $RepositoryUrl
+            installed_commit = ''
+            notifications_enabled = $false
+            last_checked_utc = ''
+        }
+    }
+    try {
+        Get-Content -LiteralPath $updateStatePath -Raw | ConvertFrom-Json
+    }
+    catch {
+        throw "The connector update state is damaged: $updateStatePath"
+    }
+}
+
+function Write-UpdateState {
+    param([object]$State)
+
+    New-Item -ItemType Directory -Path $updateStateDirectory -Force | Out-Null
+    $State | ConvertTo-Json | Set-Content -LiteralPath $updateStatePath -Encoding UTF8
+}
+
+function Get-RemoteMainCommit {
+    $git = Get-RequiredCommand 'git'
+    $result = Invoke-External $git @('ls-remote', $RepositoryUrl, 'refs/heads/main') -AllowFailure
+    if ($result.ExitCode -ne 0) {
+        throw 'Git cannot check the private repository. Sign in through Git Credential Manager and retry.'
+    }
+    $line = @($result.Output | ForEach-Object { $_.ToString().Trim() } | Where-Object { $_ }) | Select-Object -First 1
+    if (-not $line -or $line -notmatch '^([0-9a-fA-F]{40})\s+refs/heads/main$') {
+        throw 'GitHub did not return the approved main branch revision.'
+    }
+    $Matches[1].ToLowerInvariant()
+}
+
+function Set-InstalledCommit {
+    param([string]$Commit)
+
+    $state = Read-UpdateState
+    $state.repository = $RepositoryUrl
+    $state.installed_commit = $Commit
+    $state.last_checked_utc = [DateTime]::UtcNow.ToString('o')
+    Write-UpdateState $state
+}
+
+function Test-ApprovedUpdate {
+    $remoteCommit = Get-RemoteMainCommit
+    $state = Read-UpdateState
+    $state.repository = $RepositoryUrl
+    $state.last_checked_utc = [DateTime]::UtcNow.ToString('o')
+    Write-UpdateState $state
+
+    if ([string]::IsNullOrWhiteSpace([string]$state.installed_commit)) {
+        Write-Step '[UPDATE_STATUS_UNKNOWN] Press Update once to connect this installation to the approved main channel.'
+        return
+    }
+    if (-not $remoteCommit.Equals([string]$state.installed_commit, [StringComparison]::OrdinalIgnoreCase)) {
+        Write-Step '[UPDATE_AVAILABLE] Approved connector or skill updates are available. Press Update to install them.'
+        return
+    }
+    Write-Step '[UP_TO_DATE] Autodesk MCP Connector and approved skills are up to date.'
+}
+
+function Enable-UpdateNotifications {
+    $remoteCommit = Get-RemoteMainCommit
+    $state = Read-UpdateState
+    if ([string]::IsNullOrWhiteSpace([string]$state.installed_commit)) {
+        $state.installed_commit = $remoteCommit
+    }
+    $state.repository = $RepositoryUrl
+    $state.notifications_enabled = $true
+    $state.last_checked_utc = [DateTime]::UtcNow.ToString('o')
+    Write-UpdateState $state
+
+    $notifier = Join-Path $RepositoryPath 'scripts\autodesk-mcp-update-notifier.ps1'
+    if (-not (Test-Path -LiteralPath $notifier -PathType Leaf)) {
+        throw "The update notifier is missing: $notifier"
+    }
+    $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "{0}" -RepositoryUrl "{1}" -RepositoryPath "{2}"' -f $notifier, $RepositoryUrl, $RepositoryPath
+    $taskAction = New-ScheduledTaskAction -Execute $powershell -Argument $arguments
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+    $taskTrigger = @(
+        (New-ScheduledTaskTrigger -AtLogOn -User $identity),
+        (New-ScheduledTaskTrigger -Daily -At '09:00')
+    )
+    $principal = New-ScheduledTaskPrincipal -UserId $identity -LogonType Interactive -RunLevel Limited
+    Register-ScheduledTask -TaskName $updateTaskName -Action $taskAction -Trigger $taskTrigger -Principal $principal -Description 'Notify the signed-in user when approved Autodesk MCP Connector or skill updates are available.' -Force | Out-Null
+    Write-Step 'Automatic update alerts are enabled at sign-in and daily at 9:00 AM. Updates still require the user to press Update.'
+}
+
+function Disable-UpdateNotifications {
+    $task = Get-ScheduledTask -TaskName $updateTaskName -ErrorAction SilentlyContinue
+    if ($task) {
+        Unregister-ScheduledTask -TaskName $updateTaskName -Confirm:$false
+    }
+    $state = Read-UpdateState
+    $state.notifications_enabled = $false
+    Write-UpdateState $state
+    Write-Step 'Daily update alerts are disabled.'
 }
 
 function Get-GitHubArchiveUrl {
@@ -183,6 +290,72 @@ function Install-RepositoryArchive {
     }
 }
 
+function Test-GitRepository {
+    param(
+        [string]$Git,
+        [string]$Path
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) { return $false }
+    $result = Invoke-External $Git @('-C', $Path, 'rev-parse', '--is-inside-work-tree') -AllowFailure
+    $result.ExitCode -eq 0 -and (@($result.Output | ForEach-Object { $_.ToString().Trim() }) -contains 'true')
+}
+
+function Install-RepositoryClone {
+    param([string]$Git)
+
+    Assert-SafeRepositoryPath
+    $temporaryRoot = Join-Path ([IO.Path]::GetTempPath()) ("autodesk-mcp-clone-{0}" -f [Guid]::NewGuid().ToString('N'))
+    $downloadedRoot = Join-Path $temporaryRoot 'repository'
+    $backupPath = "$RepositoryPath.previous-$PID"
+    $repositoryMoved = $false
+
+    New-Item -ItemType Directory -Path $temporaryRoot -Force | Out-Null
+    try {
+        Write-Step 'Downloading the approved main version through Git...'
+        $cloned = Invoke-External $Git @('clone', '--depth', '1', '--branch', 'main', '--single-branch', $RepositoryUrl, $downloadedRoot)
+        $null = $cloned
+        if (-not (Test-Path -LiteralPath (Join-Path $downloadedRoot '.agents\skills') -PathType Container)) {
+            throw 'The downloaded repository does not contain .agents\skills.'
+        }
+
+        if (Test-Path -LiteralPath $backupPath) {
+            Remove-Item -LiteralPath $backupPath -Recurse -Force
+        }
+        if (Test-Path -LiteralPath $RepositoryPath) {
+            Move-Item -LiteralPath $RepositoryPath -Destination $backupPath
+            $repositoryMoved = $true
+        }
+        try {
+            Move-Item -LiteralPath $downloadedRoot -Destination $RepositoryPath
+            foreach ($name in @('skill-review', 'team-candidates', 'backups')) {
+                $saved = Join-Path $backupPath $name
+                $destination = Join-Path $RepositoryPath $name
+                if ($repositoryMoved -and (Test-Path -LiteralPath $saved) -and -not (Test-Path -LiteralPath $destination)) {
+                    Move-Item -LiteralPath $saved -Destination $destination
+                }
+            }
+        }
+        catch {
+            if (Test-Path -LiteralPath $RepositoryPath) {
+                Remove-Item -LiteralPath $RepositoryPath -Recurse -Force
+            }
+            if ($repositoryMoved -and (Test-Path -LiteralPath $backupPath)) {
+                Move-Item -LiteralPath $backupPath -Destination $RepositoryPath
+            }
+            throw
+        }
+        if ($repositoryMoved -and (Test-Path -LiteralPath $backupPath)) {
+            Remove-Item -LiteralPath $backupPath -Recurse -Force
+        }
+    }
+    finally {
+        if (Test-Path -LiteralPath $temporaryRoot) {
+            Remove-Item -LiteralPath $temporaryRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 function Get-Repository {
     # A downloaded package already contains everything needed for installation.
     # Copy it to a permanent location without requiring private GitHub access.
@@ -217,22 +390,16 @@ function Get-Repository {
 
     $git = Get-OptionalCommand 'git'
     if ($git) {
-        if (Test-Path -LiteralPath (Join-Path $RepositoryPath '.git') -PathType Container) {
+        if (Test-GitRepository -Git $git -Path $RepositoryPath) {
             Write-Step 'Downloading the newest setup and skills from GitHub...'
             $result = Invoke-External $git @('-C', $RepositoryPath, 'pull', '--ff-only', 'origin', 'main')
             $null = $result
         }
-        elseif (-not (Test-Path -LiteralPath $RepositoryPath) -or
-            @(Get-ChildItem -LiteralPath $RepositoryPath -Force -ErrorAction SilentlyContinue).Count -eq 0) {
-            $parent = Split-Path -Parent $RepositoryPath
-            New-Item -ItemType Directory -Path $parent -Force | Out-Null
-            Write-Step 'Downloading BIM-CAD MCP from GitHub...'
-            $result = Invoke-External $git @('clone', $RepositoryUrl, $RepositoryPath)
-            $null = $result
-        }
         else {
-            Write-Step 'Refreshing the installed copy directly from GitHub...'
-            Install-RepositoryArchive
+            if (Test-Path -LiteralPath (Join-Path $RepositoryPath '.git') -PathType Container) {
+                Write-Step 'The installed Git metadata is incomplete. Rebuilding the local copy safely...'
+            }
+            Install-RepositoryClone -Git $git
         }
     }
     else {
@@ -475,6 +642,21 @@ try {
         exit 0
     }
 
+    if ($Action -eq 'CheckUpdate') {
+        Test-ApprovedUpdate
+        exit 0
+    }
+
+    if ($Action -eq 'EnableNotifications') {
+        Enable-UpdateNotifications
+        exit 0
+    }
+
+    if ($Action -eq 'DisableNotifications') {
+        Disable-UpdateNotifications
+        exit 0
+    }
+
     if ($Action -eq 'TeamStatus') {
         $installedManifest = Join-Path $RepositoryPath '.agents\skills'
         if (Test-Path -LiteralPath $installedManifest -PathType Container) {
@@ -535,6 +717,7 @@ try {
                 Write-Step 'Revit 2024 was not detected, so its add-in was skipped.'
             }
             Register-McpServer 'autodesk' (Join-Path $root 'src\autodesk\autodesk-bridge.ps1') @('-RevitVersion','2024') @('autocad','revit')
+            Set-InstalledCommit (Get-RemoteMainCommit)
             Write-Step 'Skills and Autodesk MCP Connector are up to date. Restart Codex and any running Revit session.'
         }
     }

@@ -83,6 +83,13 @@ $teamButton.Size = New-Object System.Drawing.Size(250, 34)
 $form.Controls.Add($teamButton)
 $toolTip.SetToolTip($teamButton, 'Check private-repository access before enabling daily team knowledge collection in Codex.')
 
+$alertsButton = New-Object System.Windows.Forms.Button
+$alertsButton.Text = 'Enable update alerts'
+$alertsButton.Location = New-Object System.Drawing.Point(300, 220)
+$alertsButton.Size = New-Object System.Drawing.Size(200, 34)
+$form.Controls.Add($alertsButton)
+$toolTip.SetToolTip($alertsButton, 'Enable or disable a daily Windows alert for approved connector and skill updates.')
+
 $statusLabel = New-Object System.Windows.Forms.Label
 $statusLabel.Text = 'Status'
 $statusLabel.AutoSize = $true
@@ -109,7 +116,7 @@ function Invoke-SetupAction {
 
     $status.Text = "Working...`r`n"
     $form.UseWaitCursor = $true
-    foreach ($button in @($installButton, $updateButton, $testButton, $teamButton)) { $button.Enabled = $false }
+    foreach ($button in @($installButton, $updateButton, $testButton, $teamButton, $alertsButton)) { $button.Enabled = $false }
     [System.Windows.Forms.Application]::DoEvents()
 
     try {
@@ -129,7 +136,26 @@ function Invoke-SetupAction {
     }
     finally {
         $form.UseWaitCursor = $false
-        foreach ($button in @($installButton, $updateButton, $testButton, $teamButton)) { $button.Enabled = $true }
+        foreach ($button in @($installButton, $updateButton, $testButton, $teamButton, $alertsButton)) { $button.Enabled = $true }
+    }
+}
+
+function Test-UpdateAlertsEnabled {
+    $statePath = Join-Path $env:LOCALAPPDATA 'AutodeskMcpConnector\update-state.json'
+    if (-not (Test-Path -LiteralPath $statePath -PathType Leaf)) { return $false }
+    try {
+        $state = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+        return [bool]$state.notifications_enabled
+    }
+    catch { return $false }
+}
+
+function Refresh-UpdateAlertsButton {
+    if (Test-UpdateAlertsEnabled) {
+        $alertsButton.Text = 'Disable update alerts'
+    }
+    else {
+        $alertsButton.Text = 'Enable update alerts'
     }
 }
 
@@ -137,6 +163,15 @@ $installButton.Add_Click({ Invoke-SetupAction 'Install' })
 $updateButton.Add_Click({ Invoke-SetupAction 'Update' })
 $testButton.Add_Click({ Invoke-SetupAction 'Test' })
 $teamButton.Add_Click({ Invoke-SetupAction 'TeamStatus' })
+$alertsButton.Add_Click({
+    if (Test-UpdateAlertsEnabled) {
+        Invoke-SetupAction 'DisableNotifications'
+    }
+    else {
+        Invoke-SetupAction 'EnableNotifications'
+    }
+    Refresh-UpdateAlertsButton
+})
 $folderButton.Add_Click({
     if (Test-Path -LiteralPath $RepositoryPath) {
         Start-Process explorer.exe -ArgumentList $RepositoryPath
@@ -152,6 +187,7 @@ $form.Add_Shown({
         $form.Close()
     }
     else {
+        Refresh-UpdateAlertsButton
         Invoke-SetupAction 'Status'
     }
 })
