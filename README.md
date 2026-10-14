@@ -63,6 +63,8 @@ Codex creates a daily automation on that user's account. It reviews only CAD/BIM
 
 Each successful run creates a `skill-intake/...` branch and pull request requesting the repository owner's review. `CODEOWNERS` and the validation workflow protect the approval boundary. Configure the `main` branch ruleset to require the **Validate team skill intake** check, require the repository owner's review, dismiss stale approvals, and block direct pushes. Automatic checks reduce accidental disclosure; the owner must still read every candidate before approval.
 
+Before wider deployment, follow [Safe company rollout](COMPANY-ROLLOUT.md).
+
 ## Small Windows setup app
 
 Install / Repair uses the extracted package automatically and copies its runtime files to `%LOCALAPPDATA%\BIM-CAD-MCP`. It does not require a GitHub download or PowerShell commands. Setup finds Codex on PATH, in its Windows desktop installation, or in common CLI installation folders. Choose AutoCAD or Revit 2024 and click Install / Repair for each application. Restart Codex and Revit after installation. Update still requires access to the private GitHub repository; browser sign-in alone does not authenticate Git or direct ZIP downloads. Errors include the underlying command output.
