@@ -21,6 +21,8 @@ Revit 2024 and later .NET-based releases may require different compilation paths
 
 Commands register when the MCP service starts. Updating files on disk does not prove a loaded Revit session sees them; restart the service or Revit and test. Loaded DLLs can remain locked. An updater that replaces a command directory must package every supported Revit build.
 
+For a combined Autodesk connector, load AutoCAD and Revit bridges in isolated module scopes, verify that their tool names remain unique, and expose one stable MCP registration. During installation, back up the client configuration, remove legacy product registrations, add and verify the combined registration, and restore the backup if any registration step fails. Detect products automatically and skip missing applications without failing installation of the applications that are present.
+
 Treat downloaded command assemblies as executable code. Verify release signatures or pinned hashes before extraction, authenticate any non-loopback transport, cap message size and connections, and keep arbitrary-code and deletion commands disabled unless explicitly enabled.
 
 ## Release boundary

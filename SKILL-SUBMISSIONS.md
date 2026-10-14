@@ -4,7 +4,7 @@ Any BIM-CAD MCP user can propose an AutoCAD, Revit, or other BIM/CAD skill. Subm
 
 Team members who explicitly enable **Daily BIM team knowledge intake** can submit through an automated `skill-intake/*` pull request. The automation distills lessons locally and `scripts/submit-team-knowledge.ps1` applies a text-only privacy gate before upload. The pull request remains untrusted and requires repository-owner approval before merge.
 
-1. Open **BIM-CAD MCP Setup** and select **Review local skills**.
+1. Open **Autodesk MCP Connector** and select **Review local skills**.
 2. Open the generated `REVIEW.md` and inspect every candidate directory. Remove credentials, personal paths, drawings/models, chat transcripts, and client information.
 3. Select **Submit review package**. Sign in to GitHub and attach the generated ZIP to the skill-submission issue.
 4. The repository owner reviews the instructions, supporting files, sensitive-content flags, and claimed verification.

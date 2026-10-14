@@ -1,6 +1,6 @@
-# BIM-CAD MCP
+# Autodesk MCP Connector
 
-Portable Codex connections and reusable skills for desktop CAD/BIM applications.
+One local Codex connector for AutoCAD and Revit, plus the private BIM-CAD reusable skill library.
 
 ## AutoCAD status
 
@@ -12,7 +12,7 @@ The live application still runs on the computer where AutoCAD is installed. GitH
 
 The repository includes a Revit 2024 add-in, a named-pipe MCP bridge, an installer path, and Revit-specific skills. Its narrow tools read document information, levels, selected elements, and element parameters and can set one writable parameter in a Revit transaction. The guarded `execute_csharp` tool adds full Revit API access for workflows that are not covered by a narrow tool. It supports read-only execution, one automatic project transaction, or an explicit manual mode for family-document and advanced transaction workflows. Every call is tied to the expected active document, and model changes require an explicit write flag.
 
-The Revit ribbon contains **BIM-CAD MCP > MCP Connection**. The button reports whether the server is running, whether a client connected recently, the active document, request count, last operation, and last error. The connector does not save or synchronize unless a manual API call explicitly requests that operation.
+The Revit ribbon contains **Autodesk MCP Connector > MCP Connection**. The button reports whether the server is running, whether a client connected recently, the active document, request count, last operation, and last error. The connector does not save or synchronize unless a manual API call explicitly requests that operation.
 
 Every Revit process registers a unique session such as `2024-12345`. `list_sessions` reports the active document in each process. Pass its `session_id` to subsequent tools when multiple Revit sessions are open; the bridge refuses to guess between them. When only one session is running, `session_id` may be omitted.
 
@@ -65,13 +65,13 @@ Each successful run creates a `skill-intake/...` branch and pull request request
 
 Before wider deployment, follow [Safe company rollout](COMPANY-ROLLOUT.md).
 
-## Small Windows setup app
+## Autodesk MCP Connector setup app
 
-Install / Repair uses the extracted package automatically and copies its runtime files to `%LOCALAPPDATA%\BIM-CAD-MCP`. It does not require a GitHub download or PowerShell commands. Setup finds Codex on PATH, in its Windows desktop installation, or in common CLI installation folders. Choose AutoCAD or Revit 2024 and click Install / Repair for each application. Restart Codex and Revit after installation. Update still requires access to the private GitHub repository; browser sign-in alone does not authenticate Git or direct ZIP downloads. Errors include the underlying command output.
+Install / Repair uses the extracted package automatically and copies its runtime files to `%LOCALAPPDATA%\BIM-CAD-MCP`. It does not require a second GitHub download or manual PowerShell commands. Setup finds Codex on PATH, in its Windows desktop installation, or in common CLI installation folders. It configures AutoCAD and every supported Revit installation it detects without asking the user to choose an application. AutoCAD versions are discovered dynamically; Revit 2024 is the currently supported Revit build. Restart Codex and Revit after installation. Update still requires access to the private GitHub repository; browser sign-in alone does not authenticate Git or direct ZIP downloads. Errors include the underlying command output.
 
-Double-click `installer\Start-BIM-CAD-Setup.cmd` for a guided setup. Select AutoCAD and choose **Install / Repair**. The app downloads or updates the approved repository from GitHub under `%LOCALAPPDATA%\BIM-CAD-MCP`, installs every saved skill, registers the version-aware AutoCAD MCP server globally in Codex, and checks the local AutoCAD connection. Use **Update** on future runs to retrieve newly published skills. Git is optional: when it is unavailable, the setup downloads the current `main` branch as a GitHub ZIP.
+Double-click `installer\Start-Autodesk-MCP-Connector.cmd` and choose **Install / Repair**. The app downloads or updates the approved repository under `%LOCALAPPDATA%\BIM-CAD-MCP`, installs every saved skill, installs the Revit add-in when Revit 2024 is present, removes the legacy `autocad` and `revit` registrations, and registers one global `autodesk` MCP server named **Autodesk MCP Connector**. Use **Update** on future runs to retrieve newly published skills. Git is optional: when it is unavailable, setup downloads the current `main` branch as a GitHub ZIP.
 
-The AutoCAD path discovers installed ActiveX versions automatically. The Revit path targets Revit 2024 and builds a local add-in against the installed Revit 2024 API, installs a content-addressed DLL and user manifest, and registers a separate `revit` MCP server. This allows the updater to finish while an older DLL is loaded. Restart Revit after installation so the new add-in loads, and restart Codex after bridge-schema changes so its tool list refreshes.
+The unified connector exposes both AutoCAD and Revit tools through the `autodesk` MCP registration. The AutoCAD path discovers installed ActiveX versions automatically. The Revit path targets Revit 2024 and builds a local add-in against the installed Revit 2024 API, then installs a content-addressed DLL and user manifest. This allows the updater to finish while an older DLL is loaded. Restart Revit after installation so the new add-in loads, and restart Codex after bridge-schema changes so its combined tool list refreshes.
 
 ## Verify the bridge without editing a live drawing
 

@@ -12,7 +12,7 @@ Add-Type -AssemblyName System.Drawing
 $coreScript = Join-Path $PSScriptRoot 'Setup-BimCad.ps1'
 
 $form = New-Object System.Windows.Forms.Form
-$form.Text = 'BIM-CAD MCP Setup'
+$form.Text = 'Autodesk MCP Connector'
 $form.StartPosition = 'CenterScreen'
 $form.ClientSize = New-Object System.Drawing.Size(680, 550)
 $form.FormBorderStyle = 'FixedDialog'
@@ -20,32 +20,30 @@ $form.MaximizeBox = $false
 $form.Font = New-Object System.Drawing.Font('Segoe UI', 10)
 
 $title = New-Object System.Windows.Forms.Label
-$title.Text = 'BIM-CAD MCP Setup'
+$title.Text = 'Autodesk MCP Connector'
 $title.Font = New-Object System.Drawing.Font('Segoe UI Semibold', 20)
 $title.AutoSize = $true
 $title.Location = New-Object System.Drawing.Point(24, 20)
 $form.Controls.Add($title)
 
 $subtitle = New-Object System.Windows.Forms.Label
-$subtitle.Text = 'Download approved skills from GitHub and connect Codex to your CAD application.'
+$subtitle.Text = 'Automatically connect Codex to installed AutoCAD and supported Revit versions.'
 $subtitle.AutoSize = $true
 $subtitle.ForeColor = [System.Drawing.Color]::DimGray
 $subtitle.Location = New-Object System.Drawing.Point(28, 62)
 $form.Controls.Add($subtitle)
 
 $productLabel = New-Object System.Windows.Forms.Label
-$productLabel.Text = 'Application'
+$productLabel.Text = 'Applications'
 $productLabel.AutoSize = $true
 $productLabel.Location = New-Object System.Drawing.Point(28, 102)
 $form.Controls.Add($productLabel)
 
-$product = New-Object System.Windows.Forms.ComboBox
-$product.DropDownStyle = 'DropDownList'
-$product.Items.Add('AutoCAD - automatic version detection') | Out-Null
-$product.Items.Add('Revit 2024') | Out-Null
-$product.SelectedIndex = 0
-$product.Location = New-Object System.Drawing.Point(28, 126)
-$product.Size = New-Object System.Drawing.Size(320, 30)
+$product = New-Object System.Windows.Forms.Label
+$product.Text = 'AutoCAD and Revit - automatic detection'
+$product.AutoSize = $true
+$product.ForeColor = [System.Drawing.Color]::DimGray
+$product.Location = New-Object System.Drawing.Point(28, 130)
 $form.Controls.Add($product)
 
 $installButton = New-Object System.Windows.Forms.Button
@@ -114,7 +112,6 @@ $form.Controls.Add($closeButton)
 function Invoke-SetupAction {
     param([string]$Action)
 
-    $selectedProduct = if ($product.SelectedIndex -eq 0) { 'AutoCAD' } else { 'Revit' }
     $status.Text = "Working...`r`n"
     $form.UseWaitCursor = $true
     foreach ($button in @($installButton, $updateButton, $testButton, $collectButton, $submitButton, $teamButton)) { $button.Enabled = $false }
@@ -122,7 +119,7 @@ function Invoke-SetupAction {
 
     try {
         $output = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $coreScript `
-            -Action $Action -Product $selectedProduct -RepositoryUrl $RepositoryUrl -RepositoryPath $RepositoryPath 2>&1
+            -Action $Action -RepositoryUrl $RepositoryUrl -RepositoryPath $RepositoryPath 2>&1
         $exitCode = $LASTEXITCODE
         $status.Text = (($output | ForEach-Object { $_.ToString() }) -join "`r`n")
         if ($exitCode -eq 0) {
@@ -151,19 +148,19 @@ $submitButton.Add_Click({
     $package = Get-ChildItem -LiteralPath $reviewRoot -Filter 'skill-review-*.zip' -File -ErrorAction SilentlyContinue |
         Sort-Object LastWriteTime -Descending | Select-Object -First 1
     if (-not $package) {
-        [System.Windows.Forms.MessageBox]::Show('Choose Review local skills first.', 'BIM-CAD MCP Setup') | Out-Null
+        [System.Windows.Forms.MessageBox]::Show('Choose Review local skills first.', 'Autodesk MCP Connector') | Out-Null
         return
     }
     Start-Process explorer.exe -ArgumentList ("/select,`"{0}`"" -f $package.FullName)
     Start-Process 'https://github.com/EhabHassan007/BIM-CAD---MCP/issues/new?template=skill-submission.yml'
-    [System.Windows.Forms.MessageBox]::Show('Review the ZIP, then attach it to the GitHub submission form. Nothing is uploaded automatically.', 'BIM-CAD MCP Setup') | Out-Null
+    [System.Windows.Forms.MessageBox]::Show('Review the ZIP, then attach it to the GitHub submission form. Nothing is uploaded automatically.', 'Autodesk MCP Connector') | Out-Null
 })
 $folderButton.Add_Click({
     if (Test-Path -LiteralPath $RepositoryPath) {
         Start-Process explorer.exe -ArgumentList $RepositoryPath
     }
     else {
-        [System.Windows.Forms.MessageBox]::Show('Run Install / Repair first.', 'BIM-CAD MCP Setup') | Out-Null
+        [System.Windows.Forms.MessageBox]::Show('Run Install / Repair first.', 'Autodesk MCP Connector') | Out-Null
     }
 })
 $closeButton.Add_Click({ $form.Close() })
