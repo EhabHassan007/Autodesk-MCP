@@ -47,7 +47,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\sync-codex-sk
 
 Restart Codex after installation if the new skill does not appear immediately. Chat history is outside this workflow and is never copied by the script.
 
-Any BIM-CAD MCP user can select **Review local skills** to create a local report and ZIP package marking candidates as NEW, CHANGED, or IDENTICAL. **Submit review package** opens the package and the GitHub submission form; the contributor reviews and attaches it explicitly. Nothing is uploaded automatically or added to the approved library until the repository owner accepts that individual skill. See [skill submissions](SKILL-SUBMISSIONS.md).
+The optional team workflow can collect reusable CAD/BIM skill candidates for owner review. Nothing is added to the approved library until the repository owner accepts that individual skill. See [skill submissions](SKILL-SUBMISSIONS.md).
 
 ## Daily team knowledge approval
 
@@ -56,7 +56,7 @@ The optional team workflow turns reusable lessons from each member's CAD/BIM cha
 Each team member completes this once:
 
 1. Install Git, sign in to the private repository through Git Credential Manager, and obtain permission to push intake branches.
-2. Install or update BIM-CAD MCP, then use **Team collection check** in the setup app.
+2. Install or update Autodesk MCP Connector, then use **Team knowledge setup (optional)** in the setup app.
 3. In Codex ask: `Use cad-team-knowledge-approval to enable my daily team knowledge collection.`
 
 Codex creates a daily automation on that user's account. It reviews only CAD/BIM chats accessible to that signed-in user, distills reusable lessons into `%LOCALAPPDATA%\BIM-CAD-MCP\team-candidates`, removes project-specific context, and runs `scripts\submit-team-knowledge.ps1`. The script blocks common credentials, user paths, cloud model paths, email addresses, project/model files, binaries, links, and files above 256 KB. Previously submitted content hashes are skipped.
@@ -89,7 +89,7 @@ For the Revit bridge protocol, multi-session routing, and tool schema:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\src\revit\work\test-bridge.ps1"
 ```
 
-After restarting Revit, click **MCP Connection**, call `list_sessions`, then use `document_info` for the intended session. Verify a write with a separate read.
+After restarting Revit, open the **Autodesk MCP Connector** ribbon tab and click **Connection Status**. In Codex, call `list_sessions`, then use `document_info` for the intended session. Verify a write with a separate read.
 
 ## Current limitations
 
