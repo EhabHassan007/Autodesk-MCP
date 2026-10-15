@@ -22,7 +22,7 @@ $updateTaskName = 'Autodesk MCP Connector Update Alerts'
 
 function Write-Step {
     param([string]$Message)
-    Write-Host ("[{0}] {1}" -f (Get-Date -Format 'HH:mm:ss'), $Message)
+    Write-Output ("[{0}] {1}" -f (Get-Date -Format 'HH:mm:ss'), $Message)
 }
 
 function Get-RequiredCommand {
@@ -182,8 +182,8 @@ function Enable-UpdateNotifications {
         (New-ScheduledTaskTrigger -Daily -At '09:00')
     )
     $principal = New-ScheduledTaskPrincipal -UserId $identity -LogonType Interactive -RunLevel Limited
-    Register-ScheduledTask -TaskName $updateTaskName -Action $taskAction -Trigger $taskTrigger -Principal $principal -Description 'Notify the signed-in user when approved Autodesk MCP Connector or skill updates are available.' -Force | Out-Null
-    Write-Step 'Automatic update alerts are enabled at sign-in and daily at 9:00 AM. Updates still require the user to press Update.'
+    Register-ScheduledTask -TaskName $updateTaskName -Action $taskAction -Trigger $taskTrigger -Principal $principal -Description 'Install approved Autodesk MCP Connector and skill updates automatically, then notify the signed-in user.' -Force | Out-Null
+    Write-Step 'Automatic approved updates are enabled at sign-in and daily at 9:00 AM. A confirmation appears after each successful update.'
 }
 
 function Disable-UpdateNotifications {
@@ -194,7 +194,7 @@ function Disable-UpdateNotifications {
     $state = Read-UpdateState
     $state.notifications_enabled = $false
     Write-UpdateState $state
-    Write-Step 'Daily update alerts are disabled.'
+    Write-Step 'Automatic approved updates are disabled.'
 }
 
 function Get-GitHubArchiveUrl {

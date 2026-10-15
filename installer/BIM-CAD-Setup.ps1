@@ -100,11 +100,11 @@ $form.Controls.Add($teamButton)
 $toolTip.SetToolTip($teamButton, 'Check private-repository access before enabling daily team knowledge collection in Codex.')
 
 $alertsButton = New-Object System.Windows.Forms.Button
-$alertsButton.Text = 'Enable update alerts'
+$alertsButton.Text = 'Enable auto-updates'
 $alertsButton.Location = New-Object System.Drawing.Point(300, 220)
 $alertsButton.Size = New-Object System.Drawing.Size(200, 34)
 $form.Controls.Add($alertsButton)
-$toolTip.SetToolTip($alertsButton, 'Enable or disable a daily Windows alert for approved connector and skill updates.')
+$toolTip.SetToolTip($alertsButton, 'Install approved connector and skill updates automatically at sign-in and daily at 9:00 AM, then show a confirmation.')
 
 $statusLabel = New-Object System.Windows.Forms.Label
 $statusLabel.Text = 'Status'
@@ -168,10 +168,10 @@ function Test-UpdateAlertsEnabled {
 
 function Refresh-UpdateAlertsButton {
     if (Test-UpdateAlertsEnabled) {
-        $alertsButton.Text = 'Disable update alerts'
+        $alertsButton.Text = 'Disable auto-updates'
     }
     else {
-        $alertsButton.Text = 'Enable update alerts'
+        $alertsButton.Text = 'Enable auto-updates'
     }
 }
 
