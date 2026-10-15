@@ -1,6 +1,8 @@
 param(
     [string]$RepositoryUrl = 'https://github.com/EhabHassan007/Autodesk-MCP.git',
     [string]$RepositoryPath = (Join-Path $env:LOCALAPPDATA 'BIM-CAD-MCP'),
+    [ValidateSet('Status', 'CheckUpdate')]
+    [string]$InitialAction = 'Status',
     [switch]$SmokeTest
 )
 
@@ -202,7 +204,7 @@ $form.Add_Shown({
     }
     else {
         Refresh-UpdateAlertsButton
-        Invoke-SetupAction 'Status'
+        Invoke-SetupAction $InitialAction
     }
 })
 [void]$form.ShowDialog()

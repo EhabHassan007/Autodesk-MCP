@@ -1,6 +1,6 @@
 # Autodesk MCP Connector
 
-Current test package version: **1.0.0-beta.2**. See [TESTING.md](TESTING.md) before sharing the package with testers.
+Current test package version: **1.0.0-beta.3**. See [TESTING.md](TESTING.md) before sharing the package with testers.
 
 One local Codex and Claude connector for AutoCAD and Revit, plus the private BIM-CAD reusable skill library.
 
@@ -15,6 +15,8 @@ The live application still runs on the computer where AutoCAD is installed. GitH
 The repository includes a Revit 2024 add-in, a named-pipe MCP bridge, an installer path, and Revit-specific skills. Its narrow tools read document information, levels, selected elements, and element parameters and can set one writable parameter in a Revit transaction. The guarded `execute_csharp` tool adds full Revit API access for workflows that are not covered by a narrow tool. It supports read-only execution, one automatic project transaction, or an explicit manual mode for family-document and advanced transaction workflows. Every call is tied to the expected active document, and model changes require an explicit write flag.
 
 Revit gets a dedicated **Autodesk MCP Connector** ribbon tab. Open its **Connection** panel and click **Connection Status** to see whether the server is running, whether a client connected recently, the active document, request count, last operation, and last error. The connector does not save or synchronize unless a manual API call explicitly requests that operation.
+
+The same panel includes **Check Updates**. It opens the setup app directly on the approved update check. The check never changes the model or installs files automatically; select **Update** in the setup app when an approved version is available, then restart Revit so the new add-in DLL loads.
 
 Every Revit process registers a unique session such as `2024-12345`. `list_sessions` reports the active document in each process. Pass its `session_id` to subsequent tools when multiple Revit sessions are open; the bridge refuses to guess between them. When only one session is running, `session_id` may be omitted.
 
