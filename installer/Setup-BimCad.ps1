@@ -371,7 +371,7 @@ function Get-Repository {
             }
             Write-Step 'Installing the downloaded package to a permanent local folder...'
             New-Item -ItemType Directory -Path $destination -Force | Out-Null
-            foreach ($entry in @('installer','scripts','src','.agents','README.md','SKILL-SUBMISSIONS.md')) {
+            foreach ($entry in @('installer','scripts','src','.agents','README.md','SKILL-SUBMISSIONS.md','VERSION','TESTING.md')) {
                 $item = Join-Path $source $entry
                 if (Test-Path -LiteralPath $item) {
                     Copy-Item -LiteralPath $item -Destination $destination -Recurse -Force

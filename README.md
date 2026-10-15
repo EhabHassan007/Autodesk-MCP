@@ -1,5 +1,7 @@
 # Autodesk MCP Connector
 
+Current test package version: **1.0.0-beta.1**. See [TESTING.md](TESTING.md) before sharing the package with testers.
+
 One local Codex connector for AutoCAD and Revit, plus the private BIM-CAD reusable skill library.
 
 ## AutoCAD status

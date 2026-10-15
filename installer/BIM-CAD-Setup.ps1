@@ -26,6 +26,20 @@ $title.AutoSize = $true
 $title.Location = New-Object System.Drawing.Point(24, 20)
 $form.Controls.Add($title)
 
+$versionPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'VERSION'
+$versionText = if (Test-Path -LiteralPath $versionPath -PathType Leaf) {
+    (Get-Content -LiteralPath $versionPath -Raw).Trim()
+}
+else {
+    'development'
+}
+$versionLabel = New-Object System.Windows.Forms.Label
+$versionLabel.Text = "Version $versionText"
+$versionLabel.AutoSize = $true
+$versionLabel.ForeColor = [System.Drawing.Color]::DimGray
+$versionLabel.Location = New-Object System.Drawing.Point(520, 34)
+$form.Controls.Add($versionLabel)
+
 $subtitle = New-Object System.Windows.Forms.Label
 $subtitle.Text = 'Automatically connect Codex to installed AutoCAD and supported Revit versions.'
 $subtitle.AutoSize = $true
