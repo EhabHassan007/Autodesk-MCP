@@ -313,6 +313,25 @@ function Test-GitRepository {
     $result.ExitCode -eq 0 -and (@($result.Output | ForEach-Object { $_.ToString().Trim() }) -contains 'true')
 }
 
+function Sync-ApprovedGitRepository {
+    param([string]$Git)
+
+    Write-Step 'Downloading the newest approved setup and skills from GitHub...'
+    $configured = Invoke-External $Git @('-C', $RepositoryPath, 'remote', 'set-url', 'origin', $RepositoryUrl)
+    $null = $configured
+    $fetched = Invoke-External $Git @('-C', $RepositoryPath, 'fetch', '--prune', 'origin', 'main')
+    $null = $fetched
+
+    # Install / Repair can copy a packaged beta over an older installed Git checkout.
+    # Treat this folder as a managed installation and restore its tracked files from
+    # the approved main branch. Untracked review packages and team candidates remain.
+    Write-Step 'Refreshing packaged connector files from the approved update channel...'
+    $reset = Invoke-External $Git @('-C', $RepositoryPath, 'reset', '--hard', 'origin/main')
+    $null = $reset
+    $checkedOut = Invoke-External $Git @('-C', $RepositoryPath, 'checkout', '-B', 'main', 'origin/main')
+    $null = $checkedOut
+}
+
 function Install-RepositoryClone {
     param([string]$Git)
 
@@ -403,9 +422,7 @@ function Get-Repository {
     $git = Get-OptionalCommand 'git'
     if ($git) {
         if (Test-GitRepository -Git $git -Path $RepositoryPath) {
-            Write-Step 'Downloading the newest setup and skills from GitHub...'
-            $result = Invoke-External $git @('-C', $RepositoryPath, 'pull', '--ff-only', 'origin', 'main')
-            $null = $result
+            Sync-ApprovedGitRepository -Git $git
         }
         else {
             if (Test-Path -LiteralPath (Join-Path $RepositoryPath '.git') -PathType Container) {
