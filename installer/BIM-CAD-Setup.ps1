@@ -1,5 +1,5 @@
 param(
-    [string]$RepositoryUrl = 'https://github.com/EhabHassan007/BIM-CAD---MCP.git',
+    [string]$RepositoryUrl = 'https://github.com/EhabHassan007/Autodesk-MCP.git',
     [string]$RepositoryPath = (Join-Path $env:LOCALAPPDATA 'BIM-CAD-MCP'),
     [switch]$SmokeTest
 )
@@ -26,8 +26,22 @@ $title.AutoSize = $true
 $title.Location = New-Object System.Drawing.Point(24, 20)
 $form.Controls.Add($title)
 
+$versionPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'VERSION'
+$versionText = if (Test-Path -LiteralPath $versionPath -PathType Leaf) {
+    (Get-Content -LiteralPath $versionPath -Raw).Trim()
+}
+else {
+    'development'
+}
+$versionLabel = New-Object System.Windows.Forms.Label
+$versionLabel.Text = "Version $versionText"
+$versionLabel.AutoSize = $true
+$versionLabel.ForeColor = [System.Drawing.Color]::DimGray
+$versionLabel.Location = New-Object System.Drawing.Point(520, 34)
+$form.Controls.Add($versionLabel)
+
 $subtitle = New-Object System.Windows.Forms.Label
-$subtitle.Text = 'Automatically connect Codex to installed AutoCAD and supported Revit versions.'
+$subtitle.Text = 'Connect Codex and Claude to installed AutoCAD and supported Revit versions.'
 $subtitle.AutoSize = $true
 $subtitle.ForeColor = [System.Drawing.Color]::DimGray
 $subtitle.Location = New-Object System.Drawing.Point(28, 62)
@@ -53,7 +67,7 @@ $installButton.Text = 'Install / Repair'
 $installButton.Location = New-Object System.Drawing.Point(370, 123)
 $installButton.Size = New-Object System.Drawing.Size(130, 34)
 $form.Controls.Add($installButton)
-$toolTip.SetToolTip($installButton, 'Install or repair the connector, skills, and detected Revit add-in.')
+$toolTip.SetToolTip($installButton, 'Install or repair the connector, shared skills, AI-client registrations, and detected Revit add-in.')
 
 $updateButton = New-Object System.Windows.Forms.Button
 $updateButton.Text = 'Update'
@@ -67,7 +81,7 @@ $testButton.Text = 'Test connection'
 $testButton.Location = New-Object System.Drawing.Point(28, 174)
 $testButton.Size = New-Object System.Drawing.Size(140, 34)
 $form.Controls.Add($testButton)
-$toolTip.SetToolTip($testButton, 'Check the MCP registration and any currently running AutoCAD or Revit session.')
+$toolTip.SetToolTip($testButton, 'Check Codex and Claude registrations and any currently running AutoCAD or Revit session.')
 
 $folderButton = New-Object System.Windows.Forms.Button
 $folderButton.Text = 'Install folder'
@@ -82,6 +96,13 @@ $teamButton.Location = New-Object System.Drawing.Point(28, 220)
 $teamButton.Size = New-Object System.Drawing.Size(250, 34)
 $form.Controls.Add($teamButton)
 $toolTip.SetToolTip($teamButton, 'Check private-repository access before enabling daily team knowledge collection in Codex.')
+
+$alertsButton = New-Object System.Windows.Forms.Button
+$alertsButton.Text = 'Enable update alerts'
+$alertsButton.Location = New-Object System.Drawing.Point(300, 220)
+$alertsButton.Size = New-Object System.Drawing.Size(200, 34)
+$form.Controls.Add($alertsButton)
+$toolTip.SetToolTip($alertsButton, 'Enable or disable a daily Windows alert for approved connector and skill updates.')
 
 $statusLabel = New-Object System.Windows.Forms.Label
 $statusLabel.Text = 'Status'
@@ -109,7 +130,7 @@ function Invoke-SetupAction {
 
     $status.Text = "Working...`r`n"
     $form.UseWaitCursor = $true
-    foreach ($button in @($installButton, $updateButton, $testButton, $teamButton)) { $button.Enabled = $false }
+    foreach ($button in @($installButton, $updateButton, $testButton, $teamButton, $alertsButton)) { $button.Enabled = $false }
     [System.Windows.Forms.Application]::DoEvents()
 
     try {
@@ -129,7 +150,26 @@ function Invoke-SetupAction {
     }
     finally {
         $form.UseWaitCursor = $false
-        foreach ($button in @($installButton, $updateButton, $testButton, $teamButton)) { $button.Enabled = $true }
+        foreach ($button in @($installButton, $updateButton, $testButton, $teamButton, $alertsButton)) { $button.Enabled = $true }
+    }
+}
+
+function Test-UpdateAlertsEnabled {
+    $statePath = Join-Path $env:LOCALAPPDATA 'AutodeskMcpConnector\update-state.json'
+    if (-not (Test-Path -LiteralPath $statePath -PathType Leaf)) { return $false }
+    try {
+        $state = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+        return [bool]$state.notifications_enabled
+    }
+    catch { return $false }
+}
+
+function Refresh-UpdateAlertsButton {
+    if (Test-UpdateAlertsEnabled) {
+        $alertsButton.Text = 'Disable update alerts'
+    }
+    else {
+        $alertsButton.Text = 'Enable update alerts'
     }
 }
 
@@ -137,6 +177,15 @@ $installButton.Add_Click({ Invoke-SetupAction 'Install' })
 $updateButton.Add_Click({ Invoke-SetupAction 'Update' })
 $testButton.Add_Click({ Invoke-SetupAction 'Test' })
 $teamButton.Add_Click({ Invoke-SetupAction 'TeamStatus' })
+$alertsButton.Add_Click({
+    if (Test-UpdateAlertsEnabled) {
+        Invoke-SetupAction 'DisableNotifications'
+    }
+    else {
+        Invoke-SetupAction 'EnableNotifications'
+    }
+    Refresh-UpdateAlertsButton
+})
 $folderButton.Add_Click({
     if (Test-Path -LiteralPath $RepositoryPath) {
         Start-Process explorer.exe -ArgumentList $RepositoryPath
@@ -152,6 +201,7 @@ $form.Add_Shown({
         $form.Close()
     }
     else {
+        Refresh-UpdateAlertsButton
         Invoke-SetupAction 'Status'
     }
 })

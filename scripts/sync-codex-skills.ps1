@@ -72,7 +72,7 @@ function Install-RepositorySkills {
         Write-Host "Installed skill: $($skill.Name)"
     }
 
-    Write-Host "Codex skill library installed at: $Destination"
+    Write-Host "Skill library installed at: $Destination"
 }
 
 function Invoke-Git {

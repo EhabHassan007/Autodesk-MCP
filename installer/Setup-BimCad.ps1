@@ -1,19 +1,24 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('Status', 'Install', 'Update', 'Test', 'Collect', 'TeamStatus')]
+    [ValidateSet('Status', 'Install', 'Update', 'Test', 'Collect', 'TeamStatus', 'CheckUpdate', 'EnableNotifications', 'DisableNotifications')]
     [string]$Action = 'Status',
 
     [ValidateSet('All', 'AutoCAD', 'Revit')]
     [string]$Product = 'All',
 
-    [string]$RepositoryUrl = 'https://github.com/EhabHassan007/BIM-CAD---MCP.git',
+    [string]$RepositoryUrl = 'https://github.com/EhabHassan007/Autodesk-MCP.git',
 
     [string]$RepositoryPath = (Join-Path $env:LOCALAPPDATA 'BIM-CAD-MCP'),
 
-    [switch]$SkipRepositoryUpdate
+    [switch]$SkipRepositoryUpdate,
+
+    [switch]$LibraryOnly
 )
 
 $ErrorActionPreference = 'Stop'
+$updateStateDirectory = Join-Path $env:LOCALAPPDATA 'AutodeskMcpConnector'
+$updateStatePath = Join-Path $updateStateDirectory 'update-state.json'
+$updateTaskName = 'Autodesk MCP Connector Update Alerts'
 
 function Write-Step {
     param([string]$Message)
@@ -49,6 +54,16 @@ function Get-OptionalCommand {
             if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
         }
     }
+    if ($Name -eq 'claude') {
+        $candidates = @(
+            (Join-Path $HOME '.local\bin\claude.exe'),
+            (Join-Path $env:APPDATA 'npm\claude.cmd'),
+            (Join-Path $env:LOCALAPPDATA 'Programs\Claude Code\claude.exe')
+        )
+        foreach ($candidate in $candidates) {
+            if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
+        }
+    }
     $null
 }
 
@@ -76,6 +91,110 @@ function Invoke-External {
         throw "$FilePath failed with exit code $exitCode.`r`n$details"
     }
     [pscustomobject]@{ ExitCode = $exitCode; Output = @($output) }
+}
+
+function Read-UpdateState {
+    if (-not (Test-Path -LiteralPath $updateStatePath -PathType Leaf)) {
+        return [pscustomobject]@{
+            repository = $RepositoryUrl
+            installed_commit = ''
+            notifications_enabled = $false
+            last_checked_utc = ''
+        }
+    }
+    try {
+        Get-Content -LiteralPath $updateStatePath -Raw | ConvertFrom-Json
+    }
+    catch {
+        throw "The connector update state is damaged: $updateStatePath"
+    }
+}
+
+function Write-UpdateState {
+    param([object]$State)
+
+    New-Item -ItemType Directory -Path $updateStateDirectory -Force | Out-Null
+    $State | ConvertTo-Json | Set-Content -LiteralPath $updateStatePath -Encoding UTF8
+}
+
+function Get-RemoteMainCommit {
+    $git = Get-RequiredCommand 'git'
+    $result = Invoke-External $git @('ls-remote', $RepositoryUrl, 'refs/heads/main') -AllowFailure
+    if ($result.ExitCode -ne 0) {
+        throw 'Git cannot check the private repository. Sign in through Git Credential Manager and retry.'
+    }
+    $line = @($result.Output | ForEach-Object { $_.ToString().Trim() } | Where-Object { $_ }) | Select-Object -First 1
+    if (-not $line -or $line -notmatch '^([0-9a-fA-F]{40})\s+refs/heads/main$') {
+        throw 'GitHub did not return the approved main branch revision.'
+    }
+    $Matches[1].ToLowerInvariant()
+}
+
+function Set-InstalledCommit {
+    param([string]$Commit)
+
+    $state = Read-UpdateState
+    $state.repository = $RepositoryUrl
+    $state.installed_commit = $Commit
+    $state.last_checked_utc = [DateTime]::UtcNow.ToString('o')
+    Write-UpdateState $state
+}
+
+function Test-ApprovedUpdate {
+    $remoteCommit = Get-RemoteMainCommit
+    $state = Read-UpdateState
+    $state.repository = $RepositoryUrl
+    $state.last_checked_utc = [DateTime]::UtcNow.ToString('o')
+    Write-UpdateState $state
+
+    if ([string]::IsNullOrWhiteSpace([string]$state.installed_commit)) {
+        Write-Step '[UPDATE_STATUS_UNKNOWN] Press Update once to connect this installation to the approved main channel.'
+        return
+    }
+    if (-not $remoteCommit.Equals([string]$state.installed_commit, [StringComparison]::OrdinalIgnoreCase)) {
+        Write-Step '[UPDATE_AVAILABLE] Approved connector or skill updates are available. Press Update to install them.'
+        return
+    }
+    Write-Step '[UP_TO_DATE] Autodesk MCP Connector and approved skills are up to date.'
+}
+
+function Enable-UpdateNotifications {
+    $remoteCommit = Get-RemoteMainCommit
+    $state = Read-UpdateState
+    if ([string]::IsNullOrWhiteSpace([string]$state.installed_commit)) {
+        $state.installed_commit = $remoteCommit
+    }
+    $state.repository = $RepositoryUrl
+    $state.notifications_enabled = $true
+    $state.last_checked_utc = [DateTime]::UtcNow.ToString('o')
+    Write-UpdateState $state
+
+    $notifier = Join-Path $RepositoryPath 'scripts\autodesk-mcp-update-notifier.ps1'
+    if (-not (Test-Path -LiteralPath $notifier -PathType Leaf)) {
+        throw "The update notifier is missing: $notifier"
+    }
+    $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "{0}" -RepositoryUrl "{1}" -RepositoryPath "{2}"' -f $notifier, $RepositoryUrl, $RepositoryPath
+    $taskAction = New-ScheduledTaskAction -Execute $powershell -Argument $arguments
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+    $taskTrigger = @(
+        (New-ScheduledTaskTrigger -AtLogOn -User $identity),
+        (New-ScheduledTaskTrigger -Daily -At '09:00')
+    )
+    $principal = New-ScheduledTaskPrincipal -UserId $identity -LogonType Interactive -RunLevel Limited
+    Register-ScheduledTask -TaskName $updateTaskName -Action $taskAction -Trigger $taskTrigger -Principal $principal -Description 'Notify the signed-in user when approved Autodesk MCP Connector or skill updates are available.' -Force | Out-Null
+    Write-Step 'Automatic update alerts are enabled at sign-in and daily at 9:00 AM. Updates still require the user to press Update.'
+}
+
+function Disable-UpdateNotifications {
+    $task = Get-ScheduledTask -TaskName $updateTaskName -ErrorAction SilentlyContinue
+    if ($task) {
+        Unregister-ScheduledTask -TaskName $updateTaskName -Confirm:$false
+    }
+    $state = Read-UpdateState
+    $state.notifications_enabled = $false
+    Write-UpdateState $state
+    Write-Step 'Daily update alerts are disabled.'
 }
 
 function Get-GitHubArchiveUrl {
@@ -183,6 +302,72 @@ function Install-RepositoryArchive {
     }
 }
 
+function Test-GitRepository {
+    param(
+        [string]$Git,
+        [string]$Path
+    )
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) { return $false }
+    $result = Invoke-External $Git @('-C', $Path, 'rev-parse', '--is-inside-work-tree') -AllowFailure
+    $result.ExitCode -eq 0 -and (@($result.Output | ForEach-Object { $_.ToString().Trim() }) -contains 'true')
+}
+
+function Install-RepositoryClone {
+    param([string]$Git)
+
+    Assert-SafeRepositoryPath
+    $temporaryRoot = Join-Path ([IO.Path]::GetTempPath()) ("autodesk-mcp-clone-{0}" -f [Guid]::NewGuid().ToString('N'))
+    $downloadedRoot = Join-Path $temporaryRoot 'repository'
+    $backupPath = "$RepositoryPath.previous-$PID"
+    $repositoryMoved = $false
+
+    New-Item -ItemType Directory -Path $temporaryRoot -Force | Out-Null
+    try {
+        Write-Step 'Downloading the approved main version through Git...'
+        $cloned = Invoke-External $Git @('clone', '--depth', '1', '--branch', 'main', '--single-branch', $RepositoryUrl, $downloadedRoot)
+        $null = $cloned
+        if (-not (Test-Path -LiteralPath (Join-Path $downloadedRoot '.agents\skills') -PathType Container)) {
+            throw 'The downloaded repository does not contain .agents\skills.'
+        }
+
+        if (Test-Path -LiteralPath $backupPath) {
+            Remove-Item -LiteralPath $backupPath -Recurse -Force
+        }
+        if (Test-Path -LiteralPath $RepositoryPath) {
+            Move-Item -LiteralPath $RepositoryPath -Destination $backupPath
+            $repositoryMoved = $true
+        }
+        try {
+            Move-Item -LiteralPath $downloadedRoot -Destination $RepositoryPath
+            foreach ($name in @('skill-review', 'team-candidates', 'backups')) {
+                $saved = Join-Path $backupPath $name
+                $destination = Join-Path $RepositoryPath $name
+                if ($repositoryMoved -and (Test-Path -LiteralPath $saved) -and -not (Test-Path -LiteralPath $destination)) {
+                    Move-Item -LiteralPath $saved -Destination $destination
+                }
+            }
+        }
+        catch {
+            if (Test-Path -LiteralPath $RepositoryPath) {
+                Remove-Item -LiteralPath $RepositoryPath -Recurse -Force
+            }
+            if ($repositoryMoved -and (Test-Path -LiteralPath $backupPath)) {
+                Move-Item -LiteralPath $backupPath -Destination $RepositoryPath
+            }
+            throw
+        }
+        if ($repositoryMoved -and (Test-Path -LiteralPath $backupPath)) {
+            Remove-Item -LiteralPath $backupPath -Recurse -Force
+        }
+    }
+    finally {
+        if (Test-Path -LiteralPath $temporaryRoot) {
+            Remove-Item -LiteralPath $temporaryRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 function Get-Repository {
     # A downloaded package already contains everything needed for installation.
     # Copy it to a permanent location without requiring private GitHub access.
@@ -198,7 +383,7 @@ function Get-Repository {
             }
             Write-Step 'Installing the downloaded package to a permanent local folder...'
             New-Item -ItemType Directory -Path $destination -Force | Out-Null
-            foreach ($entry in @('installer','scripts','src','.agents','README.md','SKILL-SUBMISSIONS.md')) {
+            foreach ($entry in @('installer','scripts','src','.agents','README.md','SKILL-SUBMISSIONS.md','VERSION','TESTING.md')) {
                 $item = Join-Path $source $entry
                 if (Test-Path -LiteralPath $item) {
                     Copy-Item -LiteralPath $item -Destination $destination -Recurse -Force
@@ -217,22 +402,16 @@ function Get-Repository {
 
     $git = Get-OptionalCommand 'git'
     if ($git) {
-        if (Test-Path -LiteralPath (Join-Path $RepositoryPath '.git') -PathType Container) {
+        if (Test-GitRepository -Git $git -Path $RepositoryPath) {
             Write-Step 'Downloading the newest setup and skills from GitHub...'
             $result = Invoke-External $git @('-C', $RepositoryPath, 'pull', '--ff-only', 'origin', 'main')
             $null = $result
         }
-        elseif (-not (Test-Path -LiteralPath $RepositoryPath) -or
-            @(Get-ChildItem -LiteralPath $RepositoryPath -Force -ErrorAction SilentlyContinue).Count -eq 0) {
-            $parent = Split-Path -Parent $RepositoryPath
-            New-Item -ItemType Directory -Path $parent -Force | Out-Null
-            Write-Step 'Downloading BIM-CAD MCP from GitHub...'
-            $result = Invoke-External $git @('clone', $RepositoryUrl, $RepositoryPath)
-            $null = $result
-        }
         else {
-            Write-Step 'Refreshing the installed copy directly from GitHub...'
-            Install-RepositoryArchive
+            if (Test-Path -LiteralPath (Join-Path $RepositoryPath '.git') -PathType Container) {
+                Write-Step 'The installed Git metadata is incomplete. Rebuilding the local copy safely...'
+            }
+            Install-RepositoryClone -Git $git
         }
     }
     else {
@@ -252,8 +431,13 @@ function Install-Skills {
     if (-not (Test-Path -LiteralPath $syncScript -PathType Leaf)) {
         throw "Skill installer is missing: $syncScript"
     }
-    Write-Step 'Installing all saved Codex skills...'
+    Write-Step 'Installing all saved skills for Codex...'
     $result = Invoke-External 'powershell.exe' @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $syncScript, '-Action', 'Install')
+    $null = $result
+
+    $claudeSkills = Join-Path $HOME '.claude\skills'
+    Write-Step 'Installing the same saved skills for Claude Code...'
+    $result = Invoke-External 'powershell.exe' @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $syncScript, '-Action', 'Install', '-Destination', $claudeSkills)
     $null = $result
 }
 
@@ -318,6 +502,191 @@ function Register-McpServer {
     }
 }
 
+function Test-ClaudeDesktopInstalled {
+    $claudeDirectory = Join-Path $env:APPDATA 'Claude'
+    if (Test-Path -LiteralPath $claudeDirectory -PathType Container) { return $true }
+
+    $uninstallRoots = @(
+        'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall',
+        'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall',
+        'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall'
+    )
+    foreach ($root in $uninstallRoots) {
+        if (-not (Test-Path -LiteralPath $root)) { continue }
+        $match = Get-ChildItem -LiteralPath $root -ErrorAction SilentlyContinue |
+            ForEach-Object { Get-ItemProperty -LiteralPath $_.PSPath -ErrorAction SilentlyContinue } |
+            Where-Object { [string]$_.DisplayName -match '^Claude(?: Desktop)?$' } |
+            Select-Object -First 1
+        if ($match) { return $true }
+    }
+    $false
+}
+
+function Register-ClaudeCodeMcpServer {
+    param(
+        [string]$Name,
+        [string]$Bridge,
+        [string[]]$BridgeArguments = @(),
+        [string[]]$LegacyNames = @()
+    )
+
+    $claude = Get-OptionalCommand 'claude'
+    if (-not $claude) {
+        Write-Step 'Claude Code was not detected, so its MCP registration was skipped.'
+        return
+    }
+    if (-not (Test-Path -LiteralPath $Bridge -PathType Leaf)) {
+        throw "MCP bridge is missing: $Bridge"
+    }
+
+    $configPath = Join-Path $HOME '.claude.json'
+    $backupPath = "$configPath.autodesk-mcp-$PID.bak"
+    $hadConfig = Test-Path -LiteralPath $configPath -PathType Leaf
+    if ($hadConfig) { Copy-Item -LiteralPath $configPath -Destination $backupPath -Force }
+
+    Write-Step ("Registering the {0} MCP server in Claude Code..." -f $Name)
+    try {
+        foreach ($legacyName in $LegacyNames) {
+            foreach ($scope in @('local','user')) {
+                $removedLegacy = Invoke-External $claude @('mcp','remove',$legacyName,'--scope',$scope) -AllowFailure
+                if ($removedLegacy.ExitCode -eq 0) {
+                    Write-Step ("Removed legacy Claude MCP registration: {0} ({1})." -f $legacyName, $scope)
+                }
+            }
+        }
+        foreach ($scope in @('local','user')) {
+            $removed = Invoke-External $claude @('mcp','remove',$Name,'--scope',$scope) -AllowFailure
+            $null = $removed
+        }
+
+        $command = @(
+            'mcp', 'add', '--transport', 'stdio', '--scope', 'user', $Name, '--',
+            'powershell.exe', '-NoProfile', '-NonInteractive',
+            '-ExecutionPolicy', 'Bypass', '-File', $Bridge
+        ) + $BridgeArguments
+        $added = Invoke-External $claude $command
+        $null = $added
+        $verified = Invoke-External $claude @('mcp','get',$Name)
+        $null = $verified
+    }
+    catch {
+        if ($hadConfig) {
+            Copy-Item -LiteralPath $backupPath -Destination $configPath -Force
+        }
+        elseif (Test-Path -LiteralPath $configPath) {
+            Remove-Item -LiteralPath $configPath -Force
+        }
+        throw
+    }
+    finally {
+        if (Test-Path -LiteralPath $backupPath) { Remove-Item -LiteralPath $backupPath -Force }
+    }
+}
+
+function Register-ClaudeDesktopMcpServer {
+    param(
+        [string]$Name,
+        [string]$Bridge,
+        [string[]]$BridgeArguments = @()
+    )
+
+    if (-not (Test-ClaudeDesktopInstalled)) {
+        Write-Step 'Claude Desktop was not detected, so its local MCP registration was skipped.'
+        return
+    }
+    if (-not (Test-Path -LiteralPath $Bridge -PathType Leaf)) {
+        throw "MCP bridge is missing: $Bridge"
+    }
+
+    $claudeDirectory = Join-Path $env:APPDATA 'Claude'
+    $configPath = Join-Path $claudeDirectory 'claude_desktop_config.json'
+    $backupPath = "$configPath.autodesk-mcp-$PID.bak"
+    $temporaryPath = "$configPath.autodesk-mcp-$PID.tmp"
+    New-Item -ItemType Directory -Path $claudeDirectory -Force | Out-Null
+    $hadConfig = Test-Path -LiteralPath $configPath -PathType Leaf
+    if ($hadConfig) { Copy-Item -LiteralPath $configPath -Destination $backupPath -Force }
+
+    Write-Step ("Registering the {0} local MCP server in Claude Desktop..." -f $Name)
+    try {
+        $config = if ($hadConfig) {
+            Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+        }
+        else { [pscustomobject]@{} }
+
+        if (-not $config.PSObject.Properties['mcpServers']) {
+            $config | Add-Member -MemberType NoteProperty -Name 'mcpServers' -Value ([pscustomobject]@{})
+        }
+        elseif ($null -eq $config.mcpServers) {
+            $config.mcpServers = [pscustomobject]@{}
+        }
+
+        $entry = [pscustomobject][ordered]@{
+            command = 'powershell.exe'
+            args = @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',$Bridge) + $BridgeArguments
+        }
+        if ($config.mcpServers.PSObject.Properties[$Name]) {
+            $config.mcpServers.PSObject.Properties[$Name].Value = $entry
+        }
+        else {
+            $config.mcpServers | Add-Member -MemberType NoteProperty -Name $Name -Value $entry
+        }
+
+        $config | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $temporaryPath -Encoding UTF8
+        $null = Get-Content -LiteralPath $temporaryPath -Raw | ConvertFrom-Json
+        if ($hadConfig) {
+            Copy-Item -LiteralPath $temporaryPath -Destination $configPath -Force
+            Remove-Item -LiteralPath $temporaryPath -Force
+        }
+        else {
+            Move-Item -LiteralPath $temporaryPath -Destination $configPath
+        }
+    }
+    catch {
+        if ($hadConfig -and (Test-Path -LiteralPath $backupPath)) {
+            Copy-Item -LiteralPath $backupPath -Destination $configPath -Force
+        }
+        elseif (-not $hadConfig -and (Test-Path -LiteralPath $configPath)) {
+            Remove-Item -LiteralPath $configPath -Force
+        }
+        throw "Claude Desktop registration failed. $($_.Exception.Message)"
+    }
+    finally {
+        if (Test-Path -LiteralPath $temporaryPath) { Remove-Item -LiteralPath $temporaryPath -Force }
+        if (Test-Path -LiteralPath $backupPath) { Remove-Item -LiteralPath $backupPath -Force }
+    }
+}
+
+function Register-DetectedAiClients {
+    param([string]$Root)
+
+    $bridge = Join-Path $Root 'src\autodesk\autodesk-bridge.ps1'
+    $arguments = @('-RevitVersion','2024')
+    $legacyNames = @('autocad','revit')
+    $detected = 0
+
+    if (Get-OptionalCommand 'codex') {
+        Register-McpServer 'autodesk' $bridge $arguments $legacyNames
+        $detected++
+    }
+    else { Write-Step 'Codex was not detected, so its MCP registration was skipped.' }
+
+    if (Get-OptionalCommand 'claude') {
+        Register-ClaudeCodeMcpServer 'autodesk' $bridge $arguments $legacyNames
+        $detected++
+    }
+    else { Write-Step 'Claude Code was not detected, so its MCP registration was skipped.' }
+
+    if (Test-ClaudeDesktopInstalled) {
+        Register-ClaudeDesktopMcpServer 'autodesk' $bridge $arguments
+        $detected++
+    }
+    else { Write-Step 'Claude Desktop was not detected, so its local MCP registration was skipped.' }
+
+    if ($detected -eq 0) {
+        Write-Step 'No supported AI client was detected. Connector files and skills were installed; run Install / Repair after installing Codex or Claude.'
+    }
+}
+
 function Get-AutoCadProgIds {
     $ids = @()
     try {
@@ -369,6 +738,27 @@ function Test-AutodeskRegistration {
         else { Write-Step 'Autodesk MCP Connector is not registered yet.' }
     }
     else { Write-Step 'Codex command was not detected.' }
+
+    $claude = Get-OptionalCommand 'claude'
+    if ($claude) {
+        $registration = Invoke-External $claude @('mcp','get','autodesk') -AllowFailure
+        if ($registration.ExitCode -eq 0) { Write-Step 'Claude Code has the Autodesk MCP Connector registration.' }
+        else { Write-Step 'Autodesk MCP Connector is not registered in Claude Code yet.' }
+    }
+    else { Write-Step 'Claude Code command was not detected.' }
+
+    if (Test-ClaudeDesktopInstalled) {
+        $configPath = Join-Path (Join-Path $env:APPDATA 'Claude') 'claude_desktop_config.json'
+        try {
+            $config = Get-Content -LiteralPath $configPath -Raw -ErrorAction Stop | ConvertFrom-Json
+            if ($config.mcpServers.PSObject.Properties['autodesk']) {
+                Write-Step 'Claude Desktop has the Autodesk MCP Connector registration.'
+            }
+            else { Write-Step 'Autodesk MCP Connector is not registered in Claude Desktop yet.' }
+        }
+        catch { Write-Step 'Claude Desktop was detected, but its local MCP configuration is missing or invalid.' }
+    }
+    else { Write-Step 'Claude Desktop was not detected.' }
 }
 
 function Test-Revit2024Installed {
@@ -463,6 +853,8 @@ function Test-RevitSetup {
     finally { $client.Dispose() }
 }
 
+if ($LibraryOnly) { return }
+
 try {
     Write-Step ("Autodesk MCP Connector - {0}" -f $Action)
 
@@ -475,8 +867,29 @@ try {
         exit 0
     }
 
+    if ($Action -eq 'CheckUpdate') {
+        Test-ApprovedUpdate
+        exit 0
+    }
+
+    if ($Action -eq 'EnableNotifications') {
+        Enable-UpdateNotifications
+        exit 0
+    }
+
+    if ($Action -eq 'DisableNotifications') {
+        Disable-UpdateNotifications
+        exit 0
+    }
+
     if ($Action -eq 'TeamStatus') {
-        $root = Get-Repository
+        $installedManifest = Join-Path $RepositoryPath '.agents\skills'
+        if (Test-Path -LiteralPath $installedManifest -PathType Container) {
+            $root = (Resolve-Path -LiteralPath $RepositoryPath).Path
+        }
+        else {
+            $root = Get-Repository
+        }
         $submitter = Join-Path $root 'scripts\submit-team-knowledge.ps1'
         if (-not (Test-Path -LiteralPath $submitter -PathType Leaf)) { throw "Team submitter is missing: $submitter" }
         $git = Get-OptionalCommand 'git'
@@ -504,7 +917,6 @@ try {
             Test-AutodeskRegistration
         }
         'Install' {
-            $null = Get-RequiredCommand 'codex'
             $root = Get-Repository
             Install-Skills $root
             if ($Product -in @('All','Revit') -and (Test-Revit2024Installed)) {
@@ -513,11 +925,11 @@ try {
             elseif ($Product -in @('All','Revit')) {
                 Write-Step 'Revit 2024 was not detected, so its add-in was skipped.'
             }
-            Register-McpServer 'autodesk' (Join-Path $root 'src\autodesk\autodesk-bridge.ps1') @('-RevitVersion','2024') @('autocad','revit')
+            Register-DetectedAiClients $root
             if ($Product -in @('All','AutoCAD')) { Test-AutoCadSetup }
             if ($Product -in @('All','Revit')) { Test-RevitSetup }
             Test-AutodeskRegistration
-            Write-Step 'Setup complete. Restart Codex and any running Revit session, then open AutoCAD or Revit.'
+            Write-Step 'Setup complete. Restart Codex, Claude, and any running Revit session, then open AutoCAD or Revit.'
         }
         'Update' {
             $root = Get-Repository
@@ -528,8 +940,9 @@ try {
             elseif ($Product -in @('All','Revit')) {
                 Write-Step 'Revit 2024 was not detected, so its add-in was skipped.'
             }
-            Register-McpServer 'autodesk' (Join-Path $root 'src\autodesk\autodesk-bridge.ps1') @('-RevitVersion','2024') @('autocad','revit')
-            Write-Step 'Skills and Autodesk MCP Connector are up to date. Restart Codex and any running Revit session.'
+            Register-DetectedAiClients $root
+            Set-InstalledCommit (Get-RemoteMainCommit)
+            Write-Step 'Skills and Autodesk MCP Connector are up to date. Restart Codex, Claude, and any running Revit session.'
         }
     }
 }

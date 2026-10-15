@@ -174,7 +174,7 @@ namespace BimCadMcp.Revit
                     "Connection\nStatus",
                     assemblyPath,
                     typeof(ConnectionStatusCommand).FullName);
-                data.ToolTip = "Check whether Autodesk MCP Connector is ready and whether Codex has connected recently.";
+                data.ToolTip = "Check whether Autodesk MCP Connector is ready and whether an AI client has connected recently.";
                 PushButton button = panel.AddItem(data) as PushButton;
                 if (button != null) button.LargeImage = CreateConnectionIcon();
             }
@@ -217,7 +217,7 @@ namespace BimCadMcp.Revit
 
             TaskDialog dialog = new TaskDialog("Autodesk MCP Connector");
             dialog.MainInstruction = snapshot.ServerRunning
-                ? (recent ? "Connected to Codex" : "MCP server is ready")
+                ? (recent ? "Connected to AI client" : "MCP server is ready")
                 : "MCP server is stopped";
             dialog.MainContent =
                 "Status: " + (snapshot.ServerRunning ? "Running" : "Stopped") + "\n" +
