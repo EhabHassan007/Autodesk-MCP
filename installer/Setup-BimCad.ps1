@@ -6,7 +6,7 @@ param(
     [ValidateSet('All', 'AutoCAD', 'Revit')]
     [string]$Product = 'All',
 
-    [string]$RepositoryUrl = 'https://github.com/EhabHassan007/BIM-CAD---MCP.git',
+    [string]$RepositoryUrl = 'https://github.com/EhabHassan007/Autodesk-MCP.git',
 
     [string]$RepositoryPath = (Join-Path $env:LOCALAPPDATA 'BIM-CAD-MCP'),
 

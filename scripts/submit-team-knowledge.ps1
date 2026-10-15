@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$RepositoryRoot = (Split-Path -Parent $PSScriptRoot),
-    [string]$RepositoryUrl = 'https://github.com/EhabHassan007/BIM-CAD---MCP.git',
+    [string]$RepositoryUrl = 'https://github.com/EhabHassan007/Autodesk-MCP.git',
     [string]$BaseBranch = 'main',
     [string]$Reviewer = 'EhabHassan007',
     [string]$CandidateRoot = (Join-Path $env:LOCALAPPDATA 'BIM-CAD-MCP\team-candidates'),
