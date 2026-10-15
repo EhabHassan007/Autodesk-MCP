@@ -1,4 +1,4 @@
-# Autodesk MCP Connector 1.0.0-beta.2 testing
+# Autodesk MCP Connector 1.0.0-beta.3 testing
 
 This package is a Windows test build for the unified AutoCAD and Revit connector.
 
@@ -21,11 +21,12 @@ Initial installation uses the extracted package and does not require repository 
 
 1. Open Revit 2024 with a test project.
 2. Open the **Autodesk MCP Connector** ribbon tab and select **Connection Status**.
-3. In the setup app, select **Test connection**.
-4. If testing AutoCAD, open a blank drawing before selecting **Test connection**.
-5. Confirm that each installed AI client exposes one connector named `autodesk` with the expected AutoCAD and Revit tools.
-6. For Claude Code, confirm the shared skills appear under `~/.claude/skills` and run one relevant skill.
-7. If Codex and Claude are both installed, verify that both can read status. Do model-changing tests one at a time and confirm a concurrent write waits or returns the connector's busy message.
+3. Select **Check Updates** in the Revit ribbon and confirm the setup app opens directly with the approved update status. Do not install an update during a model operation.
+4. In the setup app, select **Test connection**.
+5. If testing AutoCAD, open a blank drawing before selecting **Test connection**.
+6. Confirm that each installed AI client exposes one connector named `autodesk` with the expected AutoCAD and Revit tools.
+7. For Claude Code, confirm the shared skills appear under `~/.claude/skills` and run one relevant skill.
+8. If Codex and Claude are both installed, verify that both can read status. Do model-changing tests one at a time and confirm a concurrent write waits or returns the connector's busy message.
 
 Automatic update alerts and the **Update** button require access to the private approved repository. Testers without repository access can still install and test this packaged version.
 
