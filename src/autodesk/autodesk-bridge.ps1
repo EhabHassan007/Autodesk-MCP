@@ -36,6 +36,31 @@ $revitTools = @(Get-RevitMcpTools)
 $toolList = @($autoCadTools + $revitTools)
 $autoCadToolNames = @($autoCadTools | ForEach-Object { [string]$_['name'] })
 $revitToolNames = @($revitTools | ForEach-Object { [string]$_['name'] })
+$readOnlyTools = @{}
+foreach ($tool in $toolList) {
+    $readOnlyTools[[string]$tool['name']] = [bool]$tool['annotations']['readOnlyHint']
+}
+
+function Invoke-WithWriteLock {
+    param([string]$Name, [scriptblock]$Operation)
+
+    if ($readOnlyTools[$Name]) { return (& $Operation) }
+
+    $mutex = New-Object Threading.Mutex($false, 'Local\AutodeskMcpConnector.ModelWrite')
+    $acquired = $false
+    try {
+        try { $acquired = $mutex.WaitOne([TimeSpan]::FromMinutes(2)) }
+        catch [Threading.AbandonedMutexException] { $acquired = $true }
+        if (-not $acquired) {
+            throw 'Another Codex or Claude session is modifying an Autodesk model. Wait for it to finish and retry.'
+        }
+        & $Operation
+    }
+    finally {
+        if ($acquired) { $mutex.ReleaseMutex() }
+        $mutex.Dispose()
+    }
+}
 
 [Console]::InputEncoding = New-Object Text.UTF8Encoding($false)
 [Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
@@ -58,8 +83,8 @@ while ($null -ne ($line = [Console]::ReadLine())) {
             $response.result = @{
                 protocolVersion = $protocol
                 capabilities = @{tools=@{}}
-                serverInfo = @{name='Autodesk MCP Connector';version='1.0.0'}
-                instructions = 'One local Autodesk connector for AutoCAD and Revit. For AutoCAD, read drawing_info before edits and save only when explicitly requested. For Revit, call list_sessions when multiple sessions may be open, read document_info before writes, pass expected_document, and verify every write with a separate read.'
+                serverInfo = @{name='Autodesk MCP Connector';version='1.1.0'}
+                instructions = 'One local Autodesk connector for Codex and Claude with AutoCAD and Revit tools. Model-changing calls are serialized across AI clients. For AutoCAD, read drawing_info before edits and save only when explicitly requested. For Revit, call list_sessions when multiple sessions may be open, read document_info before writes, pass expected_document, and verify every write with a separate read.'
             }
         }
         'ping' { $response.result = @{} }
@@ -68,10 +93,10 @@ while ($null -ne ($line = [Console]::ReadLine())) {
             try {
                 $name = [string]$request.params.name
                 if ($name -in $autoCadToolNames) {
-                    $data = Invoke-AutoCadMcpTool $name $request.params.arguments
+                    $data = Invoke-WithWriteLock $name { Invoke-AutoCadMcpTool $name $request.params.arguments }
                 }
                 elseif ($name -in $revitToolNames) {
-                    $data = Invoke-RevitMcpTool $name $request.params.arguments
+                    $data = Invoke-WithWriteLock $name { Invoke-RevitMcpTool $name $request.params.arguments }
                 }
                 else { throw "Unknown Autodesk MCP tool: $name" }
                 $response.result = @{content=@(@{type='text';text=($data | ConvertTo-Json -Depth 20 -Compress)});isError=$false}

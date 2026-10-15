@@ -41,7 +41,7 @@ $versionLabel.Location = New-Object System.Drawing.Point(520, 34)
 $form.Controls.Add($versionLabel)
 
 $subtitle = New-Object System.Windows.Forms.Label
-$subtitle.Text = 'Automatically connect Codex to installed AutoCAD and supported Revit versions.'
+$subtitle.Text = 'Connect Codex and Claude to installed AutoCAD and supported Revit versions.'
 $subtitle.AutoSize = $true
 $subtitle.ForeColor = [System.Drawing.Color]::DimGray
 $subtitle.Location = New-Object System.Drawing.Point(28, 62)
@@ -67,7 +67,7 @@ $installButton.Text = 'Install / Repair'
 $installButton.Location = New-Object System.Drawing.Point(370, 123)
 $installButton.Size = New-Object System.Drawing.Size(130, 34)
 $form.Controls.Add($installButton)
-$toolTip.SetToolTip($installButton, 'Install or repair the connector, skills, and detected Revit add-in.')
+$toolTip.SetToolTip($installButton, 'Install or repair the connector, shared skills, AI-client registrations, and detected Revit add-in.')
 
 $updateButton = New-Object System.Windows.Forms.Button
 $updateButton.Text = 'Update'
@@ -81,7 +81,7 @@ $testButton.Text = 'Test connection'
 $testButton.Location = New-Object System.Drawing.Point(28, 174)
 $testButton.Size = New-Object System.Drawing.Size(140, 34)
 $form.Controls.Add($testButton)
-$toolTip.SetToolTip($testButton, 'Check the MCP registration and any currently running AutoCAD or Revit session.')
+$toolTip.SetToolTip($testButton, 'Check Codex and Claude registrations and any currently running AutoCAD or Revit session.')
 
 $folderButton = New-Object System.Windows.Forms.Button
 $folderButton.Text = 'Install folder'
