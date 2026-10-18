@@ -22,7 +22,7 @@ $updateTaskName = 'Autodesk MCP Connector Update Alerts'
 
 function Write-Step {
     param([string]$Message)
-    Write-Output ("[{0}] {1}" -f (Get-Date -Format 'HH:mm:ss'), $Message)
+    Write-Host ("[{0}] {1}" -f (Get-Date -Format 'HH:mm:ss'), $Message)
 }
 
 function Get-RequiredCommand {
@@ -432,7 +432,16 @@ function Get-Repository {
         }
     }
     else {
-        Install-RepositoryArchive
+        if ($Action -eq 'Install') {
+            throw @'
+This is an incomplete Autodesk MCP Connector package. The private GitHub repository cannot be downloaded anonymously.
+
+Download and fully extract Autodesk-MCP-Connector-<version>.zip, keep its four files together, then run Start-Autodesk-MCP-Connector.cmd and select Install / Repair.
+
+Alternatively, install Git and sign in to the private repository through Git Credential Manager.
+'@
+        }
+        throw 'Updates from the private GitHub repository require Git. Install Git, sign in through Git Credential Manager, then retry Update.'
     }
 
     if (-not (Test-Path -LiteralPath $manifest -PathType Container)) {

@@ -1,8 +1,10 @@
 # Autodesk MCP Connector
 
-Current test package version: **1.0.0-beta.5**. See [TESTING.md](TESTING.md) before sharing the package with testers.
+Current test package version: **1.0.0-beta.6**. See [TESTING.md](TESTING.md) before sharing the package with testers.
 
 The shareable ZIP is intentionally compact. After extraction it shows only `Start-Autodesk-MCP-Connector.cmd`, `Install-Autodesk-MCP-Connector.ps1`, `Autodesk-MCP-Payload.zip`, and `README-FIRST.txt`. Keep all four together and start the CMD file; the bootstrap expands the internal runtime payload temporarily and removes it when the setup window closes.
+
+Do not copy or run the repository's `installer` folder by itself on another computer. A window labeled **Version development** or an anonymous GitHub 404 means the complete four-file package was not used. Initial installation from the complete package works without GitHub access; later private-repository updates require authenticated Git access.
 
 One local Codex and Claude connector for AutoCAD and Revit, plus the private BIM-CAD reusable skill library.
 

@@ -1,4 +1,4 @@
-# Autodesk MCP Connector 1.0.0-beta.5 testing
+# Autodesk MCP Connector 1.0.0-beta.6 testing
 
 This package is a Windows test build for the unified AutoCAD and Revit connector.
 
@@ -17,6 +17,8 @@ This package is a Windows test build for the unified AutoCAD and Revit connector
 3. Restart every installed AI client and any running Revit session.
 
 Initial installation uses the extracted package and does not require repository access.
+
+If the setup window shows **Version development** or reports a GitHub 404, the complete share package was not extracted. Close it, extract `Autodesk-MCP-Connector-<version>.zip` completely, keep the four visible files together, and start `Start-Autodesk-MCP-Connector.cmd`. Direct anonymous downloads cannot read the private repository.
 
 ## Verify
 
