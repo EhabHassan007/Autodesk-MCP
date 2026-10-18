@@ -43,8 +43,17 @@ if (-not $ghPath) { throw 'GitHub CLI (gh) is required for release publishing.' 
 & $ghPath auth status
 if ($LASTEXITCODE -ne 0) { throw 'Sign in with gh auth login, then retry.' }
 
-$visibility = & $ghPath repo view $PublicReleaseRepository --json visibility --jq '.visibility' 2>$null
-if ($LASTEXITCODE -ne 0) {
+$previousErrorPreference = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+try {
+    $visibilityOutput = & $ghPath repo view $PublicReleaseRepository --json visibility --jq '.visibility' 2>&1
+    $repoViewExitCode = $LASTEXITCODE
+}
+finally {
+    $ErrorActionPreference = $previousErrorPreference
+}
+$visibility = if ($repoViewExitCode -eq 0) { [string]($visibilityOutput | Select-Object -First 1) } else { '' }
+if ($repoViewExitCode -ne 0) {
     if (-not $CreateRepository) {
         throw "Public release repository $PublicReleaseRepository does not exist or is not accessible. Retry with -CreateRepository after reviewing the repository name."
     }
