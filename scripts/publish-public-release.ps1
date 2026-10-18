@@ -32,17 +32,24 @@ if (-not $actualHash.Equals([string]$manifest.sha256, [StringComparison]::Ordina
 }
 
 $gh = Get-Command gh -ErrorAction SilentlyContinue | Select-Object -First 1
-if (-not $gh) { throw 'GitHub CLI (gh) is required for release publishing.' }
-& $gh.Source auth status
+$ghPath = if ($gh) { $gh.Source } else { $null }
+if (-not $ghPath) {
+    $ghPath = @(
+        (Join-Path $env:ProgramFiles 'GitHub CLI\gh.exe'),
+        (Join-Path $env:LOCALAPPDATA 'Programs\GitHub CLI\gh.exe')
+    ) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+}
+if (-not $ghPath) { throw 'GitHub CLI (gh) is required for release publishing.' }
+& $ghPath auth status
 if ($LASTEXITCODE -ne 0) { throw 'Sign in with gh auth login, then retry.' }
 
-$visibility = & $gh.Source repo view $PublicReleaseRepository --json visibility --jq '.visibility' 2>$null
+$visibility = & $ghPath repo view $PublicReleaseRepository --json visibility --jq '.visibility' 2>$null
 if ($LASTEXITCODE -ne 0) {
     if (-not $CreateRepository) {
         throw "Public release repository $PublicReleaseRepository does not exist or is not accessible. Retry with -CreateRepository after reviewing the repository name."
     }
     if ($PSCmdlet.ShouldProcess($PublicReleaseRepository, 'Create public GitHub release repository')) {
-        & $gh.Source repo create $PublicReleaseRepository --public --description 'Public, read-only releases for Autodesk MCP Connector' --add-readme
+        & $ghPath repo create $PublicReleaseRepository --public --description 'Public, read-only releases for Autodesk MCP Connector' --add-readme
         if ($LASTEXITCODE -ne 0) { throw 'Could not create the public release repository.' }
         $visibility = 'PUBLIC'
     }
@@ -53,7 +60,7 @@ if (-not ([string]$visibility).Trim().Equals('PUBLIC', [StringComparison]::Ordin
 
 $tag = "v$Version"
 if ($PSCmdlet.ShouldProcess("$PublicReleaseRepository $tag", 'Publish connector ZIP and checksum manifest')) {
-    & $gh.Source release create $tag $PackagePath $ManifestPath --repo $PublicReleaseRepository --title "Autodesk MCP Connector $Version" --notes "Approved Autodesk MCP Connector release $Version. The installer verifies the package SHA-256 from latest.json." --latest
+    & $ghPath release create $tag $PackagePath $ManifestPath --repo $PublicReleaseRepository --title "Autodesk MCP Connector $Version" --notes "Approved Autodesk MCP Connector release $Version. The installer verifies the package SHA-256 from latest.json." --latest
     if ($LASTEXITCODE -ne 0) { throw 'GitHub release publishing failed.' }
     Write-Output "Published https://github.com/$PublicReleaseRepository/releases/tag/$tag"
 }
