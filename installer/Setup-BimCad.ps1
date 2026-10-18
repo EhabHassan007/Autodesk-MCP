@@ -8,11 +8,15 @@ param(
 
     [string]$RepositoryUrl = 'https://github.com/EhabHassan007/Autodesk-MCP.git',
 
+    [string]$ReleaseManifestUrl = 'https://github.com/EhabHassan007/Autodesk-MCP-Releases/releases/latest/download/latest.json',
+
     [string]$RepositoryPath = (Join-Path $env:LOCALAPPDATA 'BIM-CAD-MCP'),
 
     [switch]$SkipRepositoryUpdate,
 
-    [switch]$LibraryOnly
+    [switch]$LibraryOnly,
+
+    [switch]$InstallGitIfMissing
 )
 
 $ErrorActionPreference = 'Stop'
@@ -40,6 +44,23 @@ function Get-OptionalCommand {
 
     $command = Get-Command $Name -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($command) { return $command.Source }
+    if ($Name -eq 'git') {
+        $candidates = @(
+            (Join-Path $env:ProgramFiles 'Git\cmd\git.exe'),
+            (Join-Path $env:ProgramFiles 'Git\cmd\git.cmd'),
+            (Join-Path $env:LOCALAPPDATA 'Programs\Git\cmd\git.exe'),
+            (Join-Path $env:LOCALAPPDATA 'Programs\Git\cmd\git.cmd')
+        )
+        if (${env:ProgramFiles(x86)}) {
+            $candidates += @(
+                (Join-Path ${env:ProgramFiles(x86)} 'Git\cmd\git.exe'),
+                (Join-Path ${env:ProgramFiles(x86)} 'Git\cmd\git.cmd')
+            )
+        }
+        foreach ($candidate in $candidates) {
+            if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
+        }
+    }
     if ($Name -eq 'codex') {
         $desktopBin = Join-Path $env:LOCALAPPDATA 'OpenAI\Codex\bin'
         $candidates = @(
@@ -93,10 +114,77 @@ function Invoke-External {
     [pscustomobject]@{ ExitCode = $exitCode; Output = @($output) }
 }
 
+function Install-GitForWindows {
+    $git = Get-OptionalCommand 'git'
+    if ($git) { return $git }
+
+    $winget = Get-OptionalCommand 'winget'
+    if (-not $winget) {
+        throw 'Git is required for optional team knowledge submission, and Windows Package Manager was not found. Install Git for Windows from https://git-scm.com/download/win, then reopen the connector.'
+    }
+
+    Write-Step 'Installing Git for Windows for optional team knowledge submission...'
+    $installed = Invoke-External $winget @(
+        'install', '--id', 'Git.Git', '--exact', '--source', 'winget', '--silent',
+        '--accept-package-agreements', '--accept-source-agreements'
+    ) -AllowFailure
+
+    $git = Get-OptionalCommand 'git'
+    if (-not $git) {
+        $details = ($installed.Output | ForEach-Object { $_.ToString() }) -join "`r`n"
+        throw "Git installation did not finish. Install Git for Windows and reopen the connector.`r`n$details"
+    }
+    Write-Step 'Git for Windows is installed.'
+    $git
+}
+
+function Get-PrivateRepositoryGit {
+    param([switch]$AllowInstall)
+
+    $git = Get-OptionalCommand 'git'
+    if (-not $git -and $AllowInstall) {
+        $git = Install-GitForWindows
+    }
+    if (-not $git) {
+        throw 'Git is required only for optional team knowledge submission. Allow the connector to install Git or install Git for Windows, then retry.'
+    }
+
+    Write-Step 'Checking access to the private GitHub repository...'
+    Write-Step 'If GitHub opens, sign in with an account that can access EhabHassan007/Autodesk-MCP.'
+    $oldInteractive = $env:GCM_INTERACTIVE
+    $oldProvider = $env:GCM_PROVIDER
+    $oldModes = $env:GCM_GITHUB_AUTHMODES
+    try {
+        $env:GCM_INTERACTIVE = 'always'
+        $env:GCM_PROVIDER = 'github'
+        $env:GCM_GITHUB_AUTHMODES = 'browser,device'
+        $access = Invoke-External $git @('ls-remote', $RepositoryUrl, 'refs/heads/main') -AllowFailure
+    }
+    finally {
+        if ($null -eq $oldInteractive) { Remove-Item Env:GCM_INTERACTIVE -ErrorAction SilentlyContinue } else { $env:GCM_INTERACTIVE = $oldInteractive }
+        if ($null -eq $oldProvider) { Remove-Item Env:GCM_PROVIDER -ErrorAction SilentlyContinue } else { $env:GCM_PROVIDER = $oldProvider }
+        if ($null -eq $oldModes) { Remove-Item Env:GCM_GITHUB_AUTHMODES -ErrorAction SilentlyContinue } else { $env:GCM_GITHUB_AUTHMODES = $oldModes }
+    }
+    if ($access.ExitCode -ne 0) {
+        $details = ($access.Output | ForEach-Object { $_.ToString() }) -join "`r`n"
+        throw "GitHub sign-in or private repository access failed. Sign in as an authorized account and retry.`r`n$details"
+    }
+    $line = @($access.Output | ForEach-Object { $_.ToString().Trim() } |
+        Where-Object { $_ -match '^[0-9a-fA-F]{40}\s+refs/heads/main$' }) | Select-Object -First 1
+    if (-not $line) {
+        throw 'GitHub authentication succeeded, but the approved main branch was not returned.'
+    }
+    Write-Step 'Private GitHub repository access passed.'
+    $git
+}
+
 function Read-UpdateState {
     if (-not (Test-Path -LiteralPath $updateStatePath -PathType Leaf)) {
         return [pscustomobject]@{
             repository = $RepositoryUrl
+            release_manifest = $ReleaseManifestUrl
+            installed_version = ''
+            installed_sha256 = ''
             installed_commit = ''
             notifications_enabled = $false
             last_checked_utc = ''
@@ -110,6 +198,21 @@ function Read-UpdateState {
     }
 }
 
+function Set-StateProperty {
+    param(
+        [object]$State,
+        [string]$Name,
+        [object]$Value
+    )
+
+    if ($State.PSObject.Properties.Name -contains $Name) {
+        $State.$Name = $Value
+    }
+    else {
+        $State | Add-Member -NotePropertyName $Name -NotePropertyValue $Value
+    }
+}
+
 function Write-UpdateState {
     param([object]$State)
 
@@ -117,56 +220,97 @@ function Write-UpdateState {
     $State | ConvertTo-Json | Set-Content -LiteralPath $updateStatePath -Encoding UTF8
 }
 
-function Get-RemoteMainCommit {
-    $git = Get-RequiredCommand 'git'
-    $result = Invoke-External $git @('ls-remote', $RepositoryUrl, 'refs/heads/main') -AllowFailure
-    if ($result.ExitCode -ne 0) {
-        throw 'Git cannot check the private repository. Sign in through Git Credential Manager and retry.'
+function Get-PublicReleaseManifest {
+    Write-Step 'Checking the public Autodesk MCP release channel...'
+    try { $manifestUri = [Uri]$ReleaseManifestUrl }
+    catch { throw "The release manifest address is invalid: $ReleaseManifestUrl" }
+    if ($manifestUri.Scheme -ne 'https') {
+        throw 'The release manifest must use HTTPS.'
     }
-    $line = @($result.Output | ForEach-Object { $_.ToString().Trim() } | Where-Object { $_ }) | Select-Object -First 1
-    if (-not $line -or $line -notmatch '^([0-9a-fA-F]{40})\s+refs/heads/main$') {
-        throw 'GitHub did not return the approved main branch revision.'
+
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+        $response = Invoke-WebRequest -Uri $manifestUri.AbsoluteUri -UseBasicParsing
+        $manifest = $response.Content | ConvertFrom-Json
     }
-    $Matches[1].ToLowerInvariant()
+    catch {
+        throw "Could not read the public release channel. $($_.Exception.Message)"
+    }
+
+    $version = [string]$manifest.version
+    $downloadUrl = [string]$manifest.download_url
+    $sha256 = ([string]$manifest.sha256).ToUpperInvariant()
+    if ($version -cnotmatch '^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$') {
+        throw 'The public release manifest contains an invalid version.'
+    }
+    if ($sha256 -cnotmatch '^[0-9A-F]{64}$') {
+        throw 'The public release manifest contains an invalid SHA-256 checksum.'
+    }
+    try { $downloadUri = [Uri]$downloadUrl }
+    catch { throw 'The public release manifest contains an invalid download address.' }
+    if ($downloadUri.Scheme -ne 'https') {
+        throw 'The public release download must use HTTPS.'
+    }
+
+    [pscustomobject]@{
+        Version = $version
+        DownloadUrl = $downloadUri.AbsoluteUri
+        Sha256 = $sha256
+    }
 }
 
-function Set-InstalledCommit {
-    param([string]$Commit)
+function Get-InstalledVersion {
+    $versionPath = Join-Path $RepositoryPath 'VERSION'
+    if (Test-Path -LiteralPath $versionPath -PathType Leaf) {
+        return (Get-Content -LiteralPath $versionPath -Raw).Trim()
+    }
+    ''
+}
+
+function Set-InstalledRelease {
+    param(
+        [string]$Version,
+        [string]$Sha256 = ''
+    )
 
     $state = Read-UpdateState
-    $state.repository = $RepositoryUrl
-    $state.installed_commit = $Commit
-    $state.last_checked_utc = [DateTime]::UtcNow.ToString('o')
+    Set-StateProperty $state 'repository' $RepositoryUrl
+    Set-StateProperty $state 'release_manifest' $ReleaseManifestUrl
+    Set-StateProperty $state 'installed_version' $Version
+    Set-StateProperty $state 'installed_sha256' $Sha256
+    Set-StateProperty $state 'last_checked_utc' ([DateTime]::UtcNow.ToString('o'))
     Write-UpdateState $state
 }
 
 function Test-ApprovedUpdate {
-    $remoteCommit = Get-RemoteMainCommit
+    $release = Get-PublicReleaseManifest
     $state = Read-UpdateState
-    $state.repository = $RepositoryUrl
-    $state.last_checked_utc = [DateTime]::UtcNow.ToString('o')
+    $installedVersion = Get-InstalledVersion
+    Set-StateProperty $state 'repository' $RepositoryUrl
+    Set-StateProperty $state 'release_manifest' $ReleaseManifestUrl
+    Set-StateProperty $state 'installed_version' $installedVersion
+    Set-StateProperty $state 'last_checked_utc' ([DateTime]::UtcNow.ToString('o'))
     Write-UpdateState $state
 
-    if ([string]::IsNullOrWhiteSpace([string]$state.installed_commit)) {
-        Write-Step '[UPDATE_STATUS_UNKNOWN] Press Update once to connect this installation to the approved main channel.'
+    if ([string]::IsNullOrWhiteSpace($installedVersion)) {
+        Write-Step '[UPDATE_STATUS_UNKNOWN] Press Install / Repair to complete this installation.'
         return
     }
-    if (-not $remoteCommit.Equals([string]$state.installed_commit, [StringComparison]::OrdinalIgnoreCase)) {
-        Write-Step '[UPDATE_AVAILABLE] Approved connector or skill updates are available. Press Update to install them.'
+    if (-not $release.Version.Equals($installedVersion, [StringComparison]::OrdinalIgnoreCase)) {
+        Write-Step ("[UPDATE_AVAILABLE] Version {0} is available. Press Update to install it." -f $release.Version)
         return
     }
-    Write-Step '[UP_TO_DATE] Autodesk MCP Connector and approved skills are up to date.'
+    Write-Step ("[UP_TO_DATE] Autodesk MCP Connector {0} and approved skills are up to date." -f $installedVersion)
 }
 
 function Enable-UpdateNotifications {
-    $remoteCommit = Get-RemoteMainCommit
+    $release = Get-PublicReleaseManifest
     $state = Read-UpdateState
-    if ([string]::IsNullOrWhiteSpace([string]$state.installed_commit)) {
-        $state.installed_commit = $remoteCommit
-    }
-    $state.repository = $RepositoryUrl
-    $state.notifications_enabled = $true
-    $state.last_checked_utc = [DateTime]::UtcNow.ToString('o')
+    Set-StateProperty $state 'repository' $RepositoryUrl
+    Set-StateProperty $state 'release_manifest' $ReleaseManifestUrl
+    Set-StateProperty $state 'installed_version' (Get-InstalledVersion)
+    Set-StateProperty $state 'notifications_enabled' $true
+    Set-StateProperty $state 'last_checked_utc' ([DateTime]::UtcNow.ToString('o'))
     Write-UpdateState $state
 
     $notifier = Join-Path $RepositoryPath 'scripts\autodesk-mcp-update-notifier.ps1'
@@ -174,7 +318,7 @@ function Enable-UpdateNotifications {
         throw "The update notifier is missing: $notifier"
     }
     $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-    $arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "{0}" -RepositoryUrl "{1}" -RepositoryPath "{2}"' -f $notifier, $RepositoryUrl, $RepositoryPath
+    $arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "{0}" -RepositoryUrl "{1}" -ReleaseManifestUrl "{2}" -RepositoryPath "{3}"' -f $notifier, $RepositoryUrl, $ReleaseManifestUrl, $RepositoryPath
     $taskAction = New-ScheduledTaskAction -Execute $powershell -Argument $arguments
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
     $taskTrigger = @(
@@ -183,7 +327,7 @@ function Enable-UpdateNotifications {
     )
     $principal = New-ScheduledTaskPrincipal -UserId $identity -LogonType Interactive -RunLevel Limited
     Register-ScheduledTask -TaskName $updateTaskName -Action $taskAction -Trigger $taskTrigger -Principal $principal -Description 'Install approved Autodesk MCP Connector and skill updates automatically, then notify the signed-in user.' -Force | Out-Null
-    Write-Step 'Automatic approved updates are enabled at sign-in and daily at 9:00 AM. A confirmation appears after each successful update.'
+    Write-Step ("Automatic public release updates are enabled at sign-in and daily at 9:00 AM. Current approved release: {0}." -f $release.Version)
 }
 
 function Disable-UpdateNotifications {
@@ -387,6 +531,101 @@ function Install-RepositoryClone {
     }
 }
 
+function Install-PublicRelease {
+    param([object]$Release)
+
+    Assert-SafeRepositoryPath
+    if (-not $Release) { $Release = Get-PublicReleaseManifest }
+
+    $temporaryRoot = Join-Path ([IO.Path]::GetTempPath()) ("autodesk-mcp-release-{0}" -f [Guid]::NewGuid().ToString('N'))
+    $releaseArchive = Join-Path $temporaryRoot 'release.zip'
+    $outerRoot = Join-Path $temporaryRoot 'outer'
+    $payloadRoot = Join-Path $temporaryRoot 'payload'
+    $backupPath = "$RepositoryPath.previous-$PID"
+    $repositoryMoved = $false
+
+    New-Item -ItemType Directory -Path $outerRoot, $payloadRoot -Force | Out-Null
+    try {
+        Write-Step ("Downloading approved public release {0}..." -f $Release.Version)
+        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+        $null = Invoke-WebRequest -Uri $Release.DownloadUrl -OutFile $releaseArchive -UseBasicParsing
+        if (-not (Test-Path -LiteralPath $releaseArchive -PathType Leaf) -or (Get-Item -LiteralPath $releaseArchive).Length -eq 0) {
+            throw 'The public release download is empty.'
+        }
+
+        $actualHash = (Get-FileHash -LiteralPath $releaseArchive -Algorithm SHA256).Hash.ToUpperInvariant()
+        if (-not $actualHash.Equals($Release.Sha256, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Release checksum verification failed. Expected $($Release.Sha256), received $actualHash."
+        }
+        Write-Step 'Release checksum verification passed.'
+
+        Expand-Archive -LiteralPath $releaseArchive -DestinationPath $outerRoot -Force
+        $payloadArchive = Get-ChildItem -LiteralPath $outerRoot -Filter 'Autodesk-MCP-Payload.zip' -File -Recurse | Select-Object -First 1
+        if (-not $payloadArchive) {
+            throw 'The public release does not contain Autodesk-MCP-Payload.zip.'
+        }
+        Expand-Archive -LiteralPath $payloadArchive.FullName -DestinationPath $payloadRoot -Force
+        $downloadedRoot = Get-ChildItem -LiteralPath $payloadRoot -Directory -Recurse |
+            Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName '.agents\skills') -PathType Container } |
+            Select-Object -First 1
+        if (-not $downloadedRoot) {
+            throw 'The public release payload does not contain the approved skill library.'
+        }
+        $payloadVersion = (Get-Content -LiteralPath (Join-Path $downloadedRoot.FullName 'VERSION') -Raw).Trim()
+        if (-not $payloadVersion.Equals($Release.Version, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Release version verification failed. Manifest says $($Release.Version), payload says $payloadVersion."
+        }
+
+        $parent = Split-Path -Parent ([IO.Path]::GetFullPath($RepositoryPath))
+        New-Item -ItemType Directory -Path $parent -Force | Out-Null
+        if (Test-Path -LiteralPath $backupPath) {
+            Remove-Item -LiteralPath $backupPath -Recurse -Force
+        }
+        if (Test-Path -LiteralPath $RepositoryPath) {
+            Move-Item -LiteralPath $RepositoryPath -Destination $backupPath
+            $repositoryMoved = $true
+        }
+
+        try {
+            Move-Item -LiteralPath $downloadedRoot.FullName -Destination $RepositoryPath
+            foreach ($name in @('skill-review', 'team-candidates', 'backups')) {
+                $saved = Join-Path $backupPath $name
+                $destination = Join-Path $RepositoryPath $name
+                if ($repositoryMoved -and (Test-Path -LiteralPath $saved) -and -not (Test-Path -LiteralPath $destination)) {
+                    Move-Item -LiteralPath $saved -Destination $destination
+                }
+            }
+            [ordered]@{
+                release_manifest = $ReleaseManifestUrl
+                version = $Release.Version
+                sha256 = $Release.Sha256
+                downloaded_utc = [DateTime]::UtcNow.ToString('o')
+                method = 'public-release'
+            } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $RepositoryPath '.bim-cad-source.json') -Encoding UTF8
+        }
+        catch {
+            if (Test-Path -LiteralPath $RepositoryPath) {
+                Remove-Item -LiteralPath $RepositoryPath -Recurse -Force
+            }
+            if ($repositoryMoved -and (Test-Path -LiteralPath $backupPath)) {
+                Move-Item -LiteralPath $backupPath -Destination $RepositoryPath
+            }
+            throw
+        }
+
+        if ($repositoryMoved -and (Test-Path -LiteralPath $backupPath)) {
+            Remove-Item -LiteralPath $backupPath -Recurse -Force
+        }
+        Set-InstalledRelease -Version $Release.Version -Sha256 $Release.Sha256
+        (Resolve-Path -LiteralPath $RepositoryPath).Path
+    }
+    finally {
+        if (Test-Path -LiteralPath $temporaryRoot) {
+            Remove-Item -LiteralPath $temporaryRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 function Get-Repository {
     # A downloaded package already contains everything needed for installation.
     # Copy it to a permanent location without requiring private GitHub access.
@@ -409,6 +648,7 @@ function Get-Repository {
                 }
             }
         }
+        Set-InstalledRelease -Version ((Get-Content -LiteralPath (Join-Path $destination 'VERSION') -Raw).Trim())
         return $destination
     }
     $manifest = Join-Path $RepositoryPath '.agents\skills'
@@ -419,30 +659,13 @@ function Get-Repository {
         return (Resolve-Path -LiteralPath $RepositoryPath).Path
     }
 
-    $git = Get-OptionalCommand 'git'
-    if ($git) {
-        if (Test-GitRepository -Git $git -Path $RepositoryPath) {
-            Sync-ApprovedGitRepository -Git $git
-        }
-        else {
-            if (Test-Path -LiteralPath (Join-Path $RepositoryPath '.git') -PathType Container) {
-                Write-Step 'The installed Git metadata is incomplete. Rebuilding the local copy safely...'
-            }
-            Install-RepositoryClone -Git $git
-        }
+    if ($Action -eq 'Install' -and (Test-Path -LiteralPath $manifest -PathType Container)) {
+        Set-InstalledRelease -Version (Get-InstalledVersion)
+        return (Resolve-Path -LiteralPath $RepositoryPath).Path
     }
-    else {
-        if ($Action -eq 'Install') {
-            throw @'
-This is an incomplete Autodesk MCP Connector package. The private GitHub repository cannot be downloaded anonymously.
 
-Download and fully extract Autodesk-MCP-Connector-<version>.zip, keep its four files together, then run Start-Autodesk-MCP-Connector.cmd and select Install / Repair.
-
-Alternatively, install Git and sign in to the private repository through Git Credential Manager.
-'@
-        }
-        throw 'Updates from the private GitHub repository require Git. Install Git, sign in through Git Credential Manager, then retry Update.'
-    }
+    $release = Get-PublicReleaseManifest
+    return (Install-PublicRelease -Release $release)
 
     if (-not (Test-Path -LiteralPath $manifest -PathType Container)) {
         throw "The downloaded repository does not contain .agents\skills."
@@ -919,11 +1142,16 @@ try {
         $submitter = Join-Path $root 'scripts\submit-team-knowledge.ps1'
         if (-not (Test-Path -LiteralPath $submitter -PathType Leaf)) { throw "Team submitter is missing: $submitter" }
         $git = Get-OptionalCommand 'git'
+        if (-not $git -and $InstallGitIfMissing) {
+            $git = Install-GitForWindows
+        }
         if ($git) {
             Write-Step 'Git is installed.'
-            $access = Invoke-External $git @('ls-remote',$RepositoryUrl,'HEAD') -AllowFailure
-            if ($access.ExitCode -eq 0) { Write-Step 'Git authentication can access the private repository.' }
-            else { Write-Step 'Git cannot access the private repository. Sign in through Git Credential Manager and retry.' }
+            try {
+                $git = Get-PrivateRepositoryGit
+                Write-Step 'Git authentication can access the private repository.'
+            }
+            catch { Write-Step $_.Exception.Message }
         }
         else { Write-Step 'Git is required for automatic team collection.' }
         Write-Step 'In Codex, ask: Use cad-team-knowledge-approval to enable my daily team knowledge collection.'
@@ -967,8 +1195,11 @@ try {
                 Write-Step 'Revit 2024 was not detected, so its add-in was skipped.'
             }
             Register-DetectedAiClients $root
-            Set-InstalledCommit (Get-RemoteMainCommit)
-            Write-Step 'Skills and Autodesk MCP Connector are up to date. Restart Codex, Claude, and any running Revit session.'
+            Set-InstalledRelease -Version ((Get-Content -LiteralPath (Join-Path $root 'VERSION') -Raw).Trim()) `
+                -Sha256 $(if ((Test-Path -LiteralPath (Join-Path $root '.bim-cad-source.json'))) {
+                    [string]((Get-Content -LiteralPath (Join-Path $root '.bim-cad-source.json') -Raw | ConvertFrom-Json).sha256)
+                } else { '' })
+            Write-Step 'Skills and Autodesk MCP Connector are up to date from the verified public release channel. Restart Codex, Claude, and any running Revit session.'
         }
     }
 }

@@ -1,5 +1,6 @@
 param(
     [string]$RepositoryUrl = 'https://github.com/EhabHassan007/Autodesk-MCP.git',
+    [string]$ReleaseManifestUrl = 'https://github.com/EhabHassan007/Autodesk-MCP-Releases/releases/latest/download/latest.json',
     [string]$RepositoryPath = (Join-Path $env:LOCALAPPDATA 'BIM-CAD-MCP'),
     [ValidateSet('Status', 'CheckUpdate')]
     [string]$InitialAction = 'Status',
@@ -76,7 +77,7 @@ $updateButton.Text = 'Update'
 $updateButton.Location = New-Object System.Drawing.Point(510, 123)
 $updateButton.Size = New-Object System.Drawing.Size(130, 34)
 $form.Controls.Add($updateButton)
-$toolTip.SetToolTip($updateButton, 'Download and install the latest approved version from the private repository.')
+$toolTip.SetToolTip($updateButton, 'Download and install the latest approved public release. Git and GitHub sign-in are not required.')
 
 $testButton = New-Object System.Windows.Forms.Button
 $testButton.Text = 'Test connection'
@@ -104,7 +105,7 @@ $alertsButton.Text = 'Enable auto-updates'
 $alertsButton.Location = New-Object System.Drawing.Point(300, 220)
 $alertsButton.Size = New-Object System.Drawing.Size(200, 34)
 $form.Controls.Add($alertsButton)
-$toolTip.SetToolTip($alertsButton, 'Install approved connector and skill updates automatically at sign-in and daily at 9:00 AM, then show a confirmation.')
+$toolTip.SetToolTip($alertsButton, 'Check the public release channel at sign-in and daily at 9:00 AM. Git and GitHub sign-in are not required.')
 
 $statusLabel = New-Object System.Windows.Forms.Label
 $statusLabel.Text = 'Status'
@@ -130,14 +131,51 @@ $form.Controls.Add($closeButton)
 function Invoke-SetupAction {
     param([string]$Action)
 
+    $installGit = $false
+    if ($Action -eq 'TeamStatus') {
+        $git = Get-Command git -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $git) {
+            $gitCandidates = @(
+                (Join-Path $env:ProgramFiles 'Git\cmd\git.exe'),
+                (Join-Path $env:ProgramFiles 'Git\cmd\git.cmd'),
+                (Join-Path $env:LOCALAPPDATA 'Programs\Git\cmd\git.exe'),
+                (Join-Path $env:LOCALAPPDATA 'Programs\Git\cmd\git.cmd')
+            )
+            if (${env:ProgramFiles(x86)}) {
+                $gitCandidates += @(
+                    (Join-Path ${env:ProgramFiles(x86)} 'Git\cmd\git.exe'),
+                    (Join-Path ${env:ProgramFiles(x86)} 'Git\cmd\git.cmd')
+                )
+            }
+            $git = $gitCandidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+        }
+        if (-not $git) {
+            $answer = [System.Windows.Forms.MessageBox]::Show(
+                "Optional team knowledge submission requires Git for Windows.`r`n`r`nInstall Git now? Windows may ask for permission. GitHub will then open a secure one-time sign-in. The Autodesk MCP Connector does not store your password or token.",
+                'Autodesk MCP Connector',
+                [System.Windows.Forms.MessageBoxButtons]::YesNo,
+                [System.Windows.Forms.MessageBoxIcon]::Question
+            )
+            if ($answer -ne [System.Windows.Forms.DialogResult]::Yes) {
+                $status.Text = 'Git installation was cancelled. Install Git for Windows, then retry.'
+                return
+            }
+            $installGit = $true
+        }
+    }
+
     $status.Text = "Working...`r`n"
     $form.UseWaitCursor = $true
     foreach ($button in @($installButton, $updateButton, $testButton, $teamButton, $alertsButton)) { $button.Enabled = $false }
     [System.Windows.Forms.Application]::DoEvents()
 
     try {
-        $output = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $coreScript `
-            -Action $Action -RepositoryUrl $RepositoryUrl -RepositoryPath $RepositoryPath 2>&1
+        $arguments = @(
+            '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $coreScript,
+            '-Action', $Action, '-RepositoryUrl', $RepositoryUrl, '-ReleaseManifestUrl', $ReleaseManifestUrl, '-RepositoryPath', $RepositoryPath
+        )
+        if ($installGit) { $arguments += '-InstallGitIfMissing' }
+        $output = & powershell.exe @arguments 2>&1
         $exitCode = $LASTEXITCODE
         $status.Text = (($output | ForEach-Object { $_.ToString() }) -join "`r`n")
         if ($exitCode -eq 0) {

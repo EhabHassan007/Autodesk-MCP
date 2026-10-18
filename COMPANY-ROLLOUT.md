@@ -35,10 +35,11 @@ The automatic local and GitHub checks catch common leaks. They do not understand
 ## Package and distribute
 
 1. Pilot with two or three trusted users and disposable Revit/AutoCAD files.
-2. Build releases from an approved commit, record SHA-256 hashes, and code-sign the installer and Revit DLL with the company certificate before broad deployment.
-3. Publish approved release packages through the company software channel, such as Intune or an access-controlled SharePoint library. Do not ask staff to run arbitrary files from intake branches.
-4. Keep a rollback package and the previous content-addressed Revit DLL available for each release.
-5. Restart Revit and Codex after connector or MCP schema updates, then verify `list_sessions`, `document_info`, and one harmless read.
+2. Keep source and team intake in the private repository. Use a separate public repository containing only approved release ZIPs and `latest.json`; never publish private branches, pull requests, or team candidates there.
+3. Build releases from an approved commit, verify the generated SHA-256 manifest, and code-sign the installer and Revit DLL with the company certificate before broad deployment.
+4. Publish the ZIP and `latest.json` as assets of the same public GitHub Release. Staff installation and updates then require only HTTPS, without Git or GitHub accounts. Do not ask staff to run arbitrary files from intake branches.
+5. Keep a rollback package and the previous content-addressed Revit DLL available for each release.
+6. Restart Revit and Codex after connector or MCP schema updates, then verify `list_sessions`, `document_info`, and one harmless read.
 
 ## Full-control policy
 
@@ -56,8 +57,8 @@ Use narrow tools for recurring operations. Promote a repeatedly proven workflow 
 
 For each team member:
 
-1. Install the approved BIM-CAD MCP release and authenticate Git through Git Credential Manager to the private repository.
-2. Run **Team collection check** in Autodesk MCP Connector.
+1. Install the approved Autodesk MCP Connector release. Ordinary connector use and updates need no GitHub account.
+2. Only team members participating in skill submission install Git, receive minimum private-repository access, and run **Team knowledge setup (optional)**.
 3. In Codex ask: `Use cad-team-knowledge-approval to enable my daily team knowledge collection.`
 4. Confirm the automation is scheduled in the correct local timezone.
 5. Confirm a harmless test candidate produces a pull request requesting the repository owner's review and does not merge automatically.

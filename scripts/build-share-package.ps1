@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [string]$OutputDirectory,
-    [string]$Version
+    [string]$Version,
+    [string]$PublicReleaseRepository = 'EhabHassan007/Autodesk-MCP-Releases'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -21,6 +22,7 @@ $payloadRoot = Join-Path $temporaryRoot 'payload\Autodesk-MCP-Payload'
 $shareRoot = Join-Path $temporaryRoot ("share\Autodesk-MCP-Connector-{0}" -f $Version)
 $payloadArchive = Join-Path $shareRoot 'Autodesk-MCP-Payload.zip'
 $outputArchive = Join-Path $OutputDirectory ("Autodesk-MCP-Connector-{0}.zip" -f $Version)
+$manifestPath = Join-Path $OutputDirectory 'latest.json'
 
 function Copy-RequiredItem {
     param([string]$RelativePath)
@@ -124,8 +126,17 @@ Autodesk-MCP-Payload.zip is the internal runtime package. Keep it beside the two
     }
     Compress-Archive -LiteralPath $shareRoot -DestinationPath $outputArchive -CompressionLevel Optimal
     $hash = (Get-FileHash -LiteralPath $outputArchive -Algorithm SHA256).Hash
+    $assetName = Split-Path -Leaf $outputArchive
+    [ordered]@{
+        schema_version = 1
+        version = $Version
+        download_url = "https://github.com/$PublicReleaseRepository/releases/download/v$Version/$assetName"
+        sha256 = $hash
+        published_at = [DateTime]::UtcNow.ToString('o')
+    } | ConvertTo-Json | Set-Content -LiteralPath $manifestPath -Encoding UTF8
     Write-Output ([pscustomobject]@{
         Path = $outputArchive
+        ManifestPath = $manifestPath
         Version = $Version
         VisibleFiles = 4
         Sha256 = $hash

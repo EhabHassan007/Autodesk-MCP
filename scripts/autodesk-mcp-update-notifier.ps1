@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$RepositoryUrl = 'https://github.com/EhabHassan007/Autodesk-MCP.git',
+    [string]$ReleaseManifestUrl = 'https://github.com/EhabHassan007/Autodesk-MCP-Releases/releases/latest/download/latest.json',
     [string]$RepositoryPath = (Join-Path $env:LOCALAPPDATA 'BIM-CAD-MCP'),
     [switch]$TestNotification
 )
@@ -100,18 +101,11 @@ try {
         Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
     }
     else { $null }
-    $git = Get-Command git -ErrorAction SilentlyContinue | Select-Object -First 1
-    $remoteCommit = ''
-    if ($git) {
-        $remoteLine = @(& $git.Source ls-remote $RepositoryUrl 'refs/heads/main' 2>$null) | Select-Object -First 1
-        if ($LASTEXITCODE -eq 0 -and $remoteLine -match '^([0-9a-fA-F]{40})\s+') { $remoteCommit = $Matches[1] }
-    }
-    $installedShort = if ($savedState -and $savedState.installed_commit) { ([string]$savedState.installed_commit).Substring(0, [Math]::Min(8, ([string]$savedState.installed_commit).Length)) } else { 'unknown' }
-    $remoteShort = if ($remoteCommit) { $remoteCommit.Substring(0, 8) } else { 'unknown' }
-    Write-AlertLog ("Installed commit: {0}; approved main: {1}." -f $installedShort, $remoteShort)
+    $installedVersion = if ($savedState -and $savedState.installed_version) { [string]$savedState.installed_version } else { 'unknown' }
+    Write-AlertLog ("Installed version: {0}; checking public release manifest." -f $installedVersion)
 
     $output = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $setup `
-        -Action CheckUpdate -RepositoryUrl $RepositoryUrl -RepositoryPath $RepositoryPath 2>&1
+        -Action CheckUpdate -RepositoryUrl $RepositoryUrl -ReleaseManifestUrl $ReleaseManifestUrl -RepositoryPath $RepositoryPath 2>&1
     if ($LASTEXITCODE -ne 0) { throw "Update check stopped with exit code $LASTEXITCODE." }
     $message = ($output | ForEach-Object { $_.ToString() }) -join "`n"
     $markers = @([regex]::Matches($message, '\[(?:UPDATE_AVAILABLE|UP_TO_DATE|UPDATE_STATUS_UNKNOWN)\]') |
@@ -124,7 +118,7 @@ try {
 
     Write-AlertLog 'An approved update is available; starting automatic installation.'
     $updateOutput = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $setup `
-        -Action Update -RepositoryUrl $RepositoryUrl -RepositoryPath $RepositoryPath 2>&1
+        -Action Update -RepositoryUrl $RepositoryUrl -ReleaseManifestUrl $ReleaseManifestUrl -RepositoryPath $RepositoryPath 2>&1
     if ($LASTEXITCODE -ne 0) {
         $details = ($updateOutput | ForEach-Object { $_.ToString() }) -join ' '
         Write-AlertLog ("Automatic update failed: {0}" -f $details.Replace("`r", ' ').Replace("`n", ' '))

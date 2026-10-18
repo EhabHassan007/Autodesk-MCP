@@ -1,4 +1,4 @@
-# Autodesk MCP Connector 1.0.0-beta.6 testing
+# Autodesk MCP Connector 1.0.0-beta.8 testing
 
 This package is a Windows test build for the unified AutoCAD and Revit connector.
 
@@ -18,7 +18,7 @@ This package is a Windows test build for the unified AutoCAD and Revit connector
 
 Initial installation uses the extracted package and does not require repository access.
 
-If the setup window shows **Version development** or reports a GitHub 404, the complete share package was not extracted. Close it, extract `Autodesk-MCP-Connector-<version>.zip` completely, keep the four visible files together, and start `Start-Autodesk-MCP-Connector.cmd`. Direct anonymous downloads cannot read the private repository.
+If the setup window shows **Version development**, the complete share package was not extracted. Close it, extract `Autodesk-MCP-Connector-<version>.zip` completely, keep the four visible files together, and start `Start-Autodesk-MCP-Connector.cmd`.
 
 ## Verify
 
@@ -31,9 +31,9 @@ If the setup window shows **Version development** or reports a GitHub 404, the c
 7. For Claude Code, confirm the shared skills appear under `~/.claude/skills` and run one relevant skill.
 8. If Codex and Claude are both installed, verify that both can read status. Do model-changing tests one at a time and confirm a concurrent write waits or returns the connector's busy message.
 
-Automatic updates and the **Update** button require access to the private approved repository. Testers without repository access can still install and test this packaged version. When automatic updates are enabled, the scheduled check installs only the approved `main` version and shows a restart confirmation after success.
+Automatic updates and the **Update** button require ordinary HTTPS access to the public release repository. They must work on a computer without Git and without a GitHub sign-in. The updater must reject a ZIP whose SHA-256 or internal `VERSION` differs from `latest.json`. When automatic updates are enabled, the scheduled check installs only the approved public release and shows a restart confirmation after success.
 
-For an update regression test, select **Install / Repair** from the shared beta package over an older installed version, then select **Update**. The managed installation must refresh from the approved `main` branch without reporting that local changes would be overwritten. Local `skill-review`, `team-candidates`, and `backups` folders must remain present.
+For an update regression test, install an older package, create harmless marker files under local `skill-review`, `team-candidates`, and `backups`, publish the newer test release, then select **Update**. The managed runtime must change to the manifest version and all three local folders must remain present.
 
 ## Report
 
