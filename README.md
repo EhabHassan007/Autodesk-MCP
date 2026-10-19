@@ -1,6 +1,6 @@
 # Autodesk MCP Connector
 
-Current test package version: **1.0.0-beta.9**. See [TESTING.md](TESTING.md) before sharing the package with testers.
+Current test package version: **1.0.0-beta.10**. See [TESTING.md](TESTING.md) before sharing the package with testers.
 
 The shareable ZIP is intentionally compact. After extraction its root shows `INSTALL Autodesk MCP Connector.cmd`, `Autodesk MCP Skills for Claude.zip`, `README-FIRST.txt`, and a `Support` folder. Double-click the installer once; it installs the connector, skills, Revit add-in, and user-level Codex and Claude registrations automatically, writes `%LOCALAPPDATA%\AutodeskMcpConnector\setup.log`, and displays a restart message when finished. Claude Free users upload the included combined skill once through **Customize > Skills** because Claude Desktop does not import local skills into an account automatically.
 

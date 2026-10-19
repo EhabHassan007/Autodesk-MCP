@@ -43,6 +43,65 @@ function Get-Sha256Hex {
     }
 }
 
+function ConvertTo-ConnectorVersionInfo {
+    param([string]$Version)
+
+    $normalized = ([string]$Version).Trim().TrimStart([char]0xFEFF)
+    if ($normalized.StartsWith('v', [StringComparison]::OrdinalIgnoreCase)) {
+        $normalized = $normalized.Substring(1)
+    }
+    $match = [regex]::Match($normalized, '^(?<major>\d+)\.(?<minor>\d+)\.(?<patch>\d+)(?:-(?<prerelease>[A-Za-z0-9.-]+))?$')
+    if (-not $match.Success) {
+        throw "Invalid connector version: $Version"
+    }
+
+    [pscustomobject]@{
+        Normalized = $normalized
+        Major = [System.Numerics.BigInteger]::Parse($match.Groups['major'].Value)
+        Minor = [System.Numerics.BigInteger]::Parse($match.Groups['minor'].Value)
+        Patch = [System.Numerics.BigInteger]::Parse($match.Groups['patch'].Value)
+        PreRelease = $match.Groups['prerelease'].Value
+    }
+}
+
+function Compare-ConnectorVersion {
+    param(
+        [string]$Left,
+        [string]$Right
+    )
+
+    $leftVersion = ConvertTo-ConnectorVersionInfo $Left
+    $rightVersion = ConvertTo-ConnectorVersionInfo $Right
+    foreach ($property in @('Major', 'Minor', 'Patch')) {
+        $comparison = $leftVersion.$property.CompareTo($rightVersion.$property)
+        if ($comparison -ne 0) { return [Math]::Sign($comparison) }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($leftVersion.PreRelease) -and [string]::IsNullOrWhiteSpace($rightVersion.PreRelease)) { return 0 }
+    if ([string]::IsNullOrWhiteSpace($leftVersion.PreRelease)) { return 1 }
+    if ([string]::IsNullOrWhiteSpace($rightVersion.PreRelease)) { return -1 }
+
+    $leftParts = @($leftVersion.PreRelease.Split('.'))
+    $rightParts = @($rightVersion.PreRelease.Split('.'))
+    $count = [Math]::Max($leftParts.Count, $rightParts.Count)
+    for ($index = 0; $index -lt $count; $index++) {
+        if ($index -ge $leftParts.Count) { return -1 }
+        if ($index -ge $rightParts.Count) { return 1 }
+        $leftPart = $leftParts[$index]
+        $rightPart = $rightParts[$index]
+        $leftNumeric = $leftPart -cmatch '^\d+$'
+        $rightNumeric = $rightPart -cmatch '^\d+$'
+        if ($leftNumeric -and $rightNumeric) {
+            $comparison = ([System.Numerics.BigInteger]::Parse($leftPart)).CompareTo([System.Numerics.BigInteger]::Parse($rightPart))
+        }
+        elseif ($leftNumeric) { $comparison = -1 }
+        elseif ($rightNumeric) { $comparison = 1 }
+        else { $comparison = [StringComparer]::Ordinal.Compare($leftPart, $rightPart) }
+        if ($comparison -ne 0) { return [Math]::Sign($comparison) }
+    }
+    0
+}
+
 function Get-RequiredCommand {
     param([string]$Name)
 
@@ -245,18 +304,20 @@ function Get-PublicReleaseManifest {
     try {
         [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
         $response = Invoke-WebRequest -Uri $manifestUri.AbsoluteUri -UseBasicParsing
-        $manifest = $response.Content | ConvertFrom-Json
+        $content = if ($response.Content -is [byte[]]) {
+            [Text.Encoding]::UTF8.GetString([byte[]]$response.Content)
+        }
+        else { [string]$response.Content }
+        $manifest = $content.TrimStart([char]0xFEFF) | ConvertFrom-Json
     }
     catch {
         throw "Could not read the public release channel. $($_.Exception.Message)"
     }
 
-    $version = [string]$manifest.version
-    $downloadUrl = [string]$manifest.download_url
-    $sha256 = ([string]$manifest.sha256).ToUpperInvariant()
-    if ($version -cnotmatch '^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$') {
-        throw 'The public release manifest contains an invalid version.'
-    }
+    try { $version = (ConvertTo-ConnectorVersionInfo ([string]$manifest.version)).Normalized }
+    catch { throw 'The public release manifest contains an invalid version.' }
+    $downloadUrl = ([string]$manifest.download_url).Trim()
+    $sha256 = ([string]$manifest.sha256).Trim().ToUpperInvariant()
     if ($sha256 -cnotmatch '^[0-9A-F]{64}$') {
         throw 'The public release manifest contains an invalid SHA-256 checksum.'
     }
@@ -310,8 +371,13 @@ function Test-ApprovedUpdate {
         Write-Output ("[{0}] [UPDATE_STATUS_UNKNOWN] Press Install / Repair to complete this installation." -f (Get-Date -Format 'HH:mm:ss'))
         return
     }
-    if (-not $release.Version.Equals($installedVersion, [StringComparison]::OrdinalIgnoreCase)) {
+    $comparison = Compare-ConnectorVersion -Left $release.Version -Right $installedVersion
+    if ($comparison -gt 0) {
         Write-Output ("[{0}] [UPDATE_AVAILABLE] Version {1} is available. Press Update to install it." -f (Get-Date -Format 'HH:mm:ss'), $release.Version)
+        return
+    }
+    if ($comparison -lt 0) {
+        Write-Output ("[{0}] [UP_TO_DATE] Installed version {1} is newer than public version {2}; no downgrade will be performed." -f (Get-Date -Format 'HH:mm:ss'), $installedVersion, $release.Version)
         return
     }
     Write-Output ("[{0}] [UP_TO_DATE] Autodesk MCP Connector {1} and approved skills are up to date." -f (Get-Date -Format 'HH:mm:ss'), $installedVersion)
@@ -679,6 +745,21 @@ function Get-Repository {
     }
 
     $release = Get-PublicReleaseManifest
+    if ($Action -eq 'Update') {
+        $installedVersion = Get-InstalledVersion
+        if (-not [string]::IsNullOrWhiteSpace($installedVersion)) {
+            $comparison = Compare-ConnectorVersion -Left $release.Version -Right $installedVersion
+            if ($comparison -le 0) {
+                if ($comparison -lt 0) {
+                    Write-Step ("Installed version {0} is newer than public version {1}; the update was skipped to prevent a downgrade." -f $installedVersion, $release.Version)
+                }
+                else {
+                    Write-Step ("Autodesk MCP Connector {0} is already up to date." -f $installedVersion)
+                }
+                return (Resolve-Path -LiteralPath $RepositoryPath).Path
+            }
+        }
+    }
     return (Install-PublicRelease -Release $release)
 
     if (-not (Test-Path -LiteralPath $manifest -PathType Container)) {
