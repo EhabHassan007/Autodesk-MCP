@@ -2,7 +2,9 @@
 
 Current test package version: **1.0.0-beta.8**. See [TESTING.md](TESTING.md) before sharing the package with testers.
 
-The shareable ZIP is intentionally compact. After extraction its root shows only `INSTALL Autodesk MCP Connector.cmd`, `README-FIRST.txt`, and a `Support` folder. Double-click the installer once; it installs the connector, skills, Revit add-in, and user-level Codex and Claude registrations automatically, writes `%LOCALAPPDATA%\AutodeskMcpConnector\setup.log`, and displays a restart message when finished.
+The shareable ZIP is intentionally compact. After extraction its root shows `INSTALL Autodesk MCP Connector.cmd`, `Autodesk MCP Skills for Claude.zip`, `README-FIRST.txt`, and a `Support` folder. Double-click the installer once; it installs the connector, skills, Revit add-in, and user-level Codex and Claude registrations automatically, writes `%LOCALAPPDATA%\AutodeskMcpConnector\setup.log`, and displays a restart message when finished. Claude Free users upload the included combined skill once through **Customize > Skills** because Claude Desktop does not import local skills into an account automatically.
+
+Every pull request and approved push to `main` builds the shareable ZIP in GitHub Actions. A signed-in repository collaborator can open **Actions → Build Autodesk MCP Connector package**, select a successful run, and download the package from **Artifacts**. Artifacts are retained for 90 days.
 
 Do not copy or run the repository's `installer` folder by itself on another computer. Initial installation is self-contained. Manual and automatic updates use a separate public release channel over HTTPS, verify the ZIP with SHA-256, and require neither Git nor GitHub sign-in.
 

@@ -71,6 +71,9 @@ try {
     }
 
     Compress-Archive -LiteralPath $payloadRoot -DestinationPath $payloadArchive -CompressionLevel Optimal
+    $claudeSkillArchive = Join-Path $shareRoot 'Autodesk MCP Skills for Claude.zip'
+    $claudeSkillBuilder = Join-Path $repositoryRoot 'scripts\build-claude-skill-package.ps1'
+    $null = & $claudeSkillBuilder -RepositoryRoot $repositoryRoot -OutputPath $claudeSkillArchive
 
     @'
 @echo off
@@ -192,6 +195,8 @@ Autodesk MCP Connector $Version
 3. Wait for the installation-completed message.
 4. Restart Revit, Codex, and Claude.
 
+Claude Free users: in Claude, open Customize > Skills, choose Upload a skill, and select Autodesk MCP Skills for Claude.zip once.
+
 The Support folder contains the internal runtime package. Keep it beside the launcher; you do not need to open it.
 "@ | Set-Content -LiteralPath (Join-Path $shareRoot 'README-FIRST.txt') -Encoding UTF8
 
@@ -212,8 +217,8 @@ The Support folder contains the internal runtime package. Keep it beside the lau
         Path = $outputArchive
         ManifestPath = $manifestPath
         Version = $Version
-        RootFiles = 2
-        TotalFiles = 4
+        RootFiles = 3
+        TotalFiles = 5
         Sha256 = $hash
     })
 }
