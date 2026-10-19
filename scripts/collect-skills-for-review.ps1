@@ -12,13 +12,25 @@ if (-not (Test-Path -LiteralPath $repositorySkills -PathType Container)) {
     throw "Repository skill library was not found: $repositorySkills"
 }
 
+function Get-Sha256Hex {
+    param([string]$Path)
+
+    $stream = [IO.File]::OpenRead($Path)
+    $algorithm = [Security.Cryptography.SHA256]::Create()
+    try { ([BitConverter]::ToString($algorithm.ComputeHash($stream))).Replace('-', '') }
+    finally {
+        $algorithm.Dispose()
+        $stream.Dispose()
+    }
+}
+
 function Get-DirectoryHash {
     param([string]$Path)
 
     $rows = foreach ($file in Get-ChildItem -LiteralPath $Path -Recurse -File | Sort-Object FullName) {
         $relative = $file.FullName.Substring($Path.Length).TrimStart('\').Replace('\','/')
         if ($relative -match '(^|/)(__pycache__|\.git)(/|$)') { continue }
-        $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
+        $hash = Get-Sha256Hex -Path $file.FullName
         "$relative`t$hash"
     }
     $bytes = [Text.Encoding]::UTF8.GetBytes(($rows -join "`n"))
