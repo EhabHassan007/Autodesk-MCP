@@ -29,6 +29,20 @@ function Write-Step {
     Write-Host ("[{0}] {1}" -f (Get-Date -Format 'HH:mm:ss'), $Message)
 }
 
+function Get-Sha256Hex {
+    param([string]$Path)
+
+    $stream = [IO.File]::OpenRead($Path)
+    $algorithm = [Security.Cryptography.SHA256]::Create()
+    try {
+        ([BitConverter]::ToString($algorithm.ComputeHash($stream))).Replace('-', '')
+    }
+    finally {
+        $algorithm.Dispose()
+        $stream.Dispose()
+    }
+}
+
 function Get-RequiredCommand {
     param([string]$Name)
 
@@ -293,14 +307,14 @@ function Test-ApprovedUpdate {
     Write-UpdateState $state
 
     if ([string]::IsNullOrWhiteSpace($installedVersion)) {
-        Write-Step '[UPDATE_STATUS_UNKNOWN] Press Install / Repair to complete this installation.'
+        Write-Output ("[{0}] [UPDATE_STATUS_UNKNOWN] Press Install / Repair to complete this installation." -f (Get-Date -Format 'HH:mm:ss'))
         return
     }
     if (-not $release.Version.Equals($installedVersion, [StringComparison]::OrdinalIgnoreCase)) {
-        Write-Step ("[UPDATE_AVAILABLE] Version {0} is available. Press Update to install it." -f $release.Version)
+        Write-Output ("[{0}] [UPDATE_AVAILABLE] Version {1} is available. Press Update to install it." -f (Get-Date -Format 'HH:mm:ss'), $release.Version)
         return
     }
-    Write-Step ("[UP_TO_DATE] Autodesk MCP Connector {0} and approved skills are up to date." -f $installedVersion)
+    Write-Output ("[{0}] [UP_TO_DATE] Autodesk MCP Connector {1} and approved skills are up to date." -f (Get-Date -Format 'HH:mm:ss'), $installedVersion)
 }
 
 function Enable-UpdateNotifications {
@@ -553,7 +567,7 @@ function Install-PublicRelease {
             throw 'The public release download is empty.'
         }
 
-        $actualHash = (Get-FileHash -LiteralPath $releaseArchive -Algorithm SHA256).Hash.ToUpperInvariant()
+        $actualHash = (Get-Sha256Hex -Path $releaseArchive).ToUpperInvariant()
         if (-not $actualHash.Equals($Release.Sha256, [StringComparison]::OrdinalIgnoreCase)) {
             throw "Release checksum verification failed. Expected $($Release.Sha256), received $actualHash."
         }
@@ -1035,7 +1049,7 @@ function Install-RevitAddin {
 
         # Revit locks loaded add-in DLLs. A content-addressed filename lets an update
         # finish safely while Revit is open; the manifest takes effect on next start.
-        $assemblyHash = (Get-FileHash -LiteralPath $builtAssembly -Algorithm SHA256).Hash.Substring(0, 12).ToLowerInvariant()
+        $assemblyHash = (Get-Sha256Hex -Path $builtAssembly).Substring(0, 12).ToLowerInvariant()
         $assembly = Join-Path $assemblyDirectory ("BimCadMcp.Revit.{0}.dll" -f $assemblyHash)
         Copy-Item -LiteralPath $builtAssembly -Destination $assembly -Force
     }
