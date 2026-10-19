@@ -10,8 +10,24 @@ $core = Join-Path $repositoryRoot 'installer\Setup-BimCad.ps1'
 $testRoot = Join-Path $PSScriptRoot (".public-update-test-{0}" -f [Guid]::NewGuid().ToString('N'))
 $installationRoot = Join-Path $testRoot 'installed'
 $testLocalAppData = Join-Path $testRoot 'localappdata'
+$testTemporaryRoot = Join-Path $testRoot 'temp'
+$previousTemp = $env:TEMP
+$previousTmp = $env:TMP
 $expectedVersion = (Get-Content -LiteralPath (Join-Path $repositoryRoot 'VERSION') -Raw).Trim()
-$expectedHash = (Get-FileHash -LiteralPath $PackagePath -Algorithm SHA256).Hash
+
+function Get-Sha256Hex {
+    param([string]$Path)
+
+    $stream = [IO.File]::OpenRead($Path)
+    $algorithm = [Security.Cryptography.SHA256]::Create()
+    try { ([BitConverter]::ToString($algorithm.ComputeHash($stream))).Replace('-', '') }
+    finally {
+        $algorithm.Dispose()
+        $stream.Dispose()
+    }
+}
+
+$expectedHash = Get-Sha256Hex -Path $PackagePath
 
 function Assert-True {
     param([bool]$Condition, [string]$Message)
@@ -19,13 +35,15 @@ function Assert-True {
 }
 
 try {
-    New-Item -ItemType Directory -Path (Join-Path $installationRoot '.agents\skills\old'), (Join-Path $installationRoot 'skill-review'), (Join-Path $installationRoot 'team-candidates'), (Join-Path $installationRoot 'backups'), $testLocalAppData -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $installationRoot '.agents\skills\old'), (Join-Path $installationRoot 'skill-review'), (Join-Path $installationRoot 'team-candidates'), (Join-Path $installationRoot 'backups'), $testLocalAppData, $testTemporaryRoot -Force | Out-Null
     Set-Content -LiteralPath (Join-Path $installationRoot 'VERSION') -Value '1.0.0-beta.0' -Encoding ASCII
     foreach ($name in @('skill-review', 'team-candidates', 'backups')) {
         Set-Content -LiteralPath (Join-Path $installationRoot "$name\preserve.txt") -Value $name -Encoding ASCII
     }
 
     $env:LOCALAPPDATA = $testLocalAppData
+    $env:TEMP = $testTemporaryRoot
+    $env:TMP = $testTemporaryRoot
     . $core -Action Status -RepositoryPath $installationRoot -ReleaseManifestUrl 'https://example.invalid/latest.json' -LibraryOnly
     $script:MockDownloadSource = (Resolve-Path -LiteralPath $PackagePath).Path
     function global:Invoke-WebRequest {
@@ -63,6 +81,8 @@ try {
     Write-Output 'Public release update test passed: verified install, preserved local folders, and rejected a bad checksum.'
 }
 finally {
+    $env:TEMP = $previousTemp
+    $env:TMP = $previousTmp
     Remove-Item Function:\Invoke-WebRequest -ErrorAction SilentlyContinue
     if (Test-Path -LiteralPath $testRoot) {
         Remove-Item -LiteralPath $testRoot -Recurse -Force -ErrorAction SilentlyContinue

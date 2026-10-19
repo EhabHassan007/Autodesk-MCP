@@ -1,4 +1,4 @@
-# Autodesk MCP Connector 1.0.0-beta.8 testing
+# Autodesk MCP Connector 1.0.0-beta.9 testing
 
 This package is a Windows test build for the unified AutoCAD and Revit connector.
 

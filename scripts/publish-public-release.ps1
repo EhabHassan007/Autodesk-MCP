@@ -9,6 +9,19 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
+
+function Get-Sha256Hex {
+    param([string]$Path)
+
+    $stream = [IO.File]::OpenRead($Path)
+    $algorithm = [Security.Cryptography.SHA256]::Create()
+    try { ([BitConverter]::ToString($algorithm.ComputeHash($stream))).Replace('-', '') }
+    finally {
+        $algorithm.Dispose()
+        $stream.Dispose()
+    }
+}
+
 if ([string]::IsNullOrWhiteSpace($Version)) {
     $Version = (Get-Content -LiteralPath (Join-Path $repositoryRoot 'VERSION') -Raw).Trim()
 }
@@ -23,7 +36,7 @@ foreach ($path in @($PackagePath, $ManifestPath)) {
 }
 
 $manifest = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json
-$actualHash = (Get-FileHash -LiteralPath $PackagePath -Algorithm SHA256).Hash
+$actualHash = Get-Sha256Hex -Path $PackagePath
 if (-not ([string]$manifest.version).Equals($Version, [StringComparison]::OrdinalIgnoreCase)) {
     throw "Manifest version $($manifest.version) does not match $Version."
 }

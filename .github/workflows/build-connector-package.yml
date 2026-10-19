@@ -30,6 +30,12 @@ jobs:
         shell: pwsh
         run: ./src/revit/work/test-bridge.ps1
 
+      - name: Test verified public-release update
+        shell: pwsh
+        run: |
+          $archive = Get-ChildItem -LiteralPath dist -Filter 'Autodesk-MCP-Connector-*.zip' -File | Select-Object -First 1
+          ./installer/work/test-public-release-update.ps1 -PackagePath $archive.FullName
+
       - name: Verify package contents
         shell: pwsh
         run: |
