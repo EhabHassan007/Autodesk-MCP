@@ -1,4 +1,4 @@
-# Autodesk MCP Connector 1.0.0-beta.9 testing
+# Autodesk MCP Connector 1.0.0-beta.10 testing
 
 This package is a Windows test build for the unified AutoCAD and Revit connector.
 
@@ -33,7 +33,7 @@ If setup cannot find its payload, extract `Autodesk-MCP-Connector-<version>.zip`
 7. For Claude Code, confirm the shared skills appear under `~/.claude/skills` and run one relevant skill.
 8. If Codex and Claude are both installed, verify that both can read status. Do model-changing tests one at a time and confirm a concurrent write waits or returns the connector's busy message.
 
-Automatic updates and the **Update** button require ordinary HTTPS access to the public release repository. They must work on a computer without Git and without a GitHub sign-in. The updater must reject a ZIP whose SHA-256 or internal `VERSION` differs from `latest.json`. When automatic updates are enabled, the scheduled check installs only the approved public release and shows a restart confirmation after success.
+Automatic updates and the **Update** button require ordinary HTTPS access to the public release repository. They must work on Windows PowerShell when GitHub returns `latest.json` as either text or UTF-8 bytes, without Git and without a GitHub sign-in. The updater must reject a ZIP whose SHA-256 or internal `VERSION` differs from `latest.json`, and it must never replace a newer installed version with an older public release. When automatic updates are enabled, the scheduled check installs only a newer approved public release and shows a restart confirmation after success.
 
 For an update regression test, install an older package, create harmless marker files under local `skill-review`, `team-candidates`, and `backups`, publish the newer test release, then select **Update**. The managed runtime must change to the manifest version and all three local folders must remain present.
 

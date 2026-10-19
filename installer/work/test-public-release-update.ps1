@@ -1,13 +1,18 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)]
-    [string]$PackagePath
+    [string]$PackagePath,
+
+    [string]$TestBasePath
 )
 
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $core = Join-Path $repositoryRoot 'installer\Setup-BimCad.ps1'
-$testRoot = Join-Path $PSScriptRoot (".public-update-test-{0}" -f [Guid]::NewGuid().ToString('N'))
+if ([string]::IsNullOrWhiteSpace($TestBasePath)) {
+    $TestBasePath = Join-Path ([IO.Path]::GetTempPath()) 'AutodeskMcpTests'
+}
+$testRoot = Join-Path $TestBasePath ("amcp-test-{0}" -f [Guid]::NewGuid().ToString('N'))
 $installationRoot = Join-Path $testRoot 'installed'
 $testLocalAppData = Join-Path $testRoot 'localappdata'
 $testTemporaryRoot = Join-Path $testRoot 'temp'
@@ -46,11 +51,26 @@ try {
     $env:TMP = $testTemporaryRoot
     . $core -Action Status -RepositoryPath $installationRoot -ReleaseManifestUrl 'https://example.invalid/latest.json' -LibraryOnly
     $script:MockDownloadSource = (Resolve-Path -LiteralPath $PackagePath).Path
+    $script:MockManifestBytes = [Text.Encoding]::UTF8.GetPreamble() + [Text.Encoding]::UTF8.GetBytes((([ordered]@{
+        schema_version = 1
+        version = " v$expectedVersion "
+        download_url = 'https://example.invalid/release.zip'
+        sha256 = " $expectedHash "
+    } | ConvertTo-Json)))
     function global:Invoke-WebRequest {
         param([string]$Uri, [string]$OutFile, [switch]$UseBasicParsing)
+        if ([string]::IsNullOrWhiteSpace($OutFile)) {
+            return [pscustomobject]@{ StatusCode = 200; Content = [byte[]]$script:MockManifestBytes }
+        }
         Copy-Item -LiteralPath $script:MockDownloadSource -Destination $OutFile -Force
-        [pscustomobject]@{ StatusCode = 200; Content = '' }
+        [pscustomobject]@{ StatusCode = 200; Content = [byte[]]@() }
     }
+
+    $parsedManifest = Get-PublicReleaseManifest
+    Assert-True ($parsedManifest.Version -eq $expectedVersion) 'A UTF-8 byte-array manifest did not produce the expected normalized version.'
+    Assert-True ($parsedManifest.Sha256 -eq $expectedHash) 'A UTF-8 byte-array manifest did not produce the expected checksum.'
+    Assert-True ((Compare-ConnectorVersion '1.0.0-beta.10' '1.0.0-beta.9') -gt 0) 'Numeric prerelease ordering is incorrect.'
+    Assert-True ((Compare-ConnectorVersion '1.0.0' '1.0.0-beta.9') -gt 0) 'Stable-release ordering is incorrect.'
 
     $release = [pscustomobject]@{
         Version = $expectedVersion
@@ -78,7 +98,19 @@ try {
     Assert-True $rejected 'A release with a wrong SHA-256 was not rejected.'
     Assert-True ((Get-Content -LiteralPath (Join-Path $installed 'VERSION') -Raw).Trim() -eq $expectedVersion) 'Checksum rejection changed the installed runtime.'
 
-    Write-Output 'Public release update test passed: verified install, preserved local folders, and rejected a bad checksum.'
+    $script:Action = 'Update'
+    function Get-PublicReleaseManifest {
+        [pscustomobject]@{
+            Version = '1.0.0-beta.8'
+            DownloadUrl = 'https://example.invalid/release.zip'
+            Sha256 = $expectedHash
+        }
+    }
+    $resolved = Get-Repository
+    Assert-True ($resolved -eq (Resolve-Path -LiteralPath $installationRoot).Path) 'A newer installed version did not keep the current installation.'
+    Assert-True ((Get-Content -LiteralPath (Join-Path $installationRoot 'VERSION') -Raw).Trim() -eq $expectedVersion) 'The updater downgraded a newer installed version.'
+
+    Write-Output 'Public release update test passed: parsed byte-array JSON, verified install, preserved local folders, rejected a bad checksum, and prevented downgrade.'
 }
 finally {
     $env:TEMP = $previousTemp
