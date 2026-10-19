@@ -1,0 +1,85 @@
+name: Build Autodesk MCP Connector package
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build shareable connector ZIP
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path dist -Force | Out-Null
+          ./scripts/build-share-package.ps1 -OutputDirectory dist | Format-List
+
+      - name: Test AutoCAD bridge protocol
+        shell: pwsh
+        run: ./src/autocad/work/test-bridge.ps1
+
+      - name: Test Revit bridge protocol
+        shell: pwsh
+        run: ./src/revit/work/test-bridge.ps1
+
+      - name: Test verified public-release update
+        shell: pwsh
+        run: |
+          $archive = Get-ChildItem -LiteralPath dist -Filter 'Autodesk-MCP-Connector-*.zip' -File | Select-Object -First 1
+          ./installer/work/test-public-release-update.ps1 -PackagePath $archive.FullName
+
+      - name: Verify package contents
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $archive = @(Get-ChildItem -LiteralPath dist -Filter 'Autodesk-MCP-Connector-*.zip' -File)
+          if ($archive.Count -ne 1) { throw "Expected one connector package, found $($archive.Count)." }
+
+          $testRoot = Join-Path $env:RUNNER_TEMP 'autodesk-mcp-package-check'
+          if (Test-Path -LiteralPath $testRoot) { Remove-Item -LiteralPath $testRoot -Recurse -Force }
+          Expand-Archive -LiteralPath $archive[0].FullName -DestinationPath $testRoot -Force
+          $shareRoot = Get-ChildItem -LiteralPath $testRoot -Directory | Select-Object -First 1
+          $expected = @(
+            'Autodesk MCP Skills for Claude.zip',
+            'INSTALL Autodesk MCP Connector.cmd',
+            'README-FIRST.txt',
+            'Support'
+          )
+          $actual = @(Get-ChildItem -LiteralPath $shareRoot.FullName | Sort-Object Name | Select-Object -ExpandProperty Name)
+          if (Compare-Object $expected $actual) { throw 'The share-package root contents are incorrect.' }
+
+          $payloadRoot = Join-Path $testRoot 'payload'
+          Expand-Archive -LiteralPath (Join-Path $shareRoot.FullName 'Support\Autodesk-MCP-Payload.zip') -DestinationPath $payloadRoot -Force
+          $payload = Join-Path $payloadRoot 'Autodesk-MCP-Payload'
+          $expectedVersion = (Get-Content -LiteralPath VERSION -Raw).Trim()
+          $payloadVersion = (Get-Content -LiteralPath (Join-Path $payload 'VERSION') -Raw).Trim()
+          if ($payloadVersion -ne $expectedVersion) { throw "Payload version $payloadVersion does not match $expectedVersion." }
+
+          $expectedSkillCount = @(Get-ChildItem -LiteralPath '.agents\skills' -Filter SKILL.md -File -Recurse).Count
+          $skills = @(Get-ChildItem -LiteralPath (Join-Path $payload '.agents\skills') -Filter SKILL.md -File -Recurse)
+          if ($skills.Count -ne $expectedSkillCount) { throw "Payload has $($skills.Count) skills; expected $expectedSkillCount." }
+
+          $claudeRoot = Join-Path $testRoot 'claude'
+          Expand-Archive -LiteralPath (Join-Path $shareRoot.FullName 'Autodesk MCP Skills for Claude.zip') -DestinationPath $claudeRoot -Force
+          $claudeSkill = Join-Path $claudeRoot 'autodesk-mcp-bim-workflows\SKILL.md'
+          if (-not (Test-Path -LiteralPath $claudeSkill -PathType Leaf)) { throw 'The Claude aggregate skill is invalid.' }
+          $claudeReferences = @(Get-ChildItem -LiteralPath (Join-Path $claudeRoot 'autodesk-mcp-bim-workflows\references') -Filter SKILL.md -File -Recurse)
+          if ($claudeReferences.Count -ne $expectedSkillCount) { throw "Claude package has $($claudeReferences.Count) references; expected $expectedSkillCount." }
+
+          & (Join-Path $shareRoot.FullName 'Support\Install-Autodesk-MCP-Connector.ps1') -SmokeTest
+
+      - name: Upload connector ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: Autodesk-MCP-Connector-${{ github.sha }}
+          path: dist/Autodesk-MCP-Connector-*.zip
+          if-no-files-found: error
+          retention-days: 90

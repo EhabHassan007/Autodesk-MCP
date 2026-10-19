@@ -11,6 +11,18 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+function Get-Sha256Hex {
+    param([string]$Path)
+
+    $stream = [IO.File]::OpenRead($Path)
+    $algorithm = [Security.Cryptography.SHA256]::Create()
+    try { ([BitConverter]::ToString($algorithm.ComputeHash($stream))).Replace('-', '') }
+    finally {
+        $algorithm.Dispose()
+        $stream.Dispose()
+    }
+}
+
 function Get-RequiredCommand {
     param([string]$Name)
     $command = Get-Command $Name -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -33,7 +45,7 @@ function Get-DirectoryHash {
     param([string]$Path)
     $rows = foreach ($file in Get-ChildItem -LiteralPath $Path -Recurse -File | Sort-Object FullName) {
         $relative = $file.FullName.Substring($Path.Length).TrimStart('\').Replace('\','/')
-        $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
+        $hash = Get-Sha256Hex -Path $file.FullName
         "$relative`t$hash"
     }
     $algorithm = [Security.Cryptography.SHA256]::Create()

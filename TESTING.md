@@ -1,24 +1,26 @@
-# Autodesk MCP Connector 1.0.0-beta.8 testing
+# Autodesk MCP Connector 1.0.0-beta.9 testing
 
 This package is a Windows test build for the unified AutoCAD and Revit connector.
 
 ## Before testing
 
 - Extract the complete ZIP before running it.
-- Confirm the extracted share folder contains exactly four visible files and keep them together.
+- Confirm the extracted share folder root contains `INSTALL Autodesk MCP Connector.cmd`, `Autodesk MCP Skills for Claude.zip`, `README-FIRST.txt`, and the `Support` folder.
 - Install and sign in to Codex, Claude Code, or Claude Desktop. Testing more than one client is recommended but not required.
 - Use Revit 2024 and/or a full Windows AutoCAD installation.
 - Use a blank or disposable drawing/model for write tests. Do not use client files.
 
 ## Install
 
-1. Double-click `Start-Autodesk-MCP-Connector.cmd`.
-2. Select **Install / Repair**.
+1. Double-click `INSTALL Autodesk MCP Connector.cmd`.
+2. Wait for the installation-completed message. If setup fails, read `%LOCALAPPDATA%\AutodeskMcpConnector\setup.log`.
 3. Restart every installed AI client and any running Revit session.
+
+For Claude Free, open **Customize > Skills**, choose **Upload a skill**, and select `Autodesk MCP Skills for Claude.zip`. Confirm `autodesk-mcp-bim-workflows` is enabled.
 
 Initial installation uses the extracted package and does not require repository access.
 
-If the setup window shows **Version development**, the complete share package was not extracted. Close it, extract `Autodesk-MCP-Connector-<version>.zip` completely, keep the four visible files together, and start `Start-Autodesk-MCP-Connector.cmd`.
+If setup cannot find its payload, extract `Autodesk-MCP-Connector-<version>.zip` completely, keep the root items together, and start `INSTALL Autodesk MCP Connector.cmd` again.
 
 ## Verify
 
