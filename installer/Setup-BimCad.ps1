@@ -856,11 +856,24 @@ function Get-ClaudeDesktopInstallation {
         (Join-Path $env:LOCALAPPDATA 'AnthropicClaude\Claude.exe'),
         (Join-Path $env:LOCALAPPDATA 'Programs\Claude\Claude.exe'),
         (Join-Path $env:LOCALAPPDATA 'Claude\Claude.exe'),
+        (Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\Claude.exe'),
         (Join-Path $env:ProgramFiles 'Claude\Claude.exe')
     )
     foreach ($candidate in $candidatePaths) {
         if (Test-Path -LiteralPath $candidate -PathType Leaf) {
             return [pscustomobject]@{ Installed=$true; Executable=$candidate; Source='file' }
+        }
+    }
+
+    # AppX package enumeration may be blocked in restricted Windows sessions.
+    # The package data directory is sufficient evidence that Claude Desktop is
+    # installed, while its MCP config still belongs in roaming AppData.
+    $packagesRoot = Join-Path $env:LOCALAPPDATA 'Packages'
+    if (Test-Path -LiteralPath $packagesRoot -PathType Container) {
+        $packageDirectory = Get-ChildItem -LiteralPath $packagesRoot -Directory -Filter 'Claude_*' -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+        if ($packageDirectory) {
+            return [pscustomobject]@{ Installed=$true; Executable=''; Source='appx-directory' }
         }
     }
 
@@ -917,14 +930,9 @@ function Test-ClaudeDesktopInstalled {
 }
 
 function Get-ClaudeDesktopConfigPath {
-    $packagedRoot = Join-Path $env:LOCALAPPDATA 'Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude'
-    $packagedConfig = Join-Path $packagedRoot 'claude_desktop_config.json'
-    $installation = Get-ClaudeDesktopInstallation
-    if (($installation -and $installation.Source -eq 'appx') -or
-        (Test-Path -LiteralPath (Split-Path -Parent $packagedRoot) -PathType Container)) {
-        return $packagedConfig
-    }
-
+    # Claude Desktop uses the roaming AppData path for both the classic and
+    # Microsoft Store/MSIX builds. Do not redirect Store installs into the
+    # package LocalCache: Claude does not load local MCP registrations there.
     Join-Path (Join-Path $env:APPDATA 'Claude') 'claude_desktop_config.json'
 }
 
@@ -1043,7 +1051,7 @@ function Register-ClaudeDesktopMcpServer {
     $hadConfig = Test-Path -LiteralPath $configPath -PathType Leaf
     if ($hadConfig) { Copy-Item -LiteralPath $configPath -Destination $backupPath -Force }
 
-    Write-Step ("Registering the {0} local MCP server in Claude Desktop..." -f $Name)
+    Write-Step ("Registering the {0} local MCP server in Claude Desktop at {1}..." -f $Name, $configPath)
     try {
         $config = if ($hadConfig) {
             Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
@@ -1128,7 +1136,7 @@ function Register-DetectedAiClients {
         Register-ClaudeDesktopMcpServer 'autodesk' $bridge $arguments $legacyNames
         $detected++
     }
-    else { Write-Step 'Claude Desktop was not detected. Claude web and mobile cannot use this local Revit connection.' }
+    else { Write-Step 'Claude Desktop was not detected. Its local MCP registration was skipped; Claude web and mobile require the separate remote connector.' }
 
     if ($detected -eq 0) {
         Write-Step 'No supported AI client was detected. Connector files and skills were installed; run Install / Repair after installing Codex or Claude.'
@@ -1200,13 +1208,13 @@ function Test-AutodeskRegistration {
         try {
             $config = Get-Content -LiteralPath $configPath -Raw -ErrorAction Stop | ConvertFrom-Json
             if ($config.mcpServers.PSObject.Properties['autodesk']) {
-                Write-Step 'Claude Desktop has the Autodesk MCP Connector registration.'
+                Write-Step ("Claude Desktop has the Autodesk MCP Connector registration at {0}." -f $configPath)
             }
             else { Write-Step 'Autodesk MCP Connector is not registered in Claude Desktop yet.' }
         }
         catch { Write-Step 'Claude Desktop was detected, but its local MCP configuration is missing or invalid.' }
     }
-    else { Write-Step 'Claude Desktop was not detected. Claude web and mobile cannot reach a local Revit session.' }
+    else { Write-Step 'Claude Desktop was not detected. Its local MCP registration is not installed; Claude web and mobile require the separate remote connector.' }
 }
 
 function Test-RemoteClaudeSetup {

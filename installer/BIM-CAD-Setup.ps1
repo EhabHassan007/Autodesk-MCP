@@ -112,7 +112,7 @@ $remoteButton.Text = 'Claude remote'
 $remoteButton.Location = New-Object System.Drawing.Point(510, 220)
 $remoteButton.Size = New-Object System.Drawing.Size(130, 34)
 $form.Controls.Add($remoteButton)
-$toolTip.SetToolTip($remoteButton, 'Configure the authenticated HTTPS connector used by Claude Free and paid chat accounts.')
+$toolTip.SetToolTip($remoteButton, 'Configure the authenticated HTTPS connector used by Claude web and mobile. Claude Desktop uses the automatic local registration.')
 
 $statusLabel = New-Object System.Windows.Forms.Label
 $statusLabel.Text = 'Status'
