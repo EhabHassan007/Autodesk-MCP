@@ -40,9 +40,9 @@ function Assert-True {
 }
 
 try {
-    New-Item -ItemType Directory -Path (Join-Path $installationRoot '.agents\skills\old'), (Join-Path $installationRoot 'skill-review'), (Join-Path $installationRoot 'team-candidates'), (Join-Path $installationRoot 'backups'), $testLocalAppData, $testTemporaryRoot -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $installationRoot '.agents\skills\old'), (Join-Path $installationRoot 'skill-review'), (Join-Path $installationRoot 'team-candidates'), (Join-Path $installationRoot 'team-collection'), (Join-Path $installationRoot 'backups'), $testLocalAppData, $testTemporaryRoot -Force | Out-Null
     Set-Content -LiteralPath (Join-Path $installationRoot 'VERSION') -Value '1.0.0-beta.0' -Encoding ASCII
-    foreach ($name in @('skill-review', 'team-candidates', 'backups')) {
+    foreach ($name in @('skill-review', 'team-candidates', 'team-collection', 'backups')) {
         Set-Content -LiteralPath (Join-Path $installationRoot "$name\preserve.txt") -Value $name -Encoding ASCII
     }
 
@@ -80,7 +80,7 @@ try {
     $installed = Install-PublicRelease -Release $release
     Assert-True ((Get-Content -LiteralPath (Join-Path $installed 'VERSION') -Raw).Trim() -eq $expectedVersion) 'Installed VERSION does not match the release.'
     Assert-True (Test-Path -LiteralPath (Join-Path $installed '.agents\skills') -PathType Container) 'Approved skills were not installed.'
-    foreach ($name in @('skill-review', 'team-candidates', 'backups')) {
+    foreach ($name in @('skill-review', 'team-candidates', 'team-collection', 'backups')) {
         Assert-True (Test-Path -LiteralPath (Join-Path $installed "$name\preserve.txt") -PathType Leaf) "$name was not preserved."
     }
     $state = Get-Content -LiteralPath (Join-Path $testLocalAppData 'AutodeskMcpConnector\update-state.json') -Raw | ConvertFrom-Json

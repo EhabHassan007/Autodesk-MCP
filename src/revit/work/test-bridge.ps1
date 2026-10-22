@@ -4,12 +4,16 @@ $inputLines = @(
     '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26"}}',
     '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
 ) -join "`n"
-$output = $inputLines | & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $bridge
+$output = $inputLines | & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $bridge 3>$null
 if ($LASTEXITCODE -ne 0) { throw 'Revit MCP bridge process failed.' }
-$responses = @($output | ForEach-Object { $_ | ConvertFrom-Json })
+$responses = @($output |
+    Where-Object { ([string]$_).TrimStart().StartsWith('{') } |
+    ForEach-Object { $_ | ConvertFrom-Json })
 if ($responses.Count -ne 2) { throw 'Expected two MCP responses.' }
-if ($responses[0].result.protocolVersion -ne '2025-03-26') { throw 'Protocol negotiation failed.' }
-$names = @($responses[1].result.tools | Select-Object -ExpandProperty name)
+$initialized = $responses | Where-Object id -eq 1 | Select-Object -First 1
+$listed = $responses | Where-Object id -eq 2 | Select-Object -First 1
+if ($initialized.result.protocolVersion -ne '2025-03-26') { throw 'Protocol negotiation failed.' }
+$names = @($listed.result.tools | Select-Object -ExpandProperty name)
 foreach ($required in @('list_sessions','connection_status','document_info','list_levels','list_selected','get_element','set_parameter','execute_csharp')) {
     if ($required -notin $names) { throw "Missing tool: $required" }
 }

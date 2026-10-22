@@ -242,10 +242,16 @@ namespace BimCadMcp.Revit
             bool recent = snapshot.LastClientUtc != DateTime.MinValue && now - snapshot.LastClientUtc <= TimeSpan.FromMinutes(2);
             UIDocument uiDocument = commandData.Application.ActiveUIDocument;
             string documentName = uiDocument == null ? "No project open" : uiDocument.Document.Title;
+            string remoteConfig = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "AutodeskMcpConnector", "remote", "remote-config.json");
+            string remoteSetup = File.Exists(remoteConfig)
+                ? "Configured (verify gateway status in Autodesk MCP Setup)"
+                : "Not configured";
 
             TaskDialog dialog = new TaskDialog("Autodesk MCP Connector");
             dialog.MainInstruction = snapshot.ServerRunning
-                ? (recent ? "Connected to AI client" : "MCP server is ready")
+                ? (recent ? "An AI client recently connected" : "Local MCP server is ready")
                 : "MCP server is stopped";
             dialog.MainContent =
                 "Status: " + (snapshot.ServerRunning ? "Running" : "Stopped") + "\n" +
@@ -253,10 +259,13 @@ namespace BimCadMcp.Revit
                 "Session: " + snapshot.SessionId + "\n" +
                 "Document: " + documentName + "\n" +
                 "Pipe: " + snapshot.PipeName + "\n" +
+                "Transport: Local named pipe (not reachable from Claude web)\n" +
+                "Claude web gateway: " + remoteSetup + "\n" +
                 "Requests served: " + snapshot.RequestCount.ToString(CultureInfo.InvariantCulture) + "\n" +
                 "Last operation: " + EmptyAsDash(snapshot.LastOperation) + "\n" +
                 "Last client connection: " + FormatUtc(snapshot.LastClientUtc) + "\n" +
-                "Last error: " + EmptyAsDash(snapshot.LastError);
+                "Last error: " + EmptyAsDash(snapshot.LastError) + "\n\n" +
+                "For Claude web or mobile, configure and enable the remote connector named Autodesk MCP Connector.";
             dialog.CommonButtons = TaskDialogCommonButtons.Close;
             dialog.Show();
             return Result.Succeeded;
