@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('Status', 'Install', 'Update', 'Test', 'Collect', 'TeamStatus', 'CheckUpdate', 'EnableNotifications', 'DisableNotifications')]
+    [ValidateSet('Status', 'Install', 'Update', 'Test', 'Collect', 'TeamStatus', 'RemoteStatus', 'CheckUpdate', 'EnableNotifications', 'DisableNotifications')]
     [string]$Action = 'Status',
 
     [ValidateSet('All', 'AutoCAD', 'Revit')]
@@ -16,7 +16,9 @@ param(
 
     [switch]$LibraryOnly,
 
-    [switch]$InstallGitIfMissing
+    [switch]$InstallGitIfMissing,
+
+    [switch]$InstallClaudeDesktopIfMissing
 )
 
 $ErrorActionPreference = 'Stop'
@@ -491,9 +493,12 @@ function Install-RepositoryArchive {
 
         try {
             Move-Item -LiteralPath $downloadedRoot.FullName -Destination $RepositoryPath
-            $reviewBackup = Join-Path $backupPath 'skill-review'
-            if ($repositoryMoved -and (Test-Path -LiteralPath $reviewBackup -PathType Container)) {
-                Move-Item -LiteralPath $reviewBackup -Destination (Join-Path $RepositoryPath 'skill-review')
+            foreach ($name in @('skill-review', 'team-candidates', 'team-collection', 'backups')) {
+                $saved = Join-Path $backupPath $name
+                $destination = Join-Path $RepositoryPath $name
+                if ($repositoryMoved -and (Test-Path -LiteralPath $saved) -and -not (Test-Path -LiteralPath $destination)) {
+                    Move-Item -LiteralPath $saved -Destination $destination
+                }
             }
             [ordered]@{
                 repository = $RepositoryUrl
@@ -583,7 +588,7 @@ function Install-RepositoryClone {
         }
         try {
             Move-Item -LiteralPath $downloadedRoot -Destination $RepositoryPath
-            foreach ($name in @('skill-review', 'team-candidates', 'backups')) {
+            foreach ($name in @('skill-review', 'team-candidates', 'team-collection', 'backups')) {
                 $saved = Join-Path $backupPath $name
                 $destination = Join-Path $RepositoryPath $name
                 if ($repositoryMoved -and (Test-Path -LiteralPath $saved) -and -not (Test-Path -LiteralPath $destination)) {
@@ -668,7 +673,7 @@ function Install-PublicRelease {
 
         try {
             Move-Item -LiteralPath $downloadedRoot.FullName -Destination $RepositoryPath
-            foreach ($name in @('skill-review', 'team-candidates', 'backups')) {
+            foreach ($name in @('skill-review', 'team-candidates', 'team-collection', 'backups')) {
                 $saved = Join-Path $backupPath $name
                 $destination = Join-Path $RepositoryPath $name
                 if ($repositoryMoved -and (Test-Path -LiteralPath $saved) -and -not (Test-Path -LiteralPath $destination)) {
@@ -721,7 +726,7 @@ function Get-Repository {
             }
             Write-Step 'Installing the downloaded package to a permanent local folder...'
             New-Item -ItemType Directory -Path $destination -Force | Out-Null
-            foreach ($entry in @('installer','scripts','src','.agents','README.md','SKILL-SUBMISSIONS.md','VERSION','TESTING.md')) {
+            foreach ($entry in @('installer','scripts','src','.agents','README.md','REMOTE-CLAUDE.md','SKILL-SUBMISSIONS.md','VERSION','TESTING.md')) {
                 $item = Join-Path $source $entry
                 if (Test-Path -LiteralPath $item) {
                     Copy-Item -LiteralPath $item -Destination $destination -Recurse -Force
@@ -846,9 +851,18 @@ function Register-McpServer {
     }
 }
 
-function Test-ClaudeDesktopInstalled {
-    $claudeDirectory = Join-Path $env:APPDATA 'Claude'
-    if (Test-Path -LiteralPath $claudeDirectory -PathType Container) { return $true }
+function Get-ClaudeDesktopInstallation {
+    $candidatePaths = @(
+        (Join-Path $env:LOCALAPPDATA 'AnthropicClaude\Claude.exe'),
+        (Join-Path $env:LOCALAPPDATA 'Programs\Claude\Claude.exe'),
+        (Join-Path $env:LOCALAPPDATA 'Claude\Claude.exe'),
+        (Join-Path $env:ProgramFiles 'Claude\Claude.exe')
+    )
+    foreach ($candidate in $candidatePaths) {
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            return [pscustomobject]@{ Installed=$true; Executable=$candidate; Source='file' }
+        }
+    }
 
     $uninstallRoots = @(
         'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall',
@@ -861,9 +875,87 @@ function Test-ClaudeDesktopInstalled {
             ForEach-Object { Get-ItemProperty -LiteralPath $_.PSPath -ErrorAction SilentlyContinue } |
             Where-Object { [string]$_.DisplayName -match '^Claude(?: Desktop)?$' } |
             Select-Object -First 1
-        if ($match) { return $true }
+        if ($match) {
+            $executable = ''
+            $displayIcon = ([string]$match.DisplayIcon).Trim().Trim('"') -replace ',\d+$', ''
+            if ($displayIcon -and (Test-Path -LiteralPath $displayIcon -PathType Leaf)) {
+                $executable = $displayIcon
+            }
+            elseif ($match.InstallLocation) {
+                $installedCandidate = Join-Path ([string]$match.InstallLocation) 'Claude.exe'
+                if (Test-Path -LiteralPath $installedCandidate -PathType Leaf) {
+                    $executable = $installedCandidate
+                }
+            }
+            return [pscustomobject]@{ Installed=$true; Executable=$executable; Source='uninstall-registry' }
+        }
     }
-    $false
+
+    try {
+        $package = @(Get-AppxPackage -ErrorAction Stop | Where-Object {
+            $_.Name -eq 'Claude' -or $_.PackageFamilyName -like 'Claude_*'
+        }) | Select-Object -First 1
+        if ($package) {
+            $executable = ''
+            foreach ($relativePath in @('Claude.exe', 'app\Claude.exe')) {
+                $candidate = Join-Path ([string]$package.InstallLocation) $relativePath
+                if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+                    $executable = $candidate
+                    break
+                }
+            }
+            return [pscustomobject]@{ Installed=$true; Executable=$executable; Source='appx' }
+        }
+    }
+    catch { }
+
+    $null
+}
+
+function Test-ClaudeDesktopInstalled {
+    $null -ne (Get-ClaudeDesktopInstallation)
+}
+
+function Get-ClaudeDesktopConfigPath {
+    $packagedRoot = Join-Path $env:LOCALAPPDATA 'Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude'
+    $packagedConfig = Join-Path $packagedRoot 'claude_desktop_config.json'
+    $installation = Get-ClaudeDesktopInstallation
+    if (($installation -and $installation.Source -eq 'appx') -or
+        (Test-Path -LiteralPath (Split-Path -Parent $packagedRoot) -PathType Container)) {
+        return $packagedConfig
+    }
+
+    Join-Path (Join-Path $env:APPDATA 'Claude') 'claude_desktop_config.json'
+}
+
+function Install-ClaudeDesktop {
+    $installed = Get-ClaudeDesktopInstallation
+    if ($installed) { return $installed }
+
+    $winget = Get-OptionalCommand 'winget'
+    if (-not $winget) {
+        throw 'Claude Desktop is required for a local Revit connection, but Windows Package Manager was not found. Install Claude Desktop from https://claude.com/download, then run Install / Repair again.'
+    }
+
+    Write-Step 'Claude Desktop is not installed. Installing the official Anthropic package for the current Windows user...'
+    $result = Invoke-External $winget @(
+        'install', '--id', 'Anthropic.Claude', '--exact', '--source', 'winget', '--silent',
+        '--accept-package-agreements', '--accept-source-agreements'
+    ) -AllowFailure
+    if ($result.ExitCode -ne 0) {
+        $details = ($result.Output | ForEach-Object { $_.ToString() }) -join "`r`n"
+        throw "Claude Desktop installation failed.`r`n$details"
+    }
+
+    for ($attempt = 0; $attempt -lt 20; $attempt++) {
+        $installed = Get-ClaudeDesktopInstallation
+        if ($installed) {
+            Write-Step 'Claude Desktop is installed. The local Autodesk MCP registration will now be added.'
+            return $installed
+        }
+        Start-Sleep -Seconds 1
+    }
+    throw 'Windows reported that Claude Desktop installed, but the application could not be detected. Run Install / Repair again after Windows finishes registering the app.'
 }
 
 function Register-ClaudeCodeMcpServer {
@@ -931,7 +1023,8 @@ function Register-ClaudeDesktopMcpServer {
     param(
         [string]$Name,
         [string]$Bridge,
-        [string[]]$BridgeArguments = @()
+        [string[]]$BridgeArguments = @(),
+        [string[]]$LegacyNames = @()
     )
 
     if (-not (Test-ClaudeDesktopInstalled)) {
@@ -942,8 +1035,8 @@ function Register-ClaudeDesktopMcpServer {
         throw "MCP bridge is missing: $Bridge"
     }
 
-    $claudeDirectory = Join-Path $env:APPDATA 'Claude'
-    $configPath = Join-Path $claudeDirectory 'claude_desktop_config.json'
+    $configPath = Get-ClaudeDesktopConfigPath
+    $claudeDirectory = Split-Path -Parent $configPath
     $backupPath = "$configPath.autodesk-mcp-$PID.bak"
     $temporaryPath = "$configPath.autodesk-mcp-$PID.tmp"
     New-Item -ItemType Directory -Path $claudeDirectory -Force | Out-Null
@@ -962,6 +1055,13 @@ function Register-ClaudeDesktopMcpServer {
         }
         elseif ($null -eq $config.mcpServers) {
             $config.mcpServers = [pscustomobject]@{}
+        }
+
+        foreach ($legacyName in $LegacyNames) {
+            if ($config.mcpServers.PSObject.Properties[$legacyName]) {
+                $config.mcpServers.PSObject.Properties.Remove($legacyName)
+                Write-Step ("Removed legacy Claude Desktop MCP registration: {0}." -f $legacyName)
+            }
         }
 
         $entry = [pscustomobject][ordered]@{
@@ -1008,6 +1108,10 @@ function Register-DetectedAiClients {
     $legacyNames = @('autocad','revit')
     $detected = 0
 
+    if ($InstallClaudeDesktopIfMissing -and -not (Test-ClaudeDesktopInstalled)) {
+        $null = Install-ClaudeDesktop
+    }
+
     if (Get-OptionalCommand 'codex') {
         Register-McpServer 'autodesk' $bridge $arguments $legacyNames
         $detected++
@@ -1021,10 +1125,10 @@ function Register-DetectedAiClients {
     else { Write-Step 'Claude Code was not detected, so its MCP registration was skipped.' }
 
     if (Test-ClaudeDesktopInstalled) {
-        Register-ClaudeDesktopMcpServer 'autodesk' $bridge $arguments
+        Register-ClaudeDesktopMcpServer 'autodesk' $bridge $arguments $legacyNames
         $detected++
     }
-    else { Write-Step 'Claude Desktop was not detected, so its local MCP registration was skipped.' }
+    else { Write-Step 'Claude Desktop was not detected. Claude web and mobile cannot use this local Revit connection.' }
 
     if ($detected -eq 0) {
         Write-Step 'No supported AI client was detected. Connector files and skills were installed; run Install / Repair after installing Codex or Claude.'
@@ -1092,7 +1196,7 @@ function Test-AutodeskRegistration {
     else { Write-Step 'Claude Code command was not detected.' }
 
     if (Test-ClaudeDesktopInstalled) {
-        $configPath = Join-Path (Join-Path $env:APPDATA 'Claude') 'claude_desktop_config.json'
+        $configPath = Get-ClaudeDesktopConfigPath
         try {
             $config = Get-Content -LiteralPath $configPath -Raw -ErrorAction Stop | ConvertFrom-Json
             if ($config.mcpServers.PSObject.Properties['autodesk']) {
@@ -1102,7 +1206,31 @@ function Test-AutodeskRegistration {
         }
         catch { Write-Step 'Claude Desktop was detected, but its local MCP configuration is missing or invalid.' }
     }
-    else { Write-Step 'Claude Desktop was not detected.' }
+    else { Write-Step 'Claude Desktop was not detected. Claude web and mobile cannot reach a local Revit session.' }
+}
+
+function Test-RemoteClaudeSetup {
+    param([string]$Root)
+
+    $statusScript = Join-Path $Root 'src\autodesk\Get-AutodeskMcpRemoteConnection.ps1'
+    if (-not (Test-Path -LiteralPath $statusScript -PathType Leaf)) {
+        Write-Step 'Remote Claude gateway component is not installed.'
+        return
+    }
+    try {
+        $remote = & $statusScript 2>$null | Select-Object -Last 1
+        if ($null -eq $remote) {
+            Write-Step 'Remote Claude gateway is not configured on this workstation.'
+            return
+        }
+        if ($remote.GatewayRunning -and $remote.TunnelRunning) {
+            Write-Step ("Remote Claude gateway is running at {0}." -f $remote.PublicUrl)
+        }
+        else {
+            Write-Step ("Remote Claude gateway is configured at {0}, but one or more background processes are stopped." -f $remote.PublicUrl)
+        }
+    }
+    catch { Write-Step 'Remote Claude gateway is not configured on this workstation.' }
 }
 
 function Test-Revit2024Installed {
@@ -1254,16 +1382,28 @@ try {
         exit 0
     }
 
+    if ($Action -eq 'RemoteStatus') {
+        $installedManifest = Join-Path $RepositoryPath 'src\autodesk\Get-AutodeskMcpRemoteConnection.ps1'
+        $root = if (Test-Path -LiteralPath $installedManifest -PathType Leaf) {
+            (Resolve-Path -LiteralPath $RepositoryPath).Path
+        }
+        else { Get-Repository }
+        Test-RemoteClaudeSetup $root
+        exit 0
+    }
+
     switch ($Action) {
         'Status' {
             if ($Product -in @('All','AutoCAD')) { Test-AutoCadSetup }
             if ($Product -in @('All','Revit')) { Test-RevitSetup }
             Test-AutodeskRegistration
+            Test-RemoteClaudeSetup $(if (Test-Path -LiteralPath $RepositoryPath) { $RepositoryPath } else { (Split-Path -Parent $PSScriptRoot) })
         }
         'Test' {
             if ($Product -in @('All','AutoCAD')) { Test-AutoCadSetup }
             if ($Product -in @('All','Revit')) { Test-RevitSetup }
             Test-AutodeskRegistration
+            Test-RemoteClaudeSetup $(if (Test-Path -LiteralPath $RepositoryPath) { $RepositoryPath } else { (Split-Path -Parent $PSScriptRoot) })
         }
         'Install' {
             $root = Get-Repository

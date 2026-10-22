@@ -107,6 +107,13 @@ $alertsButton.Size = New-Object System.Drawing.Size(200, 34)
 $form.Controls.Add($alertsButton)
 $toolTip.SetToolTip($alertsButton, 'Check the public release channel at sign-in and daily at 9:00 AM. Git and GitHub sign-in are not required.')
 
+$remoteButton = New-Object System.Windows.Forms.Button
+$remoteButton.Text = 'Claude remote'
+$remoteButton.Location = New-Object System.Drawing.Point(510, 220)
+$remoteButton.Size = New-Object System.Drawing.Size(130, 34)
+$form.Controls.Add($remoteButton)
+$toolTip.SetToolTip($remoteButton, 'Configure the authenticated HTTPS connector used by Claude Free and paid chat accounts.')
+
 $statusLabel = New-Object System.Windows.Forms.Label
 $statusLabel.Text = 'Status'
 $statusLabel.AutoSize = $true
@@ -166,7 +173,7 @@ function Invoke-SetupAction {
 
     $status.Text = "Working...`r`n"
     $form.UseWaitCursor = $true
-    foreach ($button in @($installButton, $updateButton, $testButton, $teamButton, $alertsButton)) { $button.Enabled = $false }
+    foreach ($button in @($installButton, $updateButton, $testButton, $teamButton, $alertsButton, $remoteButton)) { $button.Enabled = $false }
     [System.Windows.Forms.Application]::DoEvents()
 
     try {
@@ -174,6 +181,7 @@ function Invoke-SetupAction {
             '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $coreScript,
             '-Action', $Action, '-RepositoryUrl', $RepositoryUrl, '-ReleaseManifestUrl', $ReleaseManifestUrl, '-RepositoryPath', $RepositoryPath
         )
+        if ($Action -eq 'Install') { $arguments += '-InstallClaudeDesktopIfMissing' }
         if ($installGit) { $arguments += '-InstallGitIfMissing' }
         $output = & powershell.exe @arguments 2>&1
         $exitCode = $LASTEXITCODE
@@ -190,8 +198,66 @@ function Invoke-SetupAction {
     }
     finally {
         $form.UseWaitCursor = $false
-        foreach ($button in @($installButton, $updateButton, $testButton, $teamButton, $alertsButton)) { $button.Enabled = $true }
+        foreach ($button in @($installButton, $updateButton, $testButton, $teamButton, $alertsButton, $remoteButton)) { $button.Enabled = $true }
     }
+}
+
+function Show-RemoteSetupDialog {
+    $dialog = New-Object System.Windows.Forms.Form
+    $dialog.Text = 'Claude remote connector'
+    $dialog.StartPosition = 'CenterParent'
+    $dialog.ClientSize = New-Object System.Drawing.Size(560, 220)
+    $dialog.FormBorderStyle = 'FixedDialog'
+    $dialog.MaximizeBox = $false
+    $dialog.MinimizeBox = $false
+    $dialog.Font = New-Object System.Drawing.Font('Segoe UI', 10)
+
+    $urlLabel = New-Object System.Windows.Forms.Label
+    $urlLabel.Text = 'Cloudflare public HTTPS URL'
+    $urlLabel.AutoSize = $true
+    $urlLabel.Location = New-Object System.Drawing.Point(20, 20)
+    $dialog.Controls.Add($urlLabel)
+    $url = New-Object System.Windows.Forms.TextBox
+    $url.Location = New-Object System.Drawing.Point(20, 46)
+    $url.Size = New-Object System.Drawing.Size(520, 28)
+    $dialog.Controls.Add($url)
+
+    $tokenLabel = New-Object System.Windows.Forms.Label
+    $tokenLabel.Text = 'Cloudflare Tunnel token (stored encrypted for this Windows user)'
+    $tokenLabel.AutoSize = $true
+    $tokenLabel.Location = New-Object System.Drawing.Point(20, 88)
+    $dialog.Controls.Add($tokenLabel)
+    $token = New-Object System.Windows.Forms.TextBox
+    $token.Location = New-Object System.Drawing.Point(20, 114)
+    $token.Size = New-Object System.Drawing.Size(520, 28)
+    $token.UseSystemPasswordChar = $true
+    $dialog.Controls.Add($token)
+
+    $ok = New-Object System.Windows.Forms.Button
+    $ok.Text = 'Configure'
+    $ok.Location = New-Object System.Drawing.Point(330, 166)
+    $ok.Size = New-Object System.Drawing.Size(100, 32)
+    $ok.DialogResult = [System.Windows.Forms.DialogResult]::OK
+    $dialog.Controls.Add($ok)
+    $cancel = New-Object System.Windows.Forms.Button
+    $cancel.Text = 'Cancel'
+    $cancel.Location = New-Object System.Drawing.Point(440, 166)
+    $cancel.Size = New-Object System.Drawing.Size(100, 32)
+    $cancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+    $dialog.Controls.Add($cancel)
+    $dialog.AcceptButton = $ok
+    $dialog.CancelButton = $cancel
+
+    if ($dialog.ShowDialog($form) -ne [System.Windows.Forms.DialogResult]::OK) { return $null }
+    if ($url.Text -notmatch '^https://') { throw 'Enter the HTTPS hostname assigned to this workstation.' }
+    if ([string]::IsNullOrWhiteSpace($token.Text)) { throw 'Enter the Cloudflare Tunnel token assigned to this workstation.' }
+    $secure = New-Object System.Security.SecureString
+    foreach ($character in $token.Text.ToCharArray()) { $secure.AppendChar($character) }
+    $secure.MakeReadOnly()
+    $result = [pscustomobject]@{PublicUrl=$url.Text.Trim();TunnelToken=$secure}
+    $token.Clear()
+    $dialog.Dispose()
+    $result
 }
 
 function Test-UpdateAlertsEnabled {
@@ -217,6 +283,24 @@ $installButton.Add_Click({ Invoke-SetupAction 'Install' })
 $updateButton.Add_Click({ Invoke-SetupAction 'Update' })
 $testButton.Add_Click({ Invoke-SetupAction 'Test' })
 $teamButton.Add_Click({ Invoke-SetupAction 'TeamStatus' })
+$remoteButton.Add_Click({
+    try {
+        $selection = Show-RemoteSetupDialog
+        if ($null -eq $selection) { return }
+        $initializer = Join-Path $RepositoryPath 'src\autodesk\Initialize-AutodeskMcpRemote.ps1'
+        if (-not (Test-Path -LiteralPath $initializer -PathType Leaf)) {
+            throw 'Run Install / Repair before configuring Claude remote access.'
+        }
+        $status.Text = 'Configuring the authenticated Claude remote connector...'
+        $form.UseWaitCursor = $true
+        [System.Windows.Forms.Application]::DoEvents()
+        $result = & $initializer -PublicUrl $selection.PublicUrl -CloudflareTunnelToken $selection.TunnelToken -InstallCloudflaredIfMissing
+        $status.Text = (($result | Format-List | Out-String).Trim()) + "`r`n`r`nAdd this URL and Authorization header once in Claude Customize > Connectors."
+        Start-Process 'https://claude.ai/customize/connectors'
+    }
+    catch { $status.Text = $_.Exception.Message }
+    finally { $form.UseWaitCursor = $false }
+})
 $alertsButton.Add_Click({
     if (Test-UpdateAlertsEnabled) {
         Invoke-SetupAction 'DisableNotifications'

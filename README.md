@@ -1,14 +1,14 @@
 # Autodesk MCP Connector
 
-Current test package version: **1.0.0-beta.10**. See [TESTING.md](TESTING.md) before sharing the package with testers.
+Current test package version: **1.0.0-beta.12**. See [TESTING.md](TESTING.md) before sharing the package with testers.
 
-The shareable ZIP is intentionally compact. After extraction its root shows `INSTALL Autodesk MCP Connector.cmd`, `Autodesk MCP Skills for Claude.zip`, `README-FIRST.txt`, and a `Support` folder. Double-click the installer once; it installs the connector, skills, Revit add-in, and user-level Codex and Claude registrations automatically, writes `%LOCALAPPDATA%\AutodeskMcpConnector\setup.log`, and displays a restart message when finished. Claude Free users upload the included combined skill once through **Customize > Skills** because Claude Desktop does not import local skills into an account automatically.
+The shareable ZIP is intentionally compact. After extraction its root shows `INSTALL Autodesk MCP Connector.cmd`, `Autodesk MCP Skills for Claude.zip`, `README-FIRST.txt`, and a `Support` folder. Double-click the installer once; it installs the connector, skills, Revit add-in, and user-level Codex and Claude Code registrations automatically, writes `%LOCALAPPDATA%\AutodeskMcpConnector\setup.log`, and displays a restart message when finished. Claude Free and paid Chat accounts use the authenticated remote mode described in [Claude remote setup](REMOTE-CLAUDE.md). Claude Chat users upload the included combined skill once through **Customize > Skills**; Team and Enterprise owners may provision it organization-wide.
 
 Every pull request and approved push to `main` builds the shareable ZIP in GitHub Actions. A signed-in repository collaborator can open **Actions → Build Autodesk MCP Connector package**, select a successful run, and download the package from **Artifacts**. Artifacts are retained for 90 days.
 
 Do not copy or run the repository's `installer` folder by itself on another computer. Initial installation is self-contained. Manual and automatic updates use a separate public release channel over HTTPS, verify the ZIP with SHA-256, and require neither Git nor GitHub sign-in.
 
-One local Codex and Claude connector for AutoCAD and Revit, plus the private BIM-CAD reusable skill library.
+One Autodesk connector for local Codex/Claude Code and authenticated Claude Free/Paid Chat access, plus the private BIM-CAD reusable skill library.
 
 ## AutoCAD status
 
@@ -30,14 +30,14 @@ The Revit 2024 source compiles successfully against the locally installed Revit 
 
 ## Use on this or another computer
 
-1. Install Codex, Claude Code, or Claude Desktop and a supported full AutoCAD release on Windows.
+1. Install Codex and a supported full AutoCAD release on Windows. Install / Repair can install Claude Desktop automatically when it is missing.
 2. Clone this repository.
 3. Open the cloned repository as the Codex project and mark it trusted when prompted. Codex only loads project MCP configuration from trusted projects.
 4. Start AutoCAD and open a drawing.
 5. Fully restart the installed AI client after the first clone or after MCP configuration changes.
 6. Ask: `Use the AutoCAD connection to read the active drawing name and layers.`
 
-The repository-scoped configuration in `.codex/config.toml` starts the included bridge with a relative path for Codex. The setup app creates equivalent user registrations for detected Codex, Claude Code, and Claude Desktop installations. Reusable skills live under `.agents/skills`; GitHub is their shared source of truth.
+The repository-scoped configuration in `.codex/config.toml` starts the included bridge with a relative path for Codex. The setup app creates equivalent local registrations for detected Codex and Claude Code installations. Claude Chat uses the authenticated HTTPS gateway. Reusable skills live under `.agents/skills`; GitHub is their reviewed source of truth.
 
 ## Keep skills synchronized through GitHub
 
@@ -77,15 +77,17 @@ Before wider deployment, follow [Safe company rollout](COMPANY-ROLLOUT.md).
 
 ## Autodesk MCP Connector setup app
 
-Install / Repair uses the extracted package automatically and copies its runtime files to `%LOCALAPPDATA%\BIM-CAD-MCP`. It does not require a second GitHub download or manual PowerShell commands. Setup detects Codex, Claude Code, and Claude Desktop and registers every client it finds; installation works with any one client or with all of them. It also configures AutoCAD and every supported Revit installation it detects without asking the user to choose an application. AutoCAD versions are discovered dynamically; Revit 2024 is the currently supported Revit build. Restart the AI clients and Revit after installation. Update downloads `latest.json` and the approved ZIP from the public `Autodesk-MCP-Releases` repository, then verifies the declared SHA-256 before installation. Git is needed only for the optional private team knowledge submission workflow.
+Install / Repair uses the extracted package automatically and copies its runtime files to `%LOCALAPPDATA%\BIM-CAD-MCP`. It does not require a second GitHub download or manual PowerShell commands. Setup detects Codex, Claude Code, and Claude Desktop and preserves their unrelated integrations. Local MCP registration is useful for Codex, Claude Code, and compatible local Claude sessions; Claude Free/Paid Chat requires **Claude remote** setup with a stable Cloudflare hostname and per-workstation tunnel token. The remote gateway listens only on loopback, requires its own generated bearer credential, caps requests, and excludes `execute_csharp` by default. AutoCAD versions are discovered dynamically; Revit 2024 is the currently supported Revit build. Update downloads `latest.json` and the approved ZIP from the public `Autodesk-MCP-Releases` repository, verifies the SHA-256, and preserves local team-candidate folders. Git is needed only for private team knowledge submission.
 
-Double-click `INSTALL Autodesk MCP Connector.cmd` in the extracted share folder. The one-click setup installs the approved package under `%LOCALAPPDATA%\BIM-CAD-MCP`, installs every saved skill for Codex and Claude Code, installs the Revit add-in when Revit 2024 is present, removes legacy `autocad` and `revit` registrations, and registers one user-level `autodesk` MCP server named **Autodesk MCP Connector** in every detected AI client. The installed setup app still provides Install / Repair, Update, Test connection, Install folder, optional Team knowledge setup, and **Enable auto-updates**. The updater preserves local `skill-review`, `team-candidates`, and `backups` folders while replacing the managed runtime with the verified public release.
+Double-click `INSTALL Autodesk MCP Connector.cmd` in the extracted share folder. The one-click setup installs the approved package under `%LOCALAPPDATA%\BIM-CAD-MCP`, installs every saved skill for Codex and Claude Code, installs the Revit add-in when Revit 2024 is present, and registers one local `autodesk` MCP server named **Autodesk MCP Connector**. The setup app provides Install / Repair, Update, Test connection, **Claude remote**, Install folder, optional Team knowledge setup, and **Enable auto-updates**. The updater preserves local `skill-review`, `team-candidates`, `team-collection`, `remote`, and `backups` data while replacing the managed runtime with the verified public release.
 
 **Enable auto-updates** registers a per-user Windows task that checks the public release manifest at sign-in and every day at 9:00 AM. When a new approved release appears, it verifies and installs it automatically, then shows a restart confirmation. Failures show an action-required notification and are recorded in `%LOCALAPPDATA%\AutodeskMcpConnector\update-alert.log`. Private branches and unapproved skill submissions never enter this update channel.
 
 Release maintainers build both the ZIP and its manifest with `scripts\build-share-package.ps1`, then publish them to the public release-only repository with `scripts\publish-public-release.ps1`. The public repository contains distributable artifacts only; source code, private team intake, and review history remain in the private source repository. See [Public team releases](PUBLIC-RELEASES.md).
 
 The unified connector exposes both AutoCAD and Revit tools through the `autodesk` MCP registration. A cross-process lock serializes model-changing calls when Codex and Claude are open together. The AutoCAD path discovers installed ActiveX versions automatically. The Revit path targets Revit 2024 and builds a local add-in against the installed Revit 2024 API, then installs a content-addressed DLL and user manifest. This allows the updater to finish while an older DLL is loaded. Restart Revit after installation so the new add-in loads, and restart Codex or Claude after bridge-schema changes so its combined tool list refreshes.
+
+The Revit named pipe remains local to the Windows computer. Codex and Claude Code use the STDIO bridge on that PC. Claude Free and paid Chat connect through the optional authenticated HTTPS gateway and Cloudflare Tunnel; see [Claude remote setup](REMOTE-CLAUDE.md). Free accounts support one custom remote connector.
 
 ## Verify the bridge without editing a live drawing
 
@@ -108,8 +110,9 @@ After restarting Revit, open the **Autodesk MCP Connector** ribbon tab and click
 ## Current limitations
 
 - Full AutoCAD for Windows with ActiveX automation. AutoCAD 2025 is verified; other registered versions are discovered dynamically but need version-specific compatibility verification. AutoCAD LT and AutoCAD for Mac are not supported by this bridge.
-- The local STDIO bridge is available to Codex, Claude Code, and locally configured Claude Desktop running on the same Windows computer and user session as AutoCAD.
-- Local `SKILL.md` installation applies to Codex and Claude Code. Claude Desktop chat exposes the MCP tools, while its account-managed skills remain controlled through Claude's own Customize settings.
+- The local STDIO bridge is available to Codex and Claude Code running on the same Windows computer and user session as AutoCAD/Revit.
+- Claude Chat requires the remote gateway, a stable HTTPS hostname, and a one-time account connector authorization. No Windows installer can silently grant access to a Claude account.
+- Local `SKILL.md` installation applies to Codex and Claude Code. Free and paid Claude Chat users install the generated combined skill in Customize; Team/Enterprise owners can provision it organization-wide.
 - GitHub access alone does not provide remote control of an office workstation.
 - AutoCAD blocks and external references are not expanded; arbitrary AutoLISP/command execution, hatches, dimensions, plotting, and general cloning are not exposed.
 - Saving is always a separate explicit tool call because it writes all unsaved changes in the active drawing.
@@ -120,6 +123,6 @@ After restarting Revit, open the **Autodesk MCP Connector** ribbon tab and click
 - Portable installer and AutoCAD `.bundle` add-in.
 - Add narrow Revit tools for recurring verified workflows while retaining the guarded API runner for advanced cases.
 - Versioned GitHub releases and update/rollback support.
-- Authenticated remote connector for intentionally controlled workstation access.
+- OAuth support and centralized tunnel provisioning for larger managed deployments.
 
 Do not commit DWG/RVT project files, credentials, AI-client user configuration, generated logs, or client project information.
