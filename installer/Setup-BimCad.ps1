@@ -870,7 +870,7 @@ function Get-ClaudeDesktopInstallation {
     # installed, while its MCP config still belongs in roaming AppData.
     $packagesRoot = Join-Path $env:LOCALAPPDATA 'Packages'
     if (Test-Path -LiteralPath $packagesRoot -PathType Container) {
-        $packageDirectory = Get-ChildItem -LiteralPath $packagesRoot -Directory -Filter 'Claude_*' -ErrorAction SilentlyContinue |
+        $packageDirectory = Get-ChildItem -LiteralPath $packagesRoot -Directory -Filter '*Claude*' -ErrorAction SilentlyContinue |
             Select-Object -First 1
         if ($packageDirectory) {
             return [pscustomobject]@{ Installed=$true; Executable=''; Source='appx-directory' }
@@ -906,7 +906,7 @@ function Get-ClaudeDesktopInstallation {
 
     try {
         $package = @(Get-AppxPackage -ErrorAction Stop | Where-Object {
-            $_.Name -eq 'Claude' -or $_.PackageFamilyName -like 'Claude_*'
+            $_.Name -like '*Claude*' -or $_.PackageFamilyName -like '*Claude*'
         }) | Select-Object -First 1
         if ($package) {
             $executable = ''
@@ -936,6 +936,67 @@ function Get-ClaudeDesktopConfigPath {
     Join-Path (Join-Path $env:APPDATA 'Claude') 'claude_desktop_config.json'
 }
 
+function Get-ClaudeDesktopProcesses {
+    @(
+        Get-Process -Name 'Claude' -ErrorAction SilentlyContinue |
+            Where-Object {
+                $path = ''
+                try { $path = [string]$_.Path } catch { }
+                $_.MainWindowTitle -match 'Claude' -or
+                    $path -match '(?i)\\(?:AnthropicClaude|Programs\\Claude|WindowsApps\\[^\\]*Claude|Claude)\\'
+            }
+    )
+}
+
+function Restart-ClaudeDesktopIfRunning {
+    param(
+        [object[]]$Processes,
+        [object]$Installation
+    )
+
+    $running = @($Processes | Where-Object { $_ -and -not $_.HasExited })
+    if ($running.Count -eq 0) { return }
+
+    $launchPath = @(
+        $running | ForEach-Object {
+            try { if ($_.Path) { [string]$_.Path } } catch { }
+        }
+        if ($Installation -and $Installation.Executable) { [string]$Installation.Executable }
+    ) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) } | Select-Object -First 1
+
+    Write-Step 'Restarting Claude Desktop so it loads the Autodesk MCP Connector registration...'
+    foreach ($process in $running) {
+        try { $null = $process.CloseMainWindow() } catch { }
+    }
+    Start-Sleep -Seconds 2
+    foreach ($process in $running) {
+        try {
+            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction Stop }
+        }
+        catch { Write-Step ("Claude Desktop process {0} could not be stopped automatically." -f $process.Id) }
+    }
+
+    try {
+        if ($launchPath) {
+            Start-Process -FilePath $launchPath | Out-Null
+            Write-Step 'Claude Desktop restarted successfully.'
+            return
+        }
+        $startApp = Get-StartApps -ErrorAction Stop |
+            Where-Object { $_.Name -match '^Claude(?: Desktop)?$' -or $_.Name -match '^Anthropic Claude' } |
+            Select-Object -First 1
+        if ($startApp -and $startApp.AppID) {
+            Start-Process -FilePath ("shell:AppsFolder\{0}" -f $startApp.AppID) | Out-Null
+            Write-Step 'Claude Desktop restarted successfully.'
+            return
+        }
+        Write-Step 'Claude Desktop was closed to reload the connector. Open it again from the Start menu.'
+    }
+    catch {
+        Write-Step ("Claude Desktop was closed to reload the connector, but automatic relaunch failed: {0}" -f $_.Exception.Message)
+    }
+}
+
 function Install-ClaudeDesktop {
     $installed = Get-ClaudeDesktopInstallation
     if ($installed) { return $installed }
@@ -963,7 +1024,8 @@ function Install-ClaudeDesktop {
         }
         Start-Sleep -Seconds 1
     }
-    throw 'Windows reported that Claude Desktop installed, but the application could not be detected. Run Install / Repair again after Windows finishes registering the app.'
+    Write-Step 'Windows completed the Claude Desktop installation, but its executable is not enumerable yet. Continuing with the standard per-user MCP registration.'
+    [pscustomobject]@{ Installed=$true; Executable=''; Source='winget' }
 }
 
 function Register-ClaudeCodeMcpServer {
@@ -1035,10 +1097,6 @@ function Register-ClaudeDesktopMcpServer {
         [string[]]$LegacyNames = @()
     )
 
-    if (-not (Test-ClaudeDesktopInstalled)) {
-        Write-Step 'Claude Desktop was not detected, so its local MCP registration was skipped.'
-        return
-    }
     if (-not (Test-Path -LiteralPath $Bridge -PathType Leaf)) {
         throw "MCP bridge is missing: $Bridge"
     }
@@ -1113,11 +1171,14 @@ function Register-DetectedAiClients {
 
     $bridge = Join-Path $Root 'src\autodesk\autodesk-bridge.ps1'
     $arguments = @('-RevitVersion','2024')
-    $legacyNames = @('autocad','revit')
+    $legacyNames = @('autocad','revit','AutoCAD MCP','Revit Connector','revit-mcp')
     $detected = 0
 
-    if ($InstallClaudeDesktopIfMissing -and -not (Test-ClaudeDesktopInstalled)) {
-        $null = Install-ClaudeDesktop
+    $claudeDesktopProcesses = @(Get-ClaudeDesktopProcesses)
+    $claudeDesktopInstallation = Get-ClaudeDesktopInstallation
+
+    if ($InstallClaudeDesktopIfMissing -and -not $claudeDesktopInstallation) {
+        $claudeDesktopInstallation = Install-ClaudeDesktop
     }
 
     if (Get-OptionalCommand 'codex') {
@@ -1132,9 +1193,10 @@ function Register-DetectedAiClients {
     }
     else { Write-Step 'Claude Code was not detected, so its MCP registration was skipped.' }
 
-    if (Test-ClaudeDesktopInstalled) {
+    if ($claudeDesktopInstallation -or $InstallClaudeDesktopIfMissing) {
         Register-ClaudeDesktopMcpServer 'autodesk' $bridge $arguments $legacyNames
         $detected++
+        Restart-ClaudeDesktopIfRunning -Processes $claudeDesktopProcesses -Installation $claudeDesktopInstallation
     }
     else { Write-Step 'Claude Desktop was not detected. Its local MCP registration was skipped; Claude web and mobile require the separate remote connector.' }
 

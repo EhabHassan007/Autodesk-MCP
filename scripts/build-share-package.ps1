@@ -166,7 +166,7 @@ try {
         $outputText | Add-Content -LiteralPath $logPath -Encoding UTF8
         $outputText | ForEach-Object { Write-Host $_ }
         if ($exitCode -ne 0) { throw "Installation stopped with exit code $exitCode. See $logPath" }
-        Show-SetupMessage -Message 'Installation completed. Codex and supported local clients are configured. For Claude Free or paid Chat, open setup again and choose Claude remote after your team administrator assigns this PC a Cloudflare hostname and tunnel token.' `
+        Show-SetupMessage -Message 'Installation completed. Codex and Claude Desktop are configured automatically. Claude web or mobile requires the optional remote setup.' `
             -Icon ([System.Windows.Forms.MessageBoxIcon]::Information)
     }
     else {
@@ -202,7 +202,7 @@ Autodesk MCP Connector $Version
 3. Wait for the installation-completed message.
 4. Restart Revit, Codex, and Claude Desktop.
 
-Claude Free and paid Chat accounts use an authenticated remote connector. Open setup and choose Claude remote after your team administrator assigns this PC a Cloudflare hostname and tunnel token. Local MCP remains available to Codex and Claude Code on the same PC.
+Claude Desktop Free and paid accounts are configured automatically. Claude web and mobile use the optional authenticated remote connector. Open setup and choose Web/mobile only only when your team administrator has assigned this PC a Cloudflare hostname and tunnel token.
 
 In Claude, open Customize > Skills, choose Upload a skill, and select Autodesk MCP Skills for Claude.zip once. Team or Enterprise owners can provision the same skill organization-wide.
 

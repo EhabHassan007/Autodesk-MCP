@@ -1,4 +1,4 @@
-# Autodesk MCP Connector 1.0.0-beta.13 testing
+# Autodesk MCP Connector 1.0.0-beta.14 testing
 
 This package is a Windows test build for the unified AutoCAD and Revit connector.
 
@@ -48,6 +48,8 @@ If setup cannot find its payload, extract `Autodesk-MCP-Connector-<version>.zip`
 Automatic updates and the **Update** button require ordinary HTTPS access to the public release repository. They must work on Windows PowerShell when GitHub returns `latest.json` as either text or UTF-8 bytes, without Git and without a GitHub sign-in. The updater must reject a ZIP whose SHA-256 or internal `VERSION` differs from `latest.json`, and it must never replace a newer installed version with an older public release. When automatic updates are enabled, the scheduled check installs only a newer approved public release and shows a restart confirmation after success.
 
 Claude Desktop registration must be written to `%APPDATA%\Claude\claude_desktop_config.json` for both classic and Microsoft Store/MSIX installations. Setup must preserve unrelated MCP registrations, add the `autodesk` server, and report the exact configuration path. Fully quit and reopen Claude Desktop after Install / Repair; the Autodesk tools must appear under the chat `+` menu → Connectors.
+
+Install / Repair must detect Claude package identities that contain `Claude`, remove the known legacy AutoCAD/Revit MCP registrations, write the combined `autodesk` registration even when AppX enumeration is restricted, and restart a running Claude Desktop process so the connector appears without a manual tray exit.
 
 For an update regression test, install an older package, create harmless marker files under local `skill-review`, `team-candidates`, and `backups`, publish the newer test release, then select **Update**. The managed runtime must change to the manifest version and all three local folders must remain present.
 
