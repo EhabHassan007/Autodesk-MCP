@@ -108,7 +108,7 @@ $form.Controls.Add($alertsButton)
 $toolTip.SetToolTip($alertsButton, 'Check the public release channel at sign-in and daily at 9:00 AM. Git and GitHub sign-in are not required.')
 
 $remoteButton = New-Object System.Windows.Forms.Button
-$remoteButton.Text = 'Claude remote'
+$remoteButton.Text = 'Web/mobile only'
 $remoteButton.Location = New-Object System.Drawing.Point(510, 220)
 $remoteButton.Size = New-Object System.Drawing.Size(130, 34)
 $form.Controls.Add($remoteButton)
@@ -204,7 +204,7 @@ function Invoke-SetupAction {
 
 function Show-RemoteSetupDialog {
     $dialog = New-Object System.Windows.Forms.Form
-    $dialog.Text = 'Claude remote connector'
+    $dialog.Text = 'Optional: Claude web/mobile remote connector'
     $dialog.StartPosition = 'CenterParent'
     $dialog.ClientSize = New-Object System.Drawing.Size(560, 220)
     $dialog.FormBorderStyle = 'FixedDialog'
@@ -213,7 +213,7 @@ function Show-RemoteSetupDialog {
     $dialog.Font = New-Object System.Drawing.Font('Segoe UI', 10)
 
     $urlLabel = New-Object System.Windows.Forms.Label
-    $urlLabel.Text = 'Cloudflare public HTTPS URL'
+    $urlLabel.Text = 'Web/mobile only - Cloudflare public HTTPS URL'
     $urlLabel.AutoSize = $true
     $urlLabel.Location = New-Object System.Drawing.Point(20, 20)
     $dialog.Controls.Add($urlLabel)
@@ -223,7 +223,7 @@ function Show-RemoteSetupDialog {
     $dialog.Controls.Add($url)
 
     $tokenLabel = New-Object System.Windows.Forms.Label
-    $tokenLabel.Text = 'Cloudflare Tunnel token (stored encrypted for this Windows user)'
+    $tokenLabel.Text = 'Cloudflare token (not needed for Claude Desktop; stored encrypted)'
     $tokenLabel.AutoSize = $true
     $tokenLabel.Location = New-Object System.Drawing.Point(20, 88)
     $dialog.Controls.Add($tokenLabel)
