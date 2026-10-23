@@ -35,13 +35,14 @@ try {
         mcpServers = @{
             'keep-me' = @{ command = 'keep.exe'; args = @() }
             'Revit Connector' = @{ command = 'legacy.exe'; args = @() }
+            'autodesk' = @{ command = 'old-combined.exe'; args = @() }
         }
     } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $configPath -Encoding UTF8
 
     $bridge = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'src\autodesk\autodesk-bridge.ps1'
-    Register-ClaudeDesktopMcpServer -Name 'autodesk' -Bridge $bridge -BridgeArguments @('-RevitVersion','2024') -LegacyNames @('Revit Connector')
+    Register-ClaudeDesktopMcpServer -Name 'Autodesk MCP Connector' -Bridge $bridge -BridgeArguments @('-RevitVersion','2024') -LegacyNames @('Revit Connector','autodesk')
     $registered = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
-    if (-not $registered.mcpServers.PSObject.Properties['autodesk']) {
+    if (-not $registered.mcpServers.PSObject.Properties['Autodesk MCP Connector']) {
         throw 'The combined Autodesk registration was not written.'
     }
     if (-not $registered.mcpServers.PSObject.Properties['keep-me']) {
@@ -49,6 +50,9 @@ try {
     }
     if ($registered.mcpServers.PSObject.Properties['Revit Connector']) {
         throw 'The legacy Revit registration was not removed.'
+    }
+    if ($registered.mcpServers.PSObject.Properties['autodesk']) {
+        throw 'The old short Claude Desktop connector name was not removed.'
     }
     Write-Output 'Claude Desktop registration test passed without relying on AppX detection.'
 }

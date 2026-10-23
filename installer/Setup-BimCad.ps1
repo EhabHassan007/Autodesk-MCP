@@ -1172,6 +1172,7 @@ function Register-DetectedAiClients {
     $bridge = Join-Path $Root 'src\autodesk\autodesk-bridge.ps1'
     $arguments = @('-RevitVersion','2024')
     $legacyNames = @('autocad','revit','AutoCAD MCP','Revit Connector','revit-mcp')
+    $claudeDesktopLegacyNames = @($legacyNames + 'autodesk')
     $detected = 0
 
     $claudeDesktopProcesses = @(Get-ClaudeDesktopProcesses)
@@ -1194,7 +1195,7 @@ function Register-DetectedAiClients {
     else { Write-Step 'Claude Code was not detected, so its MCP registration was skipped.' }
 
     if ($claudeDesktopInstallation -or $InstallClaudeDesktopIfMissing) {
-        Register-ClaudeDesktopMcpServer 'autodesk' $bridge $arguments $legacyNames
+        Register-ClaudeDesktopMcpServer 'Autodesk MCP Connector' $bridge $arguments $claudeDesktopLegacyNames
         $detected++
         Restart-ClaudeDesktopIfRunning -Processes $claudeDesktopProcesses -Installation $claudeDesktopInstallation
     }
@@ -1269,7 +1270,7 @@ function Test-AutodeskRegistration {
         $configPath = Get-ClaudeDesktopConfigPath
         try {
             $config = Get-Content -LiteralPath $configPath -Raw -ErrorAction Stop | ConvertFrom-Json
-            if ($config.mcpServers.PSObject.Properties['autodesk']) {
+            if ($config.mcpServers.PSObject.Properties['Autodesk MCP Connector']) {
                 Write-Step ("Claude Desktop has the Autodesk MCP Connector registration at {0}." -f $configPath)
             }
             else { Write-Step 'Autodesk MCP Connector is not registered in Claude Desktop yet.' }
