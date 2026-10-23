@@ -24,13 +24,19 @@ if ($match.Value -match 'Packages\\Claude_') {
 
 Write-Output "Claude Desktop config path test passed: $actual"
 
-$temporaryRoot = Join-Path ([IO.Path]::GetTempPath()) ('AutodeskMcpClaudeConfigTest-' + [Guid]::NewGuid().ToString('N'))
+$testBase = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))
+$temporaryRoot = Join-Path $testBase ('tc-' + [Guid]::NewGuid().ToString('N'))
 $previousAppData = $env:APPDATA
+$previousLocalAppData = $env:LOCALAPPDATA
 try {
     $env:APPDATA = $temporaryRoot
+    $env:LOCALAPPDATA = Join-Path $temporaryRoot 'Local'
     . $setupPath -LibraryOnly
     $configPath = Get-ClaudeDesktopConfigPath
     New-Item -ItemType Directory -Path (Split-Path -Parent $configPath) -Force | Out-Null
+    $packageRoot = Join-Path $env:LOCALAPPDATA 'Packages\Claude_test'
+    New-Item -ItemType Directory -Path $packageRoot -Force | Out-Null
+    $packageConfigPath = Join-Path $packageRoot 'LocalCache\Roaming\Claude\claude_desktop_config.json'
     @{
         mcpServers = @{
             'keep-me' = @{ command = 'keep.exe'; args = @() }
@@ -41,6 +47,10 @@ try {
 
     $bridge = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'src\autodesk\autodesk-bridge.ps1'
     Register-ClaudeDesktopMcpServer -Name 'Autodesk MCP Connector' -Bridge $bridge -BridgeArguments @('-RevitVersion','2024') -LegacyNames @('Revit Connector','autodesk')
+    $configBytes = [IO.File]::ReadAllBytes($configPath)
+    if ($configBytes.Length -ge 3 -and $configBytes[0] -eq 0xEF -and $configBytes[1] -eq 0xBB -and $configBytes[2] -eq 0xBF) {
+        throw 'Claude Desktop config must be UTF-8 without a BOM.'
+    }
     $registered = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
     if (-not $registered.mcpServers.PSObject.Properties['Autodesk MCP Connector']) {
         throw 'The combined Autodesk registration was not written.'
@@ -54,14 +64,26 @@ try {
     if ($registered.mcpServers.PSObject.Properties['autodesk']) {
         throw 'The old short Claude Desktop connector name was not removed.'
     }
+    if (-not (Test-Path -LiteralPath $packageConfigPath -PathType Leaf)) {
+        throw 'The Microsoft Store/MSIX Claude config was not written.'
+    }
+    $packageBytes = [IO.File]::ReadAllBytes($packageConfigPath)
+    if ($packageBytes.Length -ge 3 -and $packageBytes[0] -eq 0xEF -and $packageBytes[1] -eq 0xBB -and $packageBytes[2] -eq 0xBF) {
+        throw 'The Microsoft Store/MSIX Claude config must be UTF-8 without a BOM.'
+    }
+    $packageConfig = Get-Content -LiteralPath $packageConfigPath -Raw | ConvertFrom-Json
+    if (-not $packageConfig.mcpServers.PSObject.Properties['Autodesk MCP Connector']) {
+        throw 'The combined Autodesk registration was not written to the Microsoft Store/MSIX config.'
+    }
     Write-Output 'Claude Desktop registration test passed without relying on AppX detection.'
 }
 finally {
     $env:APPDATA = $previousAppData
+    $env:LOCALAPPDATA = $previousLocalAppData
     if (Test-Path -LiteralPath $temporaryRoot) {
         $resolvedTemporary = [IO.Path]::GetFullPath($temporaryRoot)
-        $resolvedSystemTemporary = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
-        if (-not $resolvedTemporary.StartsWith($resolvedSystemTemporary, [StringComparison]::OrdinalIgnoreCase)) {
+        $resolvedTestBase = [IO.Path]::GetFullPath($testBase)
+        if (-not $resolvedTemporary.StartsWith($resolvedTestBase, [StringComparison]::OrdinalIgnoreCase)) {
             throw "Refusing to clean an unexpected test path: $resolvedTemporary"
         }
         Remove-Item -LiteralPath $resolvedTemporary -Recurse -Force

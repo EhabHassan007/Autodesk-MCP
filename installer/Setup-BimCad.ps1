@@ -930,10 +930,46 @@ function Test-ClaudeDesktopInstalled {
 }
 
 function Get-ClaudeDesktopConfigPath {
-    # Claude Desktop uses the roaming AppData path for both the classic and
-    # Microsoft Store/MSIX builds. Do not redirect Store installs into the
-    # package LocalCache: Claude does not load local MCP registrations there.
     Join-Path (Join-Path $env:APPDATA 'Claude') 'claude_desktop_config.json'
+}
+
+function Get-ClaudeDesktopConfigPaths {
+    $paths = [Collections.Generic.List[string]]::new()
+    $paths.Add((Get-ClaudeDesktopConfigPath))
+
+    # Current Microsoft Store/MSIX releases virtualize roaming AppData into
+    # the package LocalCache. Write both locations so classic and Store builds
+    # load the same connector, including after a Claude package migration.
+    $packagesRoot = Join-Path $env:LOCALAPPDATA 'Packages'
+    if (Test-Path -LiteralPath $packagesRoot -PathType Container) {
+        foreach ($packageDirectory in @(Get-ChildItem -LiteralPath $packagesRoot -Directory -Filter '*Claude*' -ErrorAction SilentlyContinue)) {
+            $packageConfig = Join-Path $packageDirectory.FullName 'LocalCache\Roaming\Claude\claude_desktop_config.json'
+            if (-not $paths.Contains($packageConfig)) { $paths.Add($packageConfig) }
+        }
+    }
+
+    @($paths)
+}
+
+function Test-ClaudeDesktopLocalMcpAllowed {
+    $policyName = 'isLocalDevMcpEnabled'
+    $machinePolicyPath = 'HKLM:\SOFTWARE\Policies\Claude'
+    $userPolicyPath = 'HKCU:\SOFTWARE\Policies\Claude'
+
+    $machinePolicy = Get-ItemPropertyValue -LiteralPath $machinePolicyPath -Name $policyName -ErrorAction SilentlyContinue
+    if ($null -ne $machinePolicy -and [int]$machinePolicy -eq 0) {
+        Write-Step 'Claude Desktop local MCP is disabled by a machine policy. The Autodesk registration was written, but an organization administrator must enable local MCP servers.'
+        return $false
+    }
+    $userPolicy = Get-ItemPropertyValue -LiteralPath $userPolicyPath -Name $policyName -ErrorAction SilentlyContinue
+    if ($null -ne $userPolicy -and [int]$userPolicy -eq 0) {
+        Write-Step 'Claude Desktop local MCP is disabled by a Windows user policy. The Autodesk registration was written, but the managed policy must be enabled.'
+        return $false
+    }
+
+    # Anthropic documents local MCP as enabled by default. Policy keys are
+    # administrator-owned, so setup verifies them but does not overwrite them.
+    return $true
 }
 
 function Get-ClaudeDesktopProcesses {
@@ -1089,30 +1125,26 @@ function Register-ClaudeCodeMcpServer {
     }
 }
 
-function Register-ClaudeDesktopMcpServer {
+function Write-ClaudeDesktopMcpServerConfig {
     param(
+        [string]$ConfigPath,
         [string]$Name,
         [string]$Bridge,
         [string[]]$BridgeArguments = @(),
         [string[]]$LegacyNames = @()
     )
 
-    if (-not (Test-Path -LiteralPath $Bridge -PathType Leaf)) {
-        throw "MCP bridge is missing: $Bridge"
-    }
-
-    $configPath = Get-ClaudeDesktopConfigPath
-    $claudeDirectory = Split-Path -Parent $configPath
-    $backupPath = "$configPath.autodesk-mcp-$PID.bak"
-    $temporaryPath = "$configPath.autodesk-mcp-$PID.tmp"
+    $claudeDirectory = Split-Path -Parent $ConfigPath
+    $backupPath = "$ConfigPath.autodesk-mcp-$PID.bak"
+    $temporaryPath = "$ConfigPath.autodesk-mcp-$PID.tmp"
     New-Item -ItemType Directory -Path $claudeDirectory -Force | Out-Null
-    $hadConfig = Test-Path -LiteralPath $configPath -PathType Leaf
-    if ($hadConfig) { Copy-Item -LiteralPath $configPath -Destination $backupPath -Force }
+    $hadConfig = Test-Path -LiteralPath $ConfigPath -PathType Leaf
+    if ($hadConfig) { Copy-Item -LiteralPath $ConfigPath -Destination $backupPath -Force }
 
-    Write-Step ("Registering the {0} local MCP server in Claude Desktop at {1}..." -f $Name, $configPath)
+    Write-Step ("Registering the {0} local MCP server in Claude Desktop at {1}..." -f $Name, $ConfigPath)
     try {
         $config = if ($hadConfig) {
-            Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+            Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
         }
         else { [pscustomobject]@{} }
 
@@ -1141,28 +1173,49 @@ function Register-ClaudeDesktopMcpServer {
             $config.mcpServers | Add-Member -MemberType NoteProperty -Name $Name -Value $entry
         }
 
-        $config | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $temporaryPath -Encoding UTF8
+        # Windows PowerShell's UTF8 encoding adds a BOM. Newer Claude Desktop
+        # builds may reject that file before parsing mcpServers.
+        $json = $config | ConvertTo-Json -Depth 30
+        [IO.File]::WriteAllText($temporaryPath, $json, (New-Object Text.UTF8Encoding($false)))
         $null = Get-Content -LiteralPath $temporaryPath -Raw | ConvertFrom-Json
         if ($hadConfig) {
-            Copy-Item -LiteralPath $temporaryPath -Destination $configPath -Force
+            Copy-Item -LiteralPath $temporaryPath -Destination $ConfigPath -Force
             Remove-Item -LiteralPath $temporaryPath -Force
         }
         else {
-            Move-Item -LiteralPath $temporaryPath -Destination $configPath
+            Move-Item -LiteralPath $temporaryPath -Destination $ConfigPath
         }
     }
     catch {
         if ($hadConfig -and (Test-Path -LiteralPath $backupPath)) {
-            Copy-Item -LiteralPath $backupPath -Destination $configPath -Force
+            Copy-Item -LiteralPath $backupPath -Destination $ConfigPath -Force
         }
-        elseif (-not $hadConfig -and (Test-Path -LiteralPath $configPath)) {
-            Remove-Item -LiteralPath $configPath -Force
+        elseif (-not $hadConfig -and (Test-Path -LiteralPath $ConfigPath)) {
+            Remove-Item -LiteralPath $ConfigPath -Force
         }
         throw "Claude Desktop registration failed. $($_.Exception.Message)"
     }
     finally {
         if (Test-Path -LiteralPath $temporaryPath) { Remove-Item -LiteralPath $temporaryPath -Force }
         if (Test-Path -LiteralPath $backupPath) { Remove-Item -LiteralPath $backupPath -Force }
+    }
+}
+
+function Register-ClaudeDesktopMcpServer {
+    param(
+        [string]$Name,
+        [string]$Bridge,
+        [string[]]$BridgeArguments = @(),
+        [string[]]$LegacyNames = @()
+    )
+
+    if (-not (Test-Path -LiteralPath $Bridge -PathType Leaf)) {
+        throw "MCP bridge is missing: $Bridge"
+    }
+
+    foreach ($configPath in @(Get-ClaudeDesktopConfigPaths)) {
+        Write-ClaudeDesktopMcpServerConfig -ConfigPath $configPath -Name $Name -Bridge $Bridge `
+            -BridgeArguments $BridgeArguments -LegacyNames $LegacyNames
     }
 }
 
@@ -1183,21 +1236,39 @@ function Register-DetectedAiClients {
     }
 
     if (Get-OptionalCommand 'codex') {
-        Register-McpServer 'autodesk' $bridge $arguments $legacyNames
-        $detected++
+        try {
+            Register-McpServer 'autodesk' $bridge $arguments $legacyNames
+            $detected++
+        }
+        catch {
+            Write-Step ("Codex registration did not finish: {0}" -f $_.Exception.Message)
+            Write-Step 'Continuing with Claude registration; run Install / Repair again later to retry Codex.'
+        }
     }
     else { Write-Step 'Codex was not detected, so its MCP registration was skipped.' }
 
     if (Get-OptionalCommand 'claude') {
-        Register-ClaudeCodeMcpServer 'autodesk' $bridge $arguments $legacyNames
-        $detected++
+        try {
+            Register-ClaudeCodeMcpServer 'autodesk' $bridge $arguments $legacyNames
+            $detected++
+        }
+        catch {
+            Write-Step ("Claude Code registration did not finish: {0}" -f $_.Exception.Message)
+            Write-Step 'Continuing with Claude Desktop registration.'
+        }
     }
     else { Write-Step 'Claude Code was not detected, so its MCP registration was skipped.' }
 
     if ($claudeDesktopInstallation -or $InstallClaudeDesktopIfMissing) {
-        Register-ClaudeDesktopMcpServer 'Autodesk MCP Connector' $bridge $arguments $claudeDesktopLegacyNames
-        $detected++
-        Restart-ClaudeDesktopIfRunning -Processes $claudeDesktopProcesses -Installation $claudeDesktopInstallation
+        try {
+            $null = Test-ClaudeDesktopLocalMcpAllowed
+            Register-ClaudeDesktopMcpServer 'Autodesk MCP Connector' $bridge $arguments $claudeDesktopLegacyNames
+            $detected++
+            Restart-ClaudeDesktopIfRunning -Processes $claudeDesktopProcesses -Installation $claudeDesktopInstallation
+        }
+        catch {
+            Write-Step ("Claude Desktop registration did not finish: {0}" -f $_.Exception.Message)
+        }
     }
     else { Write-Step 'Claude Desktop was not detected. Its local MCP registration was skipped; Claude web and mobile require the separate remote connector.' }
 
@@ -1267,15 +1338,24 @@ function Test-AutodeskRegistration {
     else { Write-Step 'Claude Code command was not detected.' }
 
     if (Test-ClaudeDesktopInstalled) {
-        $configPath = Get-ClaudeDesktopConfigPath
-        try {
-            $config = Get-Content -LiteralPath $configPath -Raw -ErrorAction Stop | ConvertFrom-Json
-            if ($config.mcpServers.PSObject.Properties['Autodesk MCP Connector']) {
-                Write-Step ("Claude Desktop has the Autodesk MCP Connector registration at {0}." -f $configPath)
+        $registered = $true
+        foreach ($configPath in @(Get-ClaudeDesktopConfigPaths)) {
+            try {
+                $config = Get-Content -LiteralPath $configPath -Raw -ErrorAction Stop | ConvertFrom-Json
+                if ($config.mcpServers.PSObject.Properties['Autodesk MCP Connector']) {
+                    Write-Step ("Claude Desktop has the Autodesk MCP Connector registration at {0}." -f $configPath)
+                }
+                else {
+                    $registered = $false
+                    Write-Step ("Autodesk MCP Connector is not registered in Claude Desktop at {0}." -f $configPath)
+                }
             }
-            else { Write-Step 'Autodesk MCP Connector is not registered in Claude Desktop yet.' }
+            catch {
+                $registered = $false
+                Write-Step ("Claude Desktop configuration is missing or invalid at {0}." -f $configPath)
+            }
         }
-        catch { Write-Step 'Claude Desktop was detected, but its local MCP configuration is missing or invalid.' }
+        if (-not $registered) { Write-Step 'Run Install / Repair to synchronize every Claude Desktop configuration location.' }
     }
     else { Write-Step 'Claude Desktop was not detected. Its local MCP registration is not installed; Claude web and mobile require the separate remote connector.' }
 }
