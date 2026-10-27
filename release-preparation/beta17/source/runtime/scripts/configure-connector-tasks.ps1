@@ -1,0 +1,50 @@
+[CmdletBinding()]
+param([string]$RepositoryRoot = (Split-Path -Parent $PSScriptRoot))
+$ErrorActionPreference='Stop'
+$engine=(Get-Process -Id $PID).Path
+function Invoke-TaskSetup {
+    param([string]$Script,[string[]]$ScriptArguments)
+    $previous=$ErrorActionPreference
+    try {
+        $ErrorActionPreference='Continue'
+        $output=& $engine -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $Script @ScriptArguments 2>&1
+        $code=$LASTEXITCODE
+    }
+    finally {$ErrorActionPreference=$previous}
+    $output | ForEach-Object {Write-Host $_}
+    if($code -ne 0){throw "Task configuration failed (exit $code). Open Settings to retry."}
+}
+# Refresh installed collection helpers even when the user has disabled scheduling.
+try {
+    $stateRoot=Join-Path $env:LOCALAPPDATA 'AutodeskMcpSkillCollection'
+    $settingsPath=Join-Path $stateRoot 'settings.json'
+    $installedScripts=Join-Path $stateRoot 'scripts'
+    New-Item -ItemType Directory -Path $installedScripts -Force|Out-Null
+    foreach($name in @('weekly-skill-collection.ps1','collect-skills-for-review.ps1','submit-team-knowledge.ps1','central-skill-sync.ps1','Initialize-SkillService.ps1')) {
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $installedScripts $name) -Force
+    }
+    $saved=if(Test-Path $settingsPath){Get-Content $settingsPath -Raw|ConvertFrom-Json}else{$null}
+    if($saved -and $saved.enabled -eq $false){Write-Host 'Weekly skills remain disabled in Settings.'}
+    else {
+        # Invoke within this process to preserve array arguments, including custom skill roots.
+        $options=@{Action='Enable';RepositoryRoot=$RepositoryRoot;StateRoot=$stateRoot}
+        if($saved){
+            $options.Day=[string]$saved.day;$options.Time=[string]$saved.time
+            $options.AdditionalSkillRoots=@($saved.additional_skill_roots)
+        }
+        & (Join-Path $PSScriptRoot 'weekly-skill-collection.ps1') @options
+        if($LASTEXITCODE -ne 0){throw 'Weekly task could not be registered.'}
+    }
+}
+catch {Write-Warning ('Weekly skills setup needs attention: '+$_.Exception.Message)}
+try {
+    $updateState=Join-Path $env:LOCALAPPDATA 'AutodeskMcpConnector\update-state.json'
+    $saved=if(Test-Path $updateState){Get-Content $updateState -Raw|ConvertFrom-Json}else{$null}
+    if($saved -and $saved.PSObject.Properties['notifications_enabled'] -and -not $saved.notifications_enabled){
+        Write-Host 'Automatic updates remain disabled in Settings.'
+    }
+    else {
+        Invoke-TaskSetup -Script (Join-Path $RepositoryRoot 'installer\Setup-BimCad.ps1') -ScriptArguments @('-Action','EnableNotifications','-RepositoryPath',$RepositoryRoot)
+    }
+}
+catch {Write-Warning ('Automatic updates need attention: '+$_.Exception.Message)}

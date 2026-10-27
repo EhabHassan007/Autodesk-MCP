@@ -1,0 +1,31 @@
+services:
+  - type: web
+    name: autodesk-skill-service
+    runtime: docker
+    rootDir: services/skill-sharing
+    plan: starter
+    numInstances: 1
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    autoDeployTrigger: "off"
+    disk:
+      name: skill-intake-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: ADMIN_TOKEN
+        generateValue: true
+      - key: DATABASE_PATH
+        value: /data/intake.sqlite3
+      - key: GITHUB_REPOSITORY
+        value: EhabHassan007/Autodesk-MCP
+      - key: GITHUB_BASE_BRANCH
+        value: main
+      - key: GITHUB_REVIEWER
+        value: EhabHassan007
+      - key: GITHUB_APP_ID
+        sync: false
+      - key: GITHUB_INSTALLATION_ID
+        sync: false
+      - key: GITHUB_PRIVATE_KEY_FILE
+        value: /etc/secrets/github-app.pem
