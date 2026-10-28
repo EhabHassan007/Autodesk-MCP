@@ -17,7 +17,7 @@
   "d1_databases": [{
     "binding": "DB",
     "database_name": "autodesk-skills",
-    "database_id": "00000000-0000-0000-0000-000000000000",
+    "database_id": "3abe835e-22d1-4441-9c0c-ef844d8a1116",
     "migrations_dir": "migrations"
   }]
 }

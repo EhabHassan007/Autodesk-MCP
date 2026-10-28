@@ -10,4 +10,4 @@ Verified on 2026-10-27: six Python service tests; PowerShell parser and client r
 
 Windows follow-up: six regression scripts and the installer UI smoke test passed under Windows PowerShell 5.1 in [run 40639965911](https://github.com/EhabHassan007/Autodesk-MCP-Releases/actions/runs/40639965911), after fixing workflow text serialization. These are isolated checks, not live Revit or DPAPI/scheduler certification.
 
-The owner created GitHub App 5506370, installation 176074887 and a Cloudflare account. Outstanding: live Cloudflare deployment and App-key validation, per-PC admin enrollment, and real Windows/Revit update tests. Paid Render deployment is no longer planned. Do not mark the public release Latest until these are complete.
+The owner created GitHub App 5506370, installation 176074887 and a Cloudflare account. The Worker and D1 schema were deployed on 2026-10-28. Outstanding: Cloudflare service secrets and live App-key validation, per-PC admin enrollment, free-plan usage validation, and real Windows/Revit update tests. Paid Render deployment is no longer planned. Do not mark the public release Latest until these are complete.

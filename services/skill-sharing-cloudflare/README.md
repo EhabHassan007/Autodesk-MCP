@@ -1,6 +1,8 @@
 # Cloudflare skills sharing (free-plan pilot)
 
-This is the Cloudflare Workers + D1 alternative to the paid Render blueprint. It preserves the beta17 connector API: admin enrollment/revocation, weekly candidate submission, and approved-library download. No connector rebuild is needed to choose this service URL during enrollment. The service is prepared for deployment; no live Cloudflare deployment or GitHub App authentication has been verified yet.
+This is the Cloudflare Workers + D1 alternative to the paid Render blueprint. It preserves the beta17 connector API: admin enrollment/revocation, weekly candidate submission, and approved-library download. No connector rebuild is needed to choose this service URL during enrollment. The Worker and D1 schema were deployed on 2026-10-28. GitHub App authentication and device enrollment remain pending secret configuration and live checks.
+
+Deployed URL: `https://autodesk-skill-service.autodesk-skills-ehabhassan007.workers.dev`. Cloudflare confirmed workers.dev enabled and version `534fc8fe-929f-461c-8ca0-3774aaa1bad0`. Database `autodesk-skills` has UUID `3abe835e-22d1-4441-9c0c-ef844d8a1116`; migration `0001_initial.sql` succeeded remotely. At deployment verification the secret-name list was empty: `GITHUB_PRIVATE_KEY` and `ADMIN_TOKEN` still need to be added directly in Cloudflare. Without them the Worker deliberately returns 503. Its public health endpoint has not yet been checked from this environment; the hostname addition is saved for environment publication. No billing-plan upgrade or connector release publication was performed.
 
 Only `.agents/skills` on the configured `main` branch is distributed. New submissions create deterministic `skill-intake/central-*` branches and **draft** pull requests. This service never merges, writes to main, or publishes a release. Human approval remains necessary. It does not collect drawings, models, transcripts, or general PC files. Candidate content and executable files are untrusted; path/size/secret filters are heuristic, not approval.
 
@@ -14,7 +16,7 @@ The approved library is limited to 100 skill names, 800 supported text files, 25
 
 ## Administrator deployment
 
-The account ID in `wrangler.jsonc` is `9005326001bbb3ef9bc748643745e71f`, from the owner's dashboard. App ID `5506370` and installation ID `176074887` are already configured. The all-zero D1 ID is deliberately a placeholder and must be replaced with the created database UUID.
+The account ID in `wrangler.jsonc` is `9005326001bbb3ef9bc748643745e71f`, from the owner's dashboard. App ID `5506370`, installation ID `176074887`, and the deployed D1 UUID are configured. Reuse this database for redeployments.
 
 1. Create an account-scoped Cloudflare API token with **Account → Workers Scripts → Edit** and **Account → D1 → Edit**, limited to this account. Keep it in the deployment environment's secure `CLOUDFLARE_API_TOKEN` binding, allowed only to `api.cloudflare.com`. Do not paste it into chat or commit it. Existing dashboard login does not authorize this chat's API calls.
 2. From this directory, use Node 24 and `npm ci`. Run `npx wrangler d1 create autodesk-skills` (or reuse the existing database of this exact name). Put its UUID into `d1_databases[0].database_id`. Never recreate/delete an existing database during redeployment.
