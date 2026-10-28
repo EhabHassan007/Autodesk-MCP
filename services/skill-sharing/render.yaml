@@ -24,7 +24,7 @@ services:
       - key: GITHUB_REVIEWER
         value: EhabHassan007
       - key: GITHUB_APP_ID
-        sync: false
+        value: "5506370"
       - key: GITHUB_INSTALLATION_ID
         sync: false
       - key: GITHUB_PRIVATE_KEY_FILE
