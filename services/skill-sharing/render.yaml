@@ -1,6 +1,7 @@
 services:
   - type: web
     name: autodesk-skill-service
+    branch: update/central-skills-beta17
     runtime: docker
     rootDir: services/skill-sharing
     plan: starter
@@ -26,6 +27,6 @@ services:
       - key: GITHUB_APP_ID
         value: "5506370"
       - key: GITHUB_INSTALLATION_ID
-        sync: false
+        value: "176074887"
       - key: GITHUB_PRIVATE_KEY_FILE
         value: /etc/secrets/github-app.pem
