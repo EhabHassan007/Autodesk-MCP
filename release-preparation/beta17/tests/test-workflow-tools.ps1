@@ -13,7 +13,7 @@ $d=$r.result.content[0].text|ConvertFrom-Json
 if($r.result.isError -or $d.skills.Count -ne 27){throw 'Skill inventory mismatch'}
 $r=Call 'read_skill_workflow' @{name='revit-read-write'}
 $d=$r.result.content[0].text|ConvertFrom-Json
-if($r.result.isError -or $d.content -notmatch 'document_info'){throw 'Cannot read workflow'}
+if($r.result.isError -or $d.content -isnot [string] -or $d.content -notmatch 'document_info'){throw 'Cannot read workflow'}
 foreach($file in @('../VERSION','/etc/passwd','C:\Windows\win.ini','references/../../VERSION')){
  $r=Call 'read_skill_workflow' @{name='revit-read-write';file=$file}
  if(-not $r.result.isError){throw "Path escape accepted: $file"}

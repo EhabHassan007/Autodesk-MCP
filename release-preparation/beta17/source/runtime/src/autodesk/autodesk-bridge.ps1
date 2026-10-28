@@ -87,7 +87,7 @@ function Read-SharedWorkflow {
     if(-not (Test-Path -LiteralPath $path -PathType Leaf)){throw 'Skill file was not found.'}
     $item=Get-Item -LiteralPath $path
     if($item.Length -gt 256KB -or $item.Extension.ToLowerInvariant() -notin @('.md','.txt','.json','.yaml','.yml','.toml','.py','.ps1','.js','.ts','.sh','.csv','.xml')){throw 'Only small skill text files can be read.'}
-    @{name=$Name;file=$File;content=(Get-Content -LiteralPath $path -Raw)}
+    @{name=$Name;file=$File;content=([IO.File]::ReadAllText($path, [Text.Encoding]::UTF8))}
 }
 
 function Invoke-WithWriteLock {

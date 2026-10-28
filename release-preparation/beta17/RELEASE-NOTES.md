@@ -14,4 +14,6 @@ Validation: service authentication/revocation, duplicate tracking, failure/retry
 
 Do not mark this build as Latest for the team until the service is deployed and a Windows pilot succeeds. Existing connector functionality remains based on the beta 16 line; service configuration is an additional admin prerequisite.
 
-SHA-256: E8BF636311BE16D2B849888B327FA2CB9BB26119AE34574B151E8F2D7B473D43
+Source: https://github.com/EhabHassan007/Autodesk-MCP/tree/update/central-skills-beta17/release-preparation/beta17
+
+SHA-256: BF9D665DE935AE8FD14FBFBC69DDE7FAD49612709412E0E85621FA9ADA935ED9
