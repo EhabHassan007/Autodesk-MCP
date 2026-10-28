@@ -15,6 +15,8 @@ This creates skill-review branches in the selected repository, not the public re
 
 ## Hosting
 
+**Selected hosting: Cloudflare Free.** The owner declined paid hosting. Use [the Workers + D1 service](../skill-sharing-cloudflare/README.md) for the current deployment. The Docker/Render instructions below are retained as an alternative; do not create the paid Render resources for this rollout.
+
 Deploy the included Dockerfile on a server/container host with a durable volume and an HTTPS reverse proxy. Use one worker and one instance for this SQLite implementation; do not run multiple replicas without adding distributed locking.
 
 Required configuration:
