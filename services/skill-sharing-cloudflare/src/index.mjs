@@ -60,9 +60,14 @@ function github(env) {
 export async function handle(request, env, backend) {
   try {
     const path = new URL(request.url).pathname;
-    const configured = !!env.DB && typeof env.ADMIN_TOKEN === 'string' && env.ADMIN_TOKEN.length >= 32
-      && typeof env.GITHUB_PRIVATE_KEY === 'string' && /^\d+$/.test(env.GITHUB_APP_ID || '') && /^\d+$/.test(env.GITHUB_INSTALLATION_ID || '');
-    if (!configured) throw new HTTPError(503,'Administrator configuration is incomplete.');
+    // Report only the failed requirement, never a secret, its length or prefix.
+    if (!env.DB) throw new HTTPError(503,'The administrator must configure the DB binding.');
+    if (typeof env.ADMIN_TOKEN !== 'string' || env.ADMIN_TOKEN.trim().length < 32)
+      throw new HTTPError(503,'The administrator must set ADMIN_TOKEN to a random secret of at least 32 characters.');
+    if (typeof env.GITHUB_PRIVATE_KEY !== 'string' || !env.GITHUB_PRIVATE_KEY.trim())
+      throw new HTTPError(503,'The administrator must configure the GITHUB_PRIVATE_KEY secret.');
+    if (!/^\d+$/.test(env.GITHUB_APP_ID || '') || !/^\d+$/.test(env.GITHUB_INSTALLATION_ID || ''))
+      throw new HTTPError(503,'The administrator must configure numeric GitHub App and installation IDs.');
     if (path === '/health' && request.method === 'GET') {
       await env.DB.prepare('SELECT id FROM devices LIMIT 1').first();
       return json({status:'ok'}); // Configuration/schema readiness, not a GitHub permission test.

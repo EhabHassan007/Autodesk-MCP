@@ -119,6 +119,23 @@ test('missing secrets fail closed and administrator status verifies library sepa
   assert.equal((await s.request('/health')).status,503);
 });
 
+test('configuration diagnostics identify the requirement without leaking a secret',async t=>{
+  const s=setup(t);
+  s.env.ADMIN_TOKEN='short-test-secret';
+  let response=await s.request('/health');
+  assert.equal(response.status,503);
+  let message=await response.text();
+  assert.ok(message.includes('ADMIN_TOKEN'));
+  assert.ok(!message.includes(s.env.ADMIN_TOKEN));
+  s.env.ADMIN_TOKEN=' '.repeat(40);
+  assert.equal((await s.request('/health')).status,503);
+  s.env.ADMIN_TOKEN=admin;
+  s.env.GITHUB_PRIVATE_KEY='';
+  response=await s.request('/health');
+  assert.equal(response.status,503);
+  assert.ok((await response.text()).includes('GITHUB_PRIVATE_KEY'));
+});
+
 test('GitHub downloaded PKCS#1 key signs a valid short-lived App JWT',async()=>{
   const {privateKey,publicKey}=generateKeyPairSync('rsa',{modulusLength:2048});
   const jwt=await appJWT({GITHUB_PRIVATE_KEY:privateKey.export({format:'pem',type:'pkcs1'}),GITHUB_APP_ID:'5506370'});
