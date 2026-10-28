@@ -1,19 +1,20 @@
-Autodesk MCP Connector 1.0.0-beta.17 — central-service pilot build
+Autodesk MCP Connector 1.0.0-beta.17 — central-service pilot
 
-This build is for an administrator pilot. The central service must be hosted and connected to a GitHub App before central sharing works. The service is not deployed. GitHub access is verified; dedicated GitHub App setup and Windows pilot validation remain outstanding.
+This is an administrator pilot. Automatic team sharing requires the dedicated GitHub App, Render deployment and per-PC enrollment; those are not configured yet.
 
-- One connector setup includes hidden weekly skill submission and approved-library synchronization.
-- Team PCs use revocable service device credentials, not personal GitHub credentials or Git author commands. IT supplies one enrollment file per PC/user with setup; the credential is encrypted for that Windows user and the plaintext setup file is removed after import.
-- The service creates draft pull requests in the configured Autodesk-MCP repository and never merges, publishes a release, or writes directly to main.
-- After owner merge, approved workflows sync to Codex and Claude Code when this does not overwrite local edits. The MCP workflow tools expose shared guidance to Claude without a separate uploaded skills ZIP. Native Claude Skills UI entries remain optional and separate.
-- Includes all 27 current approved workflow names, including Create unfolded walls and AutoCAD project title update.
-- Main interface stays simplified: Install / Repair, Update, Test connection, Settings. Manual skill submission runs in the background, with results in the local log.
-- Devices without admin enrollment show a pending-configuration message; they are not silently granted GitHub access.
+- One setup includes weekly saved-skill submission for owner review and approved-library synchronization, using revocable device credentials instead of team GitHub sign-ins.
+- Simplified Install / Repair, Update, Test connection and Settings interface.
+- 27 shared workflows, including Create unfolded walls and AutoCAD project title update.
+- Fixes a Windows PowerShell 5.1 hang when reading workflow text through MCP. Workflow content is now read as plain UTF-8, preventing file metadata from expanding during JSON serialization.
+- Existing local skill edits and disabled-update preferences are preserved.
 
-Validation: service authentication/revocation, duplicate tracking, failure/retry and request-limit tests; mocked GitHub branch/draft-PR contract; PowerShell parser checks; central preview without Git/network; task preference preservation; approved-library synchronization with local-edit preservation; MCP workflow reading and path validation. Windows DPAPI, UI and scheduler behavior, live GitHub App permissions, HTTPS hosting and end-to-end deployment still require the documented pilot.
+Validation on 2026-10-28: six regression scripts passed on a GitHub-hosted Windows runner using Windows PowerShell 5.1: parser/client registration isolation, approved-library sync, offline central preview, task preference preservation, MCP workflow reading/path validation, and a simulated beta15 upgrade with checksum rejection and downgrade protection. The installer interface smoke test also passed. Six Python service tests previously passed with a fake GitHub backend.
 
-Do not mark this build as Latest for the team until the service is deployed and a Windows pilot succeeds. Existing connector functionality remains based on the beta 16 line; service configuration is an additional admin prerequisite.
+Validation run: https://github.com/EhabHassan007/Autodesk-MCP-Releases/actions/runs/40639965911
+Source: https://github.com/EhabHassan007/Autodesk-MCP/tree/f3f6ecd/release-preparation/beta17
 
-Source: https://github.com/EhabHassan007/Autodesk-MCP/tree/update/central-skills-beta17/release-preparation/beta17
+Still outstanding: live GitHub App and HTTPS hosting, Windows device enrollment/DPAPI and real scheduled execution, and installation/update with Revit running followed by successful restart and Claude/Codex connection checks. Hosted tests do not exercise a live Revit model.
+
+Keep this release as a pilot until those checks pass. Beta15 remains the public Latest release; no team update notification has been enabled for beta17.
 
 SHA-256: BF9D665DE935AE8FD14FBFBC69DDE7FAD49612709412E0E85621FA9ADA935ED9
