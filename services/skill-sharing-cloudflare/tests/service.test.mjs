@@ -4,13 +4,20 @@ import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
 import { generateKeyPairSync, verify } from 'node:crypto';
 import { handle } from '../src/index.mjs';
-import { appJWT, GitHub } from '../src/github.mjs';
+import { appJWT, GitHub, GitHubFailure, safeGitHubDetail } from '../src/github.mjs';
 import { canonical, hash, MAX_BODY, validateSkills } from '../src/validation.mjs';
 
 const admin = 'test-only-admin-token-at-least-32-characters';
 const skill = {name:'revit-check',files:{'SKILL.md':'---\nname: revit-check\n---\nRead document information.'}};
 const body = {skills:[skill]};
 const url = 'https://github.com/owner/repo/pull/7';
+test('GitHub diagnostics expose controlled failure categories only',async()=>{
+  assert.equal(safeGitHubDetail(new Error('private-token-and-key')),'GitHub App access could not be verified.');
+  const gh=new GitHub({GITHUB_REPOSITORY:'owner/repo',GITHUB_PRIVATE_KEY:'invalid-test-key',GITHUB_APP_ID:'1',GITHUB_INSTALLATION_ID:'2'});
+  await assert.rejects(gh.request('GET','/repos/owner/repo'),e=>e instanceof GitHubFailure && !e.message.includes('invalid-test-key') && e.message.includes('signing'));
+  gh.token='test';gh.expires=Date.now()+60000;gh.fetcher=async()=>new Response('upstream-secret',{status:403});
+  await assert.rejects(gh.request('GET','/repos/owner/repo'),e=>e.message==='GitHub rejected repository access (HTTP 403).');
+});
 test('batch digest matches existing Python service canonical format',async()=>{
   assert.equal(await hash(canonical(validateSkills(body))),'31360d69c755e6a6b2a6ed4c832c9b4a038f096465cac1ad330e3a79785815fc');
   assert.equal(canonical({'𐀀':1,'\uE000':2}),'{"\uE000":2,"𐀀":1}');
@@ -144,6 +151,11 @@ test('GitHub downloaded PKCS#1 key signs a valid short-lived App JWT',async()=>{
   const payload=JSON.parse(Buffer.from(claims,'base64url'));
   assert.equal(payload.iss,'5506370');
   assert.equal(payload.exp-payload.iat,600);
+  const pem=privateKey.export({format:'pem',type:'pkcs1'});
+  for (const encoded of [pem.replaceAll('\n','\\n'),JSON.stringify(pem)]) {
+    const [h,c,s]= (await appJWT({GITHUB_PRIVATE_KEY:encoded,GITHUB_APP_ID:'5506370'})).split('.');
+    assert.ok(verify('RSA-SHA256',Buffer.from(h+'.'+c),publicKey,Buffer.from(s,'base64url')));
+  }
 });
 
 test('GitHub mutations only create intake branches and draft PRs; race reuses PR',async()=>{

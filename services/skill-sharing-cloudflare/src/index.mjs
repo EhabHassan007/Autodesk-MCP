@@ -1,5 +1,5 @@
 import { timingSafeEqual } from 'node:crypto';
-import { GitHub } from './github.mjs';
+import { GitHub, safeGitHubDetail } from './github.mjs';
 import { bytes, canonical, hash, MAX_BODY, validateSkills } from './validation.mjs';
 
 class HTTPError extends Error {
@@ -90,14 +90,14 @@ export async function handle(request, env, backend) {
       try {
         const library = await (backend || github(env)).library();
         return json({status:'ok',approved_skill_count:Object.keys(library.skills).length,commit:library.commit});
-      } catch { throw new HTTPError(502,'GitHub App access could not be verified.'); }
+      } catch (error) { throw new HTTPError(502,safeGitHubDetail(error)); }
     }
     if (path === '/v1/library' && request.method === 'GET') {
       await device(request,env.DB);
       try {
         const library = await (backend || github(env)).library();
         return json({commit:library.commit,skills:Object.entries(library.skills).map(([name,files])=>({name,files}))});
-      } catch { throw new HTTPError(502,'Approved library is temporarily unavailable.'); }
+      } catch (error) { throw new HTTPError(502,safeGitHubDetail(error)); }
     }
     if (path === '/v1/submissions' && request.method === 'POST') {
       await device(request,env.DB);

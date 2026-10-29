@@ -3,9 +3,21 @@ import { bytes, canonical, EXTENSIONS, MAX_BODY, validateSkills } from './valida
 
 function base64url(value) { return Buffer.from(value).toString('base64url'); }
 
+export class GitHubFailure extends Error {}
+export function safeGitHubDetail(error) {
+  if (error instanceof GitHubFailure) return error.message;
+  const known = new Set(['Approved blob lookup failed.','Approved library exceeds limits.','Approved repository tree is too large.','Approved blob is unavailable or binary.','Invalid or flagged skill content.']);
+  return known.has(error?.message) ? error.message : 'GitHub App access could not be verified.';
+}
+
 export async function appJWT(env) {
   // GitHub downloads PKCS#1 PEM; WebCrypto accepts PKCS#8. Never log either.
-  const der = createPrivateKey(env.GITHUB_PRIVATE_KEY).export({type:'pkcs8', format:'der'});
+  let pem = env.GITHUB_PRIVATE_KEY.trim().replace(/^\uFEFF/, '');
+  // Accept a pasted JSON string or literal escaped line breaks from secret UIs.
+  if (pem.startsWith('"') && pem.endsWith('"')) pem = JSON.parse(pem);
+  if (typeof pem !== 'string') throw new Error('Invalid PEM encoding.');
+  pem = pem.replace(/\\r\\n|\\n/g, '\n');
+  const der = createPrivateKey(pem).export({type:'pkcs8', format:'der'});
   const key = await crypto.subtle.importKey('pkcs8', der, {name:'RSASSA-PKCS1-v1_5', hash:'SHA-256'}, false, ['sign']);
   const now = Math.floor(Date.now() / 1000);
   const unsigned = base64url(JSON.stringify({alg:'RS256',typ:'JWT'})) + '.' + base64url(JSON.stringify({iat:now-60,exp:now+540,iss:env.GITHUB_APP_ID}));
@@ -34,7 +46,11 @@ export class GitHub {
       }).finally(() => { this.refreshing = null; });
       await this.refreshing;
     }
-    const token = app ? await appJWT(this.env) : this.token;
+    let token = this.token;
+    if (app) {
+      try { token = await appJWT(this.env); }
+      catch { throw new GitHubFailure('The GitHub App private key could not be loaded or used for signing.'); }
+    }
     const response = await this.fetcher('https://api.github.com'+path, {
       method, redirect:'manual', signal:AbortSignal.timeout(25000),
       headers:{Authorization:`Bearer ${token}`,Accept:'application/vnd.github+json','Content-Type':'application/json','X-GitHub-Api-Version':'2022-11-28','User-Agent':'Autodesk-Skill-Intake'},
@@ -43,7 +59,7 @@ export class GitHub {
     if (!allowed.includes(response.status)) {
       if (response.status === 401 && !app) this.expires = 0;
       await response.body?.cancel();
-      throw new Error(`GitHub HTTP ${response.status}.`);
+      throw new GitHubFailure(`GitHub rejected ${app ? 'installation authentication' : 'repository access'} (HTTP ${response.status}).`);
     }
     if (response.status === 404) { await response.body?.cancel(); return null; }
     return response.status === 204 ? null : response.json();
