@@ -6,7 +6,7 @@ import { generateKeyPairSync, verify } from 'node:crypto';
 import { handle } from '../src/index.mjs';
 import { appJWT, GitHub, GitHubFailure, safeGitHubDetail } from '../src/github.mjs';
 import { canonical, hash, MAX_BODY, validateSkills } from '../src/validation.mjs';
-import { DASHBOARD_HTML, DASHBOARD_JS } from '../src/dashboard.mjs';
+import { DASHBOARD_CSS, DASHBOARD_HTML, DASHBOARD_JS } from '../src/dashboard.mjs';
 
 const admin = 'test-only-admin-token-at-least-32-characters';
 const join = 'test-only-team-join-code-at-least-32-characters';
@@ -332,5 +332,6 @@ test('dashboard page is static, locked down and renders data only as text',async
   }
   assert.ok(!/innerHTML|outerHTML|insertAdjacentHTML|document\.write|eval\(|new Function/.test(DASHBOARD_JS),'no HTML injection sinks');
   assert.ok(!/<script>[^<]/.test(DASHBOARD_HTML),'no inline script');
+  assert.ok(DASHBOARD_CSS.includes('[hidden]{display:none!important}'),'signed-out header buttons stay hidden');
   assert.equal((await s.request('/admin','POST')).status,404);
 });

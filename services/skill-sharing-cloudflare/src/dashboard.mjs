@@ -60,6 +60,8 @@ export const DASHBOARD_HTML = `<!doctype html>
 export const DASHBOARD_CSS = `:root{--bg:#f6f7f9;--card:#fff;--text:#1d2329;--muted:#5f6b77;--line:#e3e7ec;--accent:#0b6bcb;--accent-text:#fff;--good:#1f7a3d;--bad:#b42318;--chip:#eef2f6}
 @media (prefers-color-scheme:dark){:root{--bg:#121417;--card:#1b1f24;--text:#e7ebef;--muted:#9aa6b2;--line:#2b3138;--accent:#4c9ee8;--accent-text:#0b1520;--good:#5cc683;--bad:#f1847a;--chip:#252b32}}
 *{box-sizing:border-box}
+/* Elements toggled with the hidden attribute must stay hidden even when a class sets display. */
+[hidden]{display:none!important}
 body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
 .bar{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid var(--line);background:var(--card)}
 h1{font-size:17px;margin:0}h2{font-size:15px;margin:0 0 10px}
