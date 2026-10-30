@@ -143,7 +143,8 @@ $secure=ConvertTo-SecureString ([string]$config.protected_token)
 $pointer=[Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
 try{$token=[Runtime.InteropServices.Marshal]::PtrToStringBSTR($pointer)}
 finally{[Runtime.InteropServices.Marshal]::ZeroFreeBSTR($pointer)}
-$headers=@{Authorization='Bearer '+$token}
+$versionPath=Join-Path $RepositoryRoot 'VERSION'
+$headers=@{Authorization='Bearer '+$token;'X-Connector-Version'=$(if(Test-Path $versionPath){(Get-Content $versionPath -Raw).Trim()}else{'unknown'})}
 $token=$null
 try{
  $base=$uri.AbsoluteUri.TrimEnd('/')

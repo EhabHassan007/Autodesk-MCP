@@ -20,7 +20,7 @@ try {
     $settingsPath=Join-Path $stateRoot 'settings.json'
     $installedScripts=Join-Path $stateRoot 'scripts'
     New-Item -ItemType Directory -Path $installedScripts -Force|Out-Null
-    foreach($name in @('weekly-skill-collection.ps1','collect-skills-for-review.ps1','submit-team-knowledge.ps1','central-skill-sync.ps1','Initialize-SkillService.ps1')) {
+    foreach($name in @('weekly-skill-collection.ps1','collect-skills-for-review.ps1','submit-team-knowledge.ps1','central-skill-sync.ps1','Initialize-SkillService.ps1','send-usage.ps1')) {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $installedScripts $name) -Force
     }
     $saved=if(Test-Path $settingsPath){Get-Content $settingsPath -Raw|ConvertFrom-Json}else{$null}
@@ -37,6 +37,9 @@ try {
     }
 }
 catch {Write-Warning ('Weekly skills setup needs attention: '+$_.Exception.Message)}
+# Usage reporting only sends once the PC is enrolled; the task is harmless before that.
+try {& (Join-Path $installedScripts 'send-usage.ps1') -Action Register -StateRoot $stateRoot}
+catch {Write-Warning ('Usage reporting setup needs attention: '+$_.Exception.Message)}
 try {
     $updateState=Join-Path $env:LOCALAPPDATA 'AutodeskMcpConnector\update-state.json'
     $saved=if(Test-Path $updateState){Get-Content $updateState -Raw|ConvertFrom-Json}else{$null}

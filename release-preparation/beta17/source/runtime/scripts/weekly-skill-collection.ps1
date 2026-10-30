@@ -22,7 +22,7 @@ if ($Action -eq 'Enable') {
     New-Item -ItemType Directory -Path $StateRoot -Force | Out-Null
     $installRoot = Join-Path $StateRoot 'scripts'
     New-Item -ItemType Directory -Path $installRoot -Force | Out-Null
-    foreach ($name in @('weekly-skill-collection.ps1','collect-skills-for-review.ps1','submit-team-knowledge.ps1','central-skill-sync.ps1','Initialize-SkillService.ps1')) {
+    foreach ($name in @('weekly-skill-collection.ps1','collect-skills-for-review.ps1','submit-team-knowledge.ps1','central-skill-sync.ps1','Initialize-SkillService.ps1','send-usage.ps1')) {
         $source = Join-Path $PSScriptRoot $name
         $destination = Join-Path $installRoot $name
         if ([IO.Path]::GetFullPath($source) -ne [IO.Path]::GetFullPath($destination)) { Copy-Item -LiteralPath $source -Destination $destination -Force }
@@ -75,6 +75,11 @@ try {
         $AdditionalSkillRoots = @($config.additional_skill_roots)
     }
     if (-not (Test-Path (Join-Path $RepositoryRoot '.agents\skills'))) { throw 'The installed connector skill library is missing.' }
+    # Usage is reported first and independently, so a failed skill submission never holds it back.
+    $usageSender = Join-Path $PSScriptRoot 'send-usage.ps1'
+    if ($Action -eq 'Run' -and (Test-Path -LiteralPath $usageSender)) {
+        try { $null = & $usageSender -Action Run -StateRoot $StateRoot 2>$null } catch { }
+    }
     $central=Join-Path $PSScriptRoot 'central-skill-sync.ps1'
     $output=@(& $central -RepositoryRoot $RepositoryRoot -StateRoot $StateRoot -AdditionalSkillRoots $AdditionalSkillRoots -Preview:($Action -eq 'Preview') 3>&1)
     $text = ($output | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine
