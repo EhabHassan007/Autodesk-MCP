@@ -3,7 +3,9 @@ param(
     [string]$RepositoryRoot = (Split-Path -Parent $PSScriptRoot),
     [string]$OutputRoot = (Join-Path $env:LOCALAPPDATA 'BIM-CAD-MCP\skill-review'),
     [string[]]$AdditionalSkillRoots = @(),
-    [switch]$OnlyAdditionalSkillRoots
+    [switch]$OnlyAdditionalSkillRoots,
+    [string[]]$ExcludeSkills = @(),
+    [string]$ExclusionListPath = (Join-Path $env:LOCALAPPDATA 'AutodeskMcpSkillCollection\excluded-skills.txt')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -66,6 +68,15 @@ function Test-SkillLinks {
     return $false
 }
 
+# Personal skills listed here never leave this PC: one folder name per line, # starts a comment.
+$excluded = @{}
+$exclusionLines = if (Test-Path -LiteralPath $ExclusionListPath -PathType Leaf) { @(Get-Content -LiteralPath $ExclusionListPath) } else { @() }
+foreach ($name in @($ExcludeSkills) + $exclusionLines) {
+    $trimmed = ([string]$name).Trim()
+    if ($trimmed -and -not $trimmed.StartsWith('#')) { $excluded[$trimmed.ToLowerInvariant()] = $true }
+}
+$excludedCount = 0
+
 $codexHome = if ([string]::IsNullOrWhiteSpace($env:CODEX_HOME)) { Join-Path $HOME '.codex' } else { $env:CODEX_HOME }
 $userProfilePath = $env:USERPROFILE
 $sources = if ($OnlyAdditionalSkillRoots) { @() } else {
@@ -105,6 +116,8 @@ foreach ($source in $sources) {
 
     foreach ($skill in Get-ChildItem -LiteralPath $source.Path -Directory | Where-Object { -not $_.Name.StartsWith('.') }) {
         if (-not (Test-Path -LiteralPath (Join-Path $skill.FullName 'SKILL.md') -PathType Leaf)) { continue }
+        # Excluded skills are not copied or listed, because REVIEW.md can be attached to a submission.
+        if ($excluded.ContainsKey($skill.Name.ToLowerInvariant())) { $excludedCount++; continue }
         if (Test-SkillLinks $skill.FullName) { Write-Warning ('Skipped linked skill: ' + $skill.Name); continue }
         $hash = Get-DirectoryHash $skill.FullName
         $key = "$($skill.Name)|$hash"
@@ -160,3 +173,4 @@ Compress-Archive -Path (Join-Path $reviewDirectory '*') -DestinationPath $zipPat
 Write-Output "Review report: $reportPath"
 Write-Output "Review package: $zipPath"
 Write-Output "Candidates requiring a decision: $(@($results | Where-Object Status -ne 'IDENTICAL').Count)"
+Write-Output "Skills kept private by the exclusion list: $excludedCount"

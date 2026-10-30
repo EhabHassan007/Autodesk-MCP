@@ -60,12 +60,18 @@ try {
         New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
         "[{0}] Starting Autodesk MCP Connector installation." -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') |
             Set-Content -LiteralPath $logPath -Encoding UTF8
+        $coreArguments = @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $coreSetup,
+            '-Action', 'Install', '-RepositoryPath', (Join-Path $env:LOCALAPPDATA 'BIM-CAD-MCP'), '-InstallClaudeDesktopIfMissing')
+        # Administrators deploy the enrollment file beside INSTALL Autodesk MCP Connector.cmd, outside the extracted payload.
+        $enrollmentFile = @('enrollment.json', 'skill-service-device.json') |
+            ForEach-Object { Join-Path (Split-Path -Parent $PSScriptRoot) $_ } |
+            Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
+            Select-Object -First 1
+        if ($enrollmentFile) { $coreArguments += @('-EnrollmentPath', $enrollmentFile) }
         $savedPreference = $ErrorActionPreference
         try {
             $ErrorActionPreference = 'Continue'
-        $output = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $coreSetup `
-            -Action Install -RepositoryPath (Join-Path $env:LOCALAPPDATA 'BIM-CAD-MCP') `
-            -InstallClaudeDesktopIfMissing 2>&1
+        $output = & powershell.exe @coreArguments 2>&1
         $exitCode = $LASTEXITCODE
         }
         finally { $ErrorActionPreference = $savedPreference }
@@ -73,12 +79,6 @@ try {
         $outputText | Add-Content -LiteralPath $logPath -Encoding UTF8
         $outputText | ForEach-Object { Write-Host $_ }
         if ($exitCode -ne 0) { throw "Installation stopped with exit code $exitCode. See $logPath" }
-        $enrollmentFile=Join-Path (Split-Path -Parent $PSScriptRoot) 'skill-service-device.json'
-        if(Test-Path -LiteralPath $enrollmentFile){
-            $initializer=Join-Path $env:LOCALAPPDATA 'BIM-CAD-MCP\scripts\Initialize-SkillService.ps1'
-            & $initializer -ConfigPath $enrollmentFile
-            Remove-Item -LiteralPath $enrollmentFile -Force
-        }
         $centralRunner=Join-Path $env:LOCALAPPDATA 'BIM-CAD-MCP\scripts\weekly-skill-collection.ps1'
         if(Test-Path (Join-Path $env:LOCALAPPDATA 'AutodeskMcpSkillCollection\service.json')){
             Start-Process powershell.exe -WindowStyle Hidden -ArgumentList ('-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -Action Run' -f $centralRunner)

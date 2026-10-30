@@ -107,7 +107,11 @@ if($LibraryOnly){return}
 New-Item -ItemType Directory $StateRoot -Force|Out-Null
 $reviewRoot=Join-Path $StateRoot ('central-review-'+[guid]::NewGuid().ToString('N'))
 $collector=Join-Path $PSScriptRoot 'collect-skills-for-review.ps1'
-$null=& $collector -RepositoryRoot $RepositoryRoot -OutputRoot $reviewRoot -AdditionalSkillRoots (@((Join-Path $RepositoryRoot 'team-candidates'))+@($AdditionalSkillRoots))
+$exclusionList=Join-Path $StateRoot 'excluded-skills.txt'
+$null=& $collector -RepositoryRoot $RepositoryRoot -OutputRoot $reviewRoot -AdditionalSkillRoots (@((Join-Path $RepositoryRoot 'team-candidates'))+@($AdditionalSkillRoots)) -ExclusionListPath $exclusionList
+# The collector matches folder names; also match the SKILL.md name in case a folder was renamed.
+$excluded=@{}
+if(Test-Path -LiteralPath $exclusionList){foreach($line in Get-Content -LiteralPath $exclusionList){$t=$line.Trim();if($t -and -not $t.StartsWith('#')){$excluded[$t.ToLowerInvariant()]=$true}}}
 $review=Get-ChildItem $reviewRoot -Directory|Select-Object -First 1
 $skills=New-Object System.Collections.Generic.List[object]
 $names=@{}
@@ -115,6 +119,7 @@ $submissionBlocked=$false
 foreach($folder in @(Get-ChildItem (Join-Path $review.FullName 'candidates') -Directory)){
  try{$name=Get-SkillName $folder.FullName;Test-SafeCandidate $folder.FullName}
  catch{Write-Warning ('Skipped flagged skill: '+$folder.Name);continue}
+ if($excluded.ContainsKey($name.ToLowerInvariant())){Remove-Item -LiteralPath $folder.FullName -Recurse -Force;continue}
  $hash=Get-DirectoryHash $folder.FullName
  if($names.ContainsKey($name)){
   if($names[$name] -ne $hash){$submissionBlocked=$true;Write-Warning ('Conflicting saved skill variants; submissions paused: '+$name)}

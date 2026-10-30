@@ -18,7 +18,9 @@ param(
 
     [switch]$InstallGitIfMissing,
 
-    [switch]$InstallClaudeDesktopIfMissing
+    [switch]$InstallClaudeDesktopIfMissing,
+
+    [string]$EnrollmentPath = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -1428,6 +1430,96 @@ function Test-RevitSetup {
     finally { $client.Dispose() }
 }
 
+function Remove-PlaintextFileSecurely {
+    param([string]$Path)
+
+    # Overwrite before deleting so the token does not stay in freed disk space. SSD wear levelling
+    # can still retain old blocks, so deployment tools must not keep their own copies either.
+    $item = Get-Item -LiteralPath $Path -Force
+    if ($item.IsReadOnly) { $item.IsReadOnly = $false }
+    $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Write, [IO.FileShare]::None)
+    $random = [Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $buffer = New-Object byte[] 4096
+        $remaining = [int64]$item.Length
+        while ($remaining -gt 0) {
+            $count = [int][Math]::Min($remaining, $buffer.Length)
+            $random.GetBytes($buffer)
+            $stream.Write($buffer, 0, $count)
+            $remaining -= $count
+        }
+        $stream.Flush($true)
+    }
+    finally {
+        $random.Dispose()
+        $stream.Dispose()
+    }
+    Remove-Item -LiteralPath $Path -Force
+}
+
+function Import-SkillServiceEnrollment {
+    param(
+        [string]$Root,
+        [string]$Path = $EnrollmentPath,
+        [string[]]$SearchDirectories = @($PSScriptRoot, (Split-Path -Parent $PSScriptRoot))
+    )
+
+    $serviceConfig = Join-Path $env:LOCALAPPDATA 'AutodeskMcpSkillCollection\service.json'
+    $explicit = -not [string]::IsNullOrWhiteSpace($Path)
+    $candidates = if ($explicit) { @($Path) } else {
+        foreach ($directory in $SearchDirectories) {
+            foreach ($name in @('enrollment.json', 'skill-service-device.json')) { Join-Path $directory $name }
+        }
+    }
+    $file = $candidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+    if (-not $file) {
+        if ($explicit) {
+            Write-Step ("[ENROLLMENT_MISSING] Enrollment file not found: {0}. Central skill sharing stays pending." -f $Path)
+        }
+        elseif (Test-Path -LiteralPath $serviceConfig -PathType Leaf) {
+            Write-Step '[ENROLLMENT_UNCHANGED] No enrollment file supplied. The existing central skill sharing enrollment is kept.'
+            return 'AlreadyEnrolled'
+        }
+        else {
+            Write-Step '[ENROLLMENT_PENDING] No enrollment file supplied. Central skill sharing waits for administrator enrollment.'
+        }
+        return 'Missing'
+    }
+
+    Write-Step ("Importing central skill sharing enrollment from {0}..." -f (Split-Path -Leaf $file))
+    $status = 'Failed'
+    try {
+        $initializer = Join-Path $Root 'scripts\Initialize-SkillService.ps1'
+        if (-not (Test-Path -LiteralPath $initializer -PathType Leaf)) { throw "Enrollment initializer is missing: $initializer" }
+        # Parse here first: PowerShell JSON errors quote the input, which could copy the token into setup.log.
+        try { $null = Get-Content -LiteralPath $file -Raw | ConvertFrom-Json }
+        catch { throw 'The enrollment file is not valid JSON.' }
+        $previous = if (Test-Path -LiteralPath $serviceConfig -PathType Leaf) { (Get-Item -LiteralPath $serviceConfig).LastWriteTimeUtc } else { $null }
+        $output = @(& $initializer -ConfigPath $file)
+        if (-not (Test-Path -LiteralPath $serviceConfig -PathType Leaf) -or
+            ($previous -and (Get-Item -LiteralPath $serviceConfig).LastWriteTimeUtc -eq $previous)) {
+            throw 'The initializer did not write service.json.'
+        }
+        $output | ForEach-Object { Write-Step ([string]$_) }
+        Write-Step '[ENROLLMENT_OK] Central skill sharing is enrolled for this Windows user.'
+        $status = 'Enrolled'
+    }
+    catch {
+        Write-Step ("[ENROLLMENT_FAILED] {0} Central skill sharing stays pending. Ask your administrator for a new enrollment file." -f $_.Exception.Message)
+    }
+    finally {
+        # The plaintext token must not stay on disk, even when the import failed.
+        try {
+            Remove-PlaintextFileSecurely -Path $file
+            Write-Step '[ENROLLMENT_FILE_REMOVED] The plaintext enrollment file was overwritten and deleted.'
+        }
+        catch {
+            Write-Step ("[ENROLLMENT_FILE_NOT_REMOVED] Delete the plaintext enrollment file manually: {0} ({1})" -f $file, $_.Exception.Message)
+        }
+    }
+    return $status
+}
+
 if ($LibraryOnly) { return }
 
 try {
@@ -1517,6 +1609,7 @@ try {
         'Install' {
             $root = Get-Repository
             Install-Skills $root
+            $null = Import-SkillServiceEnrollment -Root $root
             if ($Product -in @('All','Revit') -and (Test-Revit2024Installed)) {
                 Install-RevitAddin $root
             }
@@ -1532,6 +1625,7 @@ try {
         'Update' {
             $script:UpdateDownloaded = $false
             $root = Get-Repository
+            $null = Import-SkillServiceEnrollment -Root $root
             if (-not $script:UpdateDownloaded) {
                 Write-Step 'No newer release was installed. Existing client registrations were preserved. Use Install / Repair to repair connections.'
                 break
