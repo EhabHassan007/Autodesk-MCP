@@ -68,6 +68,20 @@ try {
             Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
             Select-Object -First 1
         if ($enrollmentFile) { $coreArguments += @('-EnrollmentPath', $enrollmentFile) }
+        # The private TEAM build carries a join code; the administrator's enrollment file always wins.
+        $payloadInstaller = Join-Path $packageRoot 'installer'
+        $joinDialog = Join-Path $payloadInstaller 'TeamJoinDialog.ps1'
+        if (-not $enrollmentFile -and (Test-Path -LiteralPath $joinDialog -PathType Leaf)) {
+            . $joinDialog
+            if (Test-TeamJoinRequired -PayloadInstaller $payloadInstaller) {
+                $join = Show-TeamJoinDialog
+                if ($join) { $coreArguments += @('-JoinName', $join.Name, '-JoinEmail', $join.Email) }
+                else {
+                    "[{0}] [ENROLLMENT_PENDING] Team join was skipped. Installation continues without central skill sharing." -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') |
+                        Add-Content -LiteralPath $logPath -Encoding UTF8
+                }
+            }
+        }
         $savedPreference = $ErrorActionPreference
         try {
             $ErrorActionPreference = 'Continue'

@@ -2,3 +2,6 @@ beta*/Autodesk-MCP-Connector-*.zip
 beta*/beta*-github-upload.zip
 beta*/beta*-source-and-tests.zip
 beta*/latest.json
+beta*/Autodesk-MCP-Connector-*-TEAM.zip
+# The team join code only ever lives inside the private -TEAM.zip.
+**/team-join.json
