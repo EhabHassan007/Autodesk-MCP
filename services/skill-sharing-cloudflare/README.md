@@ -36,13 +36,15 @@ For local CLI work in the managed cloud workspace, use `XDG_CONFIG_HOME=/tmp/aut
 
 ## Connect team PCs
 
-Use the existing administrator tool in `../skill-sharing/admin.py` with the resulting HTTPS `workers.dev` URL. Each PC/user gets a unique revocable device token:
+On Windows, use `tools/New-DeviceEnrollment.ps1`; it needs no Python and defaults to the deployed URL. Each PC/user gets a unique revocable device token:
 
 ```
-python ../skill-sharing/admin.py enroll --service-url https://YOUR-WORKER.YOUR-SUBDOMAIN.workers.dev --label Office-PC-01 --output skill-service-device.json
+powershell -ExecutionPolicy Bypass -File tools\New-DeviceEnrollment.ps1 -Label Office-PC-01,Office-PC-02
 ```
 
-The utility prompts privately for the admin token. Place that enrollment file beside the beta17 installer, and deliver it privately using your admin deployment process. Run setup in the intended Windows user's context. Setup imports the token with user-scoped DPAPI and starts background collection/sync; weekly scheduling remains in the connector, not Cloudflare. The team needs no GitHub sign-in, Git author configuration, or separate skills setup. A public download by itself cannot securely enroll an unknown PC: admin provisioning remains necessary. Never embed a shared admin credential into a public installer.
+It prompts once for the admin token without displaying it, then writes `Documents\Autodesk-MCP-Enrollments\<label>\enrollment.json` for each PC. The folder is restricted to the current Windows user. `devices.csv` beside them records label and device ID, without tokens, for later revocation (`DELETE /admin/devices/<device_id>`). Existing files are never overwritten. `../skill-sharing/admin.py enroll` remains an alternative where Python is available.
+
+Place the PC's `enrollment.json` beside the beta17 installer, and deliver it privately using your admin deployment process. Run setup in the intended Windows user's context. Setup imports the token with user-scoped DPAPI and starts background collection/sync; weekly scheduling remains in the connector, not Cloudflare. The team needs no GitHub sign-in, Git author configuration, or separate skills setup. A public download by itself cannot securely enroll an unknown PC: admin provisioning remains necessary. Never embed a shared admin credential into a public installer.
 
 Devices already enrolled against another service need a new enrollment file because the URL and credential store differ. There are no known live Render devices to migrate at preparation time.
 
