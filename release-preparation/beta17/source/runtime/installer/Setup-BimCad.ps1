@@ -20,7 +20,12 @@ param(
 
     [switch]$InstallClaudeDesktopIfMissing,
 
-    [string]$EnrollmentPath = ''
+    [string]$EnrollmentPath = '',
+
+    # Typed by the person in the team join dialog; used only with a TEAM build's installer\team-join.json.
+    [string]$JoinName = '',
+
+    [string]$JoinEmail = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -736,6 +741,9 @@ function Get-Repository {
                     Copy-Item -LiteralPath $item -Destination $destination -Recurse -Force
                 }
             }
+            # The team join code stays in the downloaded installer only, even when joining was skipped.
+            $copiedJoin = Join-Path $destination 'installer\team-join.json'
+            if (Test-Path -LiteralPath $copiedJoin -PathType Leaf) { Remove-Item -LiteralPath $copiedJoin -Force }
         }
         Set-InstalledRelease -Version ((Get-Content -LiteralPath (Join-Path $destination 'VERSION') -Raw).Trim())
         return $destination
@@ -1520,6 +1528,68 @@ function Import-SkillServiceEnrollment {
     return $status
 }
 
+function Register-SkillServiceDevice {
+    param(
+        [string]$Root,
+        [string]$Name = $JoinName,
+        [string]$Email = $JoinEmail,
+        [string]$JoinConfigPath = (Join-Path $PSScriptRoot 'team-join.json')
+    )
+
+    $state = Join-Path $env:LOCALAPPDATA 'AutodeskMcpSkillCollection'
+    if (Test-Path -LiteralPath (Join-Path $state 'service.json') -PathType Leaf) {
+        Write-Step '[ENROLLMENT_UNCHANGED] This PC already belongs to the team skill service.'
+        return 'AlreadyEnrolled'
+    }
+    $headers = @{}
+    try {
+        if (-not (Test-Path -LiteralPath $JoinConfigPath -PathType Leaf)) { throw 'This installer has no team join code. Ask your administrator for the team installer.' }
+        try { $join = Get-Content -LiteralPath $JoinConfigPath -Raw | ConvertFrom-Json }
+        catch { throw 'The team join file in this installer is damaged.' }
+        $uri = [Uri]([string]$join.service_url)
+        if ($uri.Scheme -ne 'https' -or $uri.UserInfo -or $uri.Query -or $uri.Fragment) { throw 'The team join file has an invalid service address.' }
+        $versionPath = Join-Path $Root 'VERSION'
+        $version = if (Test-Path -LiteralPath $versionPath) { (Get-Content -LiteralPath $versionPath -Raw).Trim() } else { 'unknown' }
+        $body = @{ name = $Name.Trim(); email = $Email.Trim(); pc_name = $env:COMPUTERNAME; windows_user = $env:USERNAME; connector_version = $version } | ConvertTo-Json -Compress
+        $headers = @{ Authorization = 'Bearer ' + [string]$join.join_code; 'X-Connector-Version' = $version }
+        Write-Step ("Joining the team skill service as {0}..." -f $Name.Trim())
+        try {
+            $device = Invoke-RestMethod -Uri ($uri.AbsoluteUri.TrimEnd('/') + '/v1/enroll') -Method Post -Headers $headers -UserAgent "Autodesk-MCP-Connector/$version" `
+                -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body)) -TimeoutSec 60
+        }
+        catch {
+            $code = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 }
+            # The service's error detail never contains secrets; it explains validation problems.
+            $detail = ''
+            try { $detail = [string]($_.ErrorDetails.Message | ConvertFrom-Json).detail } catch { }
+            $reason = switch ($code) {
+                0 { 'The team skill service could not be reached. Check the internet connection and run setup again.' }
+                403 { 'The team join code was not accepted; this installer may be out of date. Ask your administrator for the current team installer.' }
+                429 { 'Too many join attempts from this network. Wait an hour and run setup again.' }
+                default { if ($detail) { $detail } else { "The team skill service refused the request (HTTP $code)." } }
+            }
+            throw $reason
+        }
+        New-Item -ItemType Directory -Path $state -Force | Out-Null
+        $file = Join-Path $state ("enrollment-{0}.json" -f [guid]::NewGuid().ToString('N'))
+        @{ service_url = $uri.AbsoluteUri.TrimEnd('/'); device_id = [string]$device.device_id; device_token = [string]$device.device_token } | ConvertTo-Json |
+            Set-Content -LiteralPath $file -Encoding UTF8
+        $device = $null
+        # Reuses the admin-file path: DPAPI import, [ENROLLMENT_*] logging and secure deletion.
+        return (Import-SkillServiceEnrollment -Root $Root -Path $file -SearchDirectories @())
+    }
+    catch {
+        Write-Step ("[ENROLLMENT_FAILED] {0} Installation continues without central skill sharing." -f $_.Exception.Message)
+        return 'Failed'
+    }
+    finally {
+        $headers.Authorization = $null
+        # Don't leave the team code in the permanent install; the installer itself is the only copy.
+        $installedCopy = Join-Path $RepositoryPath 'installer\team-join.json'
+        if (Test-Path -LiteralPath $installedCopy -PathType Leaf) { Remove-Item -LiteralPath $installedCopy -Force }
+    }
+}
+
 if ($LibraryOnly) { return }
 
 try {
@@ -1609,7 +1679,9 @@ try {
         'Install' {
             $root = Get-Repository
             Install-Skills $root
-            $null = Import-SkillServiceEnrollment -Root $root
+            # An administrator's enrollment file wins; otherwise the team join dialog's answers are used.
+            if ($JoinName -and $JoinEmail -and [string]::IsNullOrWhiteSpace($EnrollmentPath)) { $null = Register-SkillServiceDevice -Root $root }
+            else { $null = Import-SkillServiceEnrollment -Root $root }
             if ($Product -in @('All','Revit') -and (Test-Revit2024Installed)) {
                 Install-RevitAddin $root
             }

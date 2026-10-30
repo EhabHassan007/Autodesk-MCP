@@ -115,6 +115,25 @@ function Get-AutodeskMcpTools {
     @($toolList)
 }
 
+# Records which skill or tool was used, by name only (never arguments or results), for the
+# administrator's usage report. Only enrolled PCs record. Failures never affect the tool call.
+function Write-UsageEvent {
+    param([string]$Kind, [string]$Name)
+    try {
+        if ($Name -notmatch '^[A-Za-z0-9_.:-]{1,100}$') { return }
+        $state = Join-Path $env:LOCALAPPDATA 'AutodeskMcpSkillCollection'
+        if (-not (Test-Path -LiteralPath (Join-Path $state 'service.json') -PathType Leaf)) { return }
+        $line = (@{kind=$Kind;name=$Name;day=(Get-Date).ToString('yyyy-MM-dd')} | ConvertTo-Json -Compress) + "`n"
+        $path = Join-Path $state 'usage.jsonl'
+        # Several Codex/Claude sessions can append at once; retry briefly if the file is busy.
+        for ($attempt = 0; $attempt -lt 3; $attempt++) {
+            try { [IO.File]::AppendAllText($path, $line, (New-Object Text.UTF8Encoding($false))); return }
+            catch [IO.IOException] { Start-Sleep -Milliseconds 50 }
+        }
+    }
+    catch { }
+}
+
 function Invoke-AutodeskMcpRequest {
     param([Parameter(Mandatory=$true)][object]$Request)
 
@@ -153,6 +172,13 @@ function Invoke-AutodeskMcpRequest {
                 }
                 else { throw "Unknown Autodesk MCP tool: $name" }
                 $response.result = @{content=@(@{type='text';text=($data | ConvertTo-Json -Depth 20 -Compress)});isError=$false}
+                # Opening a skill's SKILL.md counts as using that skill; supporting files are not counted.
+                if ($name -eq 'read_skill_workflow') {
+                    if ([string]::IsNullOrWhiteSpace([string]$Request.params.arguments.file) -or [string]$Request.params.arguments.file -eq 'SKILL.md') {
+                        Write-UsageEvent 'skill' ([string]$Request.params.arguments.name)
+                    }
+                }
+                elseif ($name -ne 'list_skill_workflows') { Write-UsageEvent 'tool' $name }
             }
             catch {
                 $response.result = @{content=@(@{type='text';text=$_.Exception.Message});isError=$true}

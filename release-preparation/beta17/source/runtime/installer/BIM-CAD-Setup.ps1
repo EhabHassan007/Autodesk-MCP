@@ -13,6 +13,7 @@ Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
 $coreScript = Join-Path $PSScriptRoot 'Setup-BimCad.ps1'
+. (Join-Path $PSScriptRoot 'TeamJoinDialog.ps1')
 
 $form = New-Object System.Windows.Forms.Form
 $form.Text = 'Autodesk MCP Connector'
@@ -213,6 +214,10 @@ function Invoke-SetupAction {
     param([string]$Action)
 
     $installGit = $false
+    $join = $null
+    if ($Action -eq 'Install' -and (Test-TeamJoinRequired -PayloadInstaller $PSScriptRoot)) {
+        $join = Show-TeamJoinDialog -Owner $form
+    }
     if ($Action -in @('TeamStatus','ConnectGitHub')) {
         $git = Get-Command git -ErrorAction SilentlyContinue | Select-Object -First 1
         if (-not $git) {
@@ -256,6 +261,7 @@ function Invoke-SetupAction {
             '-Action', $Action, '-RepositoryUrl', $RepositoryUrl, '-ReleaseManifestUrl', $ReleaseManifestUrl, '-RepositoryPath', $RepositoryPath
         )
         if ($Action -eq 'Install') { $arguments += '-InstallClaudeDesktopIfMissing' }
+        if ($join) { $arguments += @('-JoinName', $join.Name, '-JoinEmail', $join.Email) }
         if ($installGit) { $arguments += '-InstallGitIfMissing' }
         $savedPreference = $ErrorActionPreference
         try {
