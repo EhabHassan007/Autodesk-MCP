@@ -1,7 +1,7 @@
 // Executes the production bundle under workerd, with real local D1 and fake
 // GitHub network responses. No live account, GitHub key, or token is used.
 import assert from 'node:assert/strict';
-import { readFile, mkdtemp, rm } from 'node:fs/promises';
+import { readFile, readdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { generateKeyPairSync, verify } from 'node:crypto';
@@ -10,12 +10,13 @@ import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 const {privateKey,publicKey}=generateKeyPairSync('rsa',{modulusLength:2048});
 const directory=await mkdtemp(join(tmpdir(),'autodesk-d1-test-'));
 const admin='local-test-administrator-token-32-characters';
+const joinCode='local-test-team-join-code-at-least-32-chars';
 const content='---\nname: revit-check\n---\nRead document information.';
 let tokenChecks=0, draftPRs=0;
 const options={
   modules:true,scriptPath:'.wrangler/check/index.js',compatibilityDate:'2026-10-28',compatibilityFlags:['nodejs_compat'],
   d1Databases:{DB:'test-database'},d1Persist:directory,
-  bindings:{ADMIN_TOKEN:admin,GITHUB_PRIVATE_KEY:privateKey.export({type:'pkcs1',format:'pem'}),GITHUB_APP_ID:'5506370',GITHUB_INSTALLATION_ID:'176074887',GITHUB_REPOSITORY:'owner/repo',GITHUB_BASE_BRANCH:'main'},
+  bindings:{ADMIN_TOKEN:admin,JOIN_CODE:joinCode,GITHUB_PRIVATE_KEY:privateKey.export({type:'pkcs1',format:'pem'}),GITHUB_APP_ID:'5506370',GITHUB_INSTALLATION_ID:'176074887',GITHUB_REPOSITORY:'owner/repo',GITHUB_BASE_BRANCH:'main'},
   async outboundService(request) {
     const u=new URL(request.url),p=u.pathname;
     assert.equal(u.origin,'https://api.github.com');
@@ -55,9 +56,11 @@ try {
   mf=new Miniflare({...convertV4MiniflareOptions(options),resourcePersistencePath:directory});
   const db=await mf.getD1Database('DB');
   // D1 exec accepts one statement per line. Production migrations use Wrangler.
-  const schema=await readFile(new URL('../migrations/0001_initial.sql',import.meta.url),'utf8');
-  await db.batch(schema.split(';').filter(s=>s.trim()).map(s=>db.prepare(s)));
-  const call=(path,method='GET',token,body)=>mf.dispatchFetch('https://worker.test'+path,{method,headers:token?{Authorization:'Bearer '+token}:{},body:body===undefined?undefined:JSON.stringify(body)});
+  for (const file of (await readdir(new URL('../migrations/',import.meta.url))).filter(f=>f.endsWith('.sql')).sort()) {
+    const schema=await readFile(new URL('../migrations/'+file,import.meta.url),'utf8');
+    await db.batch(schema.split(';').filter(s=>s.trim()).map(s=>db.prepare(s)));
+  }
+  const call=(path,method='GET',token,body,extra={})=>mf.dispatchFetch('https://worker.test'+path,{method,headers:{...(token?{Authorization:'Bearer '+token}:{}),...extra},body:body===undefined?undefined:JSON.stringify(body)});
   assert.equal((await call('/health')).status,200);
   const enrolled=await call('/admin/devices','POST',admin,{label:'Test PC'});
   assert.equal(enrolled.status,200);
@@ -79,7 +82,22 @@ try {
   assert.equal(draftPRs,1);assert.equal(tokenChecks,2);
   assert.equal((await call('/admin/devices/'+device.device_id,'DELETE',admin)).status,200);
   assert.equal((await call('/v1/library','GET',device.device_token)).status,401);
-  console.log('PASS: workerd + D1 enrollment, PKCS#1 signing, approved library, draft-only submission, restart persistence, deduplication and revocation. GitHub mocked.');
+  // Team join, usage report and dashboard overview against real D1 (batch upsert included).
+  const joined=await call('/v1/enroll','POST',joinCode,{name:'Test Person',email:'test@example.com',pc_name:'TEST-PC',windows_user:'tester',connector_version:'1.0.0-beta.17'},{'CF-Connecting-IP':'203.0.113.5'});
+  assert.equal(joined.status,200,await joined.clone().text());
+  const member=await joined.json();
+  const today=new Date().toISOString().slice(0,10);
+  const usage=await call('/v1/usage','POST',member.device_token,{events:[{kind:'skill',name:'revit-check',day:today,count:2},{kind:'tool',name:'list_levels',day:today,count:1}]});
+  assert.equal(usage.status,200,await usage.clone().text());
+  await call('/v1/usage','POST',member.device_token,{events:[{kind:'skill',name:'revit-check',day:today,count:3}]});
+  const overview=await (await call('/admin/api/overview','GET',admin)).json();
+  const person=overview.devices.find(d=>d.id===member.device_id);
+  assert.equal(person.person_name,'Test Person');assert.equal(person.enroll_ip,'203.0.113.5');
+  assert.equal(overview.usage.find(u=>u.device===member.device_id&&u.name==='revit-check').last7,5);
+  assert.equal((await call('/admin')).headers.get('Content-Type'),'text/html; charset=utf-8');
+  assert.equal((await call('/admin/devices/'+member.device_id+'/block','POST',admin)).status,200);
+  assert.equal((await call('/v1/library','GET',member.device_token)).status,401);
+  console.log('PASS: workerd + D1 enrollment, PKCS#1 signing, approved library, draft-only submission, restart persistence, deduplication, revocation, team join, usage and admin overview. GitHub mocked.');
 } finally {
   await mf?.dispose();
   await rm(directory,{recursive:true,force:true});

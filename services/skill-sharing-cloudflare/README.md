@@ -30,9 +30,25 @@ The account ID in `wrangler.jsonc` is `9005326001bbb3ef9bc748643745e71f`, from t
    - `ADMIN_TOKEN`: a password-manager-generated random secret of at least 32 characters. Keep it administrator-only; never give it to team PCs.
 5. Save/deploy those secret settings. Check `/health` (configuration and D1 schema), then authenticated `GET /admin/status` (read-only live GitHub App check). A health success alone does not certify GitHub access.
 
-The Worker has no browser admin UI and does not enable cross-origin browser access. Deployment/API tokens, the GitHub private key, service admin token, and per-PC tokens are separate credentials with different purposes.
+The Worker's only browser page is the same-origin admin dashboard at `/admin`. It does not enable cross-origin browser access. Deployment/API tokens, the GitHub private key, service admin token, and per-PC tokens are separate credentials with different purposes.
 
 For local CLI work in the managed cloud workspace, use `XDG_CONFIG_HOME=/tmp/autodesk-cloudflare-config WRANGLER_SEND_METRICS=false` so Wrangler writes only to the permitted local directory. Use inherited proxy/CA settings. Do not bypass the environment's network policy.
+
+## Team installer and admin dashboard
+
+Migration `0002_team_enrollment.sql` adds the person profile, last-seen data and IP to `devices`. It also adds the `usage`, `submission_log` and `limits` tables. Run `npm run migrate:remote` before deploying this version.
+
+- **Team join (`POST /v1/enroll`).** It is authorized by the `JOIN_CODE` secret: add it in Cloudflare next to `ADMIN_TOKEN`, as a random value of 32+ characters. It takes `{name, email, pc_name, windows_user, connector_version}` and returns `{device_id, device_token}`. The code ships inside the private team installer only.
+  - Without `JOIN_CODE`, joining returns 503 and everything else keeps working.
+  - After 10 wrong codes from one IP in an hour, that IP waits an hour before the code is even checked. Successful joins are limited to 60 per IP per hour, because an office shares one address.
+  - To retire a leaked installer, change `JOIN_CODE` and rebuild. Devices that already joined keep working.
+- **Usage (`POST /v1/usage`).** Device-authenticated. Accepts up to 500 `{kind: skill|tool, name, day, count}` events, which are aggregated per device and day. Names only, never arguments or content. It has its own 30-per-hour budget, separate from the 20-per-hour library/submission limit. Rows older than 180 days are deleted.
+- **Every device call** records `last_seen`, the `CF-Connecting-IP` address and the `X-Connector-Version` header.
+- **Dashboard.** Open `https://autodesk-skill-service.autodesk-skills-ehabhassan007.workers.dev/admin` and paste `ADMIN_TOKEN`. The token is kept for the browser tab only.
+  - The page and its script contain no data. They load `GET /admin/api/overview` with the token and insert every value as text.
+  - It shows each person, email, PC and Windows user, IP, join date, last seen, version, skills used (7 and 30 days), tools used and submissions.
+  - Block/Unblock calls `POST /admin/devices/<id>/block|unblock`.
+  - A strict CSP, `no-store` and `X-Frame-Options: DENY` apply.
 
 ## Connect team PCs
 
