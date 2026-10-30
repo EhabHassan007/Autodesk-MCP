@@ -1,0 +1,64 @@
+# Cloudflare skills sharing (free-plan pilot)
+
+This is the Cloudflare Workers + D1 alternative to the paid Render blueprint. It preserves the beta17 connector API: admin enrollment/revocation, weekly candidate submission, and approved-library download. No connector rebuild is needed to choose this service URL during enrollment. The Worker and D1 schema were deployed on 2026-10-28. Live GitHub App download, draft submission, deduplication and revocation checks passed on 2026-10-29. A private enrolled installer is prepared for the owner's Windows/Revit pilot; team rollout remains pending that pilot.
+
+Deployed URL: `https://autodesk-skill-service.autodesk-skills-ehabhassan007.workers.dev`. Current verified version is `ce7ff578-2dd3-401e-a40f-51030771ab45`. Database `autodesk-skills` has UUID `3abe835e-22d1-4441-9c0c-ef844d8a1116`; migration `0001_initial.sql` succeeded remotely. Both encrypted secrets are configured. No billing-plan upgrade or connector release publication was performed.
+
+Live verification on 2026-10-29 after the owner replaced the private key: `/health` and authenticated library downloads return 200; anonymous and revoked-device requests return 401. The service downloads 27 skills / 36 files from main commit `3c6c3e4e51b063b9038e8a36f8bbeaeb8724daca`. A harmless test submission created [draft PR 10](https://github.com/EhabHassan007/Autodesk-MCP/pull/10) as `autodesk-mcp-skills-ehabhassan007[bot]` on an intake branch. Repeated submission returned the same PR. The unapproved fixture remained absent from downloaded skills. Both temporary validation devices were revoked. The test PR was not merged and no candidate was approved.
+
+The invalid administrator secret was replaced with a cryptographically random value directly in Cloudflare; its value was not printed or retained locally. The administrator can rotate it in Cloudflare when manual use of `admin.py` is needed. `tools/live-check.py` instead uses authorized Cloudflare D1 administration to create a temporary hashed device credential and always revokes that device. Default mode only reads GitHub; explicit `--submit-test` creates/reuses the harmless draft PR and verifies the approval boundary. Neither mode reads secret values. Python's default HTTP user-agent received Cloudflare error 1010; probes using `Autodesk-MCP-Connector/1.0.0-beta.17` reach the Worker normally.
+
+Only `.agents/skills` on the configured `main` branch is distributed. New submissions create deterministic `skill-intake/central-*` branches and **draft** pull requests. This service never merges, writes to main, or publishes a release. Human approval remains necessary. It does not collect drawings, models, transcripts, or general PC files. Candidate content and executable files are untrusted; path/size/secret filters are heuristic, not approval.
+
+## Free plan and limits
+
+Use **Workers Free** and **D1 Free**, with a supplied `workers.dev` address. No domain purchase, persistent paid Render disk, R2, Durable Objects, queue, or paid Worker subscription is required by this implementation. Deployment commands do not upgrade a billing plan.
+
+Cloudflare's published Workers Free limits checked on 2026-10-28 are 100,000 requests/day, 10 ms CPU/request and 50 external subrequests/invocation. D1 has its own free storage/read/write quotas. Quota exhaustion can interrupt service; local tests do not certify Cloudflare's CPU accounting. Run a live pilot with representative skills before team rollout, especially for large batches. Do not enable paid billing to work around a failure without owner authorization.
+
+The approved library is limited to 100 skill names, 800 supported text files, 256 KiB/file and 2 MiB combined content. GitHub GraphQL batches 40 blobs per request, keeping the worst-case request count below the free external-request cap. The current main library is 36 files, approximately 107 KiB. An isolate caches the installation token and approved library briefly; durable device hashes and batch records live in D1. D1 rate counters and expiring batch claims are atomic across Worker isolates. A deterministic GitHub branch and PR lookup allow recovery after process loss or a lost response.
+
+## Administrator deployment
+
+The account ID in `wrangler.jsonc` is `9005326001bbb3ef9bc748643745e71f`, from the owner's dashboard. App ID `5506370`, installation ID `176074887`, and the deployed D1 UUID are configured. Reuse this database for redeployments.
+
+1. Create an account-scoped Cloudflare API token with **Account → Workers Scripts → Edit** and **Account → D1 → Edit**, limited to this account. Keep it in the deployment environment's secure `CLOUDFLARE_API_TOKEN` binding, allowed only to `api.cloudflare.com`. Do not paste it into chat or commit it. Existing dashboard login does not authorize this chat's API calls.
+2. From this directory, use Node 24 and `npm ci`. Run `npx wrangler d1 create autodesk-skills` (or reuse the existing database of this exact name). Put its UUID into `d1_databases[0].database_id`. Never recreate/delete an existing database during redeployment.
+3. Run `npm run migrate:remote`, then `npm run deploy`. Keep the account on the Free plan. Wrangler applies only pending migrations. The service returns 503 until its required secrets are set.
+4. In Cloudflare: **Workers & Pages → autodesk-skill-service → Settings → Variables and Secrets**, add encrypted secrets:
+   - `GITHUB_PRIVATE_KEY`: the **complete contents** of the downloaded GitHub `.pem`, including BEGIN/END lines and newlines. Both PKCS#1 and PKCS#8 RSA formats are accepted. Store it directly in Cloudflare, never in chat, environment draft variables, GitHub source, or the connector ZIP.
+   - `ADMIN_TOKEN`: a password-manager-generated random secret of at least 32 characters. Keep it administrator-only; never give it to team PCs.
+5. Save/deploy those secret settings. Check `/health` (configuration and D1 schema), then authenticated `GET /admin/status` (read-only live GitHub App check). A health success alone does not certify GitHub access.
+
+The Worker has no browser admin UI and does not enable cross-origin browser access. Deployment/API tokens, the GitHub private key, service admin token, and per-PC tokens are separate credentials with different purposes.
+
+For local CLI work in the managed cloud workspace, use `XDG_CONFIG_HOME=/tmp/autodesk-cloudflare-config WRANGLER_SEND_METRICS=false` so Wrangler writes only to the permitted local directory. Use inherited proxy/CA settings. Do not bypass the environment's network policy.
+
+## Connect team PCs
+
+Use the existing administrator tool in `../skill-sharing/admin.py` with the resulting HTTPS `workers.dev` URL. Each PC/user gets a unique revocable device token:
+
+```
+python ../skill-sharing/admin.py enroll --service-url https://YOUR-WORKER.YOUR-SUBDOMAIN.workers.dev --label Office-PC-01 --output skill-service-device.json
+```
+
+The utility prompts privately for the admin token. Place that enrollment file beside the beta17 installer, and deliver it privately using your admin deployment process. Run setup in the intended Windows user's context. Setup imports the token with user-scoped DPAPI and starts background collection/sync; weekly scheduling remains in the connector, not Cloudflare. The team needs no GitHub sign-in, Git author configuration, or separate skills setup. A public download by itself cannot securely enroll an unknown PC: admin provisioning remains necessary. Never embed a shared admin credential into a public installer.
+
+Devices already enrolled against another service need a new enrollment file because the URL and credential store differ. There are no known live Render devices to migrate at preparation time.
+
+The owner pilot ZIP is stored privately outside the checkout at `/workspace/artifacts/autodesk-beta17-pilot/Autodesk-MCP-Connector-beta17-Ehab-Pilot.zip`. It contains one device enrollment for the owner's test PC/user. Do not commit, upload to releases, or redistribute it to the team. Its adjacent private `pilot-metadata.json` records the revocable device ID and archive checksum without the token. All original installer members were byte-verified against the Windows-tested beta17 ZIP (SHA-256 `bf9d665de935ae8fd14fbfbc69dde7fad49612709412e0e85621fa9ada935ed9`); only the enrollment JSON and pilot instructions were added. The pilot device passed live library authentication. Windows DPAPI import, actual scheduled execution and Revit/Codex/Claude operation still need testing on the user's PC.
+
+## Validation
+
+```
+npm ci
+npm test
+npm run test:runtime
+npm run migrate:local
+```
+
+Unit/contract tests use actual SQLite with a D1 adapter. Runtime tests execute the **production bundle** in workerd with real local D1 and mocked GitHub responses. They generate a disposable RSA test key in memory, exercise signing, enrollment, approved library download, draft submission, restart persistence, duplicate suppression and revocation. They never use real credentials or create live PRs. The runtime test caught and fixed a Worker-specific unbound `fetch` invocation that Node alone did not catch.
+
+Verified on 2026-10-29: all 14 unit/contract tests pass, including controlled secret-safe diagnostics and escaped/JSON-encoded PEM signatures; production bundle dry run and workerd/D1 integration test pass, including process restart. Local and remote D1 migrations passed previously. Runtime checks also required `redirect: manual` because Workers does not support Fetch's `error` redirect mode. Redirect statuses are rejected and credentials are never forwarded to a redirect target. These checks do not establish live library CPU usage, GitHub App authorization, or Revit operation.
+
+Before publishing the connector update: validate live GitHub App permissions, free-plan CPU/quota usage, per-PC provisioning, real Windows/Revit scheduled sync, owner-approved merge/download, revocation and the beta15-to-beta17 update path. Keep beta17 a pilot/draft until those checks pass. Do not merge a sample candidate without owner approval.

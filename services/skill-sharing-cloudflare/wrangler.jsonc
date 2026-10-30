@@ -1,0 +1,23 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "autodesk-skill-service",
+  "main": "src/index.mjs",
+  "account_id": "9005326001bbb3ef9bc748643745e71f",
+  "compatibility_date": "2026-10-28",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": false,
+  "observability": { "enabled": false },
+  "vars": {
+    "GITHUB_APP_ID": "5506370",
+    "GITHUB_INSTALLATION_ID": "176074887",
+    "GITHUB_REPOSITORY": "EhabHassan007/Autodesk-MCP",
+    "GITHUB_BASE_BRANCH": "main"
+  },
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "autodesk-skills",
+    "database_id": "3abe835e-22d1-4441-9c0c-ef844d8a1116",
+    "migrations_dir": "migrations"
+  }]
+}
