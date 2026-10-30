@@ -33,13 +33,19 @@ Serve HTTPS on a domain your PCs can reach. Proxy to container port 8080. Limit 
 
 ## Enroll PCs without team GitHub accounts
 
-The administrator runs the included utility, not the team member:
+The administrator runs the included utility, not the team member. On Windows (Cloudflare service):
+
+```
+powershell -ExecutionPolicy Bypass -File services\skill-sharing-cloudflare\tools\New-DeviceEnrollment.ps1 -Label Office-PC-01,Office-PC-02
+```
+
+This writes `Documents\Autodesk-MCP-Enrollments\<label>\enrollment.json` per PC. With Python:
 
 ```
 python admin.py enroll --service-url https://YOUR-SERVICE-HOST --label Office-PC-01 --output skill-service-device.json
 ```
 
-It prompts for the service administrator token without displaying it. It writes one **device credential**, which can only submit skill candidates and download approved skills. It has no GitHub API access. Enrollment requires an existing admin token; devices cannot enroll themselves anonymously.
+Either utility prompts for the service administrator token without displaying it. It writes one **device credential**, which can only submit skill candidates and download approved skills. It has no GitHub API access. Enrollment requires an existing admin token; devices cannot enroll themselves anonymously.
 
 Place that file beside `INSTALL Autodesk MCP Connector.cmd` in the extracted connector folder before deploying the single setup to that PC/user. Use Intune, your endpoint-management tool, or another secure admin deployment process. Do not add the enrollment file to public release assets. Use a distinct enrollment for each participating PC/user.
 
