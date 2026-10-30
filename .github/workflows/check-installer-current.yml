@@ -1,0 +1,22 @@
+name: Check stored installer is current
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  installer-current:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Fails when source/runtime changed without rebuilding the stored ZIPs, or a join code is committed.
+      - name: Stored installer matches source and holds no join code
+        shell: powershell
+        run: ./release-preparation/beta17/tests/check-installer-current.ps1
