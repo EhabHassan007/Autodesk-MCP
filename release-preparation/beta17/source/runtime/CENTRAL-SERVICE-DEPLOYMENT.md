@@ -43,7 +43,7 @@ It prompts for the service administrator token without displaying it. It writes 
 
 Place that file beside `INSTALL Autodesk MCP Connector.cmd` in the extracted connector folder before deploying the single setup to that PC/user. Use Intune, your endpoint-management tool, or another secure admin deployment process. Do not add the enrollment file to public release assets. Use a distinct enrollment for each participating PC/user.
 
-Setup stores the credential encrypted for the current Windows user using DPAPI, removes the plaintext enrollment file from the extracted installer folder after successful import, and starts a first background collection/sync. Weekly jobs then run in that user's session. No team GitHub account, Git installation, author name/email command, or separate skills upload is required for MCP workflow guidance.
+Setup also accepts the file as `enrollment.json`, or from any path through `Setup-BimCad.ps1 -EnrollmentPath`. Setup stores the credential encrypted for the current Windows user using DPAPI, overwrites and deletes the plaintext enrollment file after every import attempt (successful or not), writes an `[ENROLLMENT_OK]` or `[ENROLLMENT_FAILED]` line to `%LOCALAPPDATA%\AutodeskMcpConnector\setup.log`, and starts a first background collection/sync. Weekly jobs then run in that user's session. No team GitHub account, Git installation, author name/email command, or separate skills upload is required for MCP workflow guidance.
 
 IT must run setup in the intended user's context. An administrator/SYSTEM account would encrypt the credential for the wrong identity. Existing installs can be provisioned through the included Initialize-SkillService.ps1 under that user's context.
 

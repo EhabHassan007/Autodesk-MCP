@@ -9,3 +9,5 @@ The administrator must deploy the service and install its GitHub App. See CENTRA
 Settings provides Preview saved skills, Submit skills for review now, Sharing service status and the weekly log. Submission and scheduled runs happen in the background. Credentials are stored encrypted for the enrolled Windows user. Existing local skill edits are preserved when approved updates are downloaded.
 
 Discovery covers Codex skills, .agents/skills, Claude Code skills and explicit team-candidates. Additional project skill folders must be configured by the administrator. Cloud chats and native Claude cloud skill uploads are not scanned.
+
+To keep a personal skill off the review queue, add its folder name on its own line to `%LOCALAPPDATA%\AutodeskMcpSkillCollection\excluded-skills.txt`. Lines starting with `#` are comments. Excluded skills are not copied into review packages, not listed in REVIEW.md and never submitted.
