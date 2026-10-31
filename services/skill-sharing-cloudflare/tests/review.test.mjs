@@ -60,8 +60,11 @@ test('required checks block approval; secrets, personal paths and client data ar
   assert.deepEqual(r.flags.map(f=>[f.kind,f.line]), [['secret',7],['personal-path',8],['client-data',9],['personal-path',10]], 'the approved email line is not flagged again');
   // Double-encoded UTF-8 as seen in intake PR #24: an em dash arriving as mojibake. Real non-ASCII text is not flagged.
   const twice = Buffer.from(Buffer.from('—','utf8').toString('latin1'),'utf8').toString('latin1');
-  const encoded = reviewChecks('acad-x','autocad',{'SKILL.md':manifest('acad-x')+'\nStep one '+twice+' read.\nAlso â€” here.\nArabic مرحبا, café — fine.'});
-  assert.deepEqual(encoded.flags.map(f=>[f.kind,f.line]), [['encoding',6],['encoding',7]]);
+  const once = text => Buffer.from(text,'utf8').toString('latin1');
+  const encoded = reviewChecks('acad-x','autocad',{'SKILL.md':manifest('acad-x')+'\nStep one '+twice+' read.\nAlso â€” here.\nArabic مرحبا, café — fine.'
+    // One Latin-1 layer, as stored on main before PR #30: "—", "→" and "“" each become "â" plus C1 controls.
+    +'\nOne layer '+once('—')+' dash.\nArrow '+once('→')+' and '+once('“quoted”')+'.\nPrices in £ or €, “” → — and ôa stay unflagged.'});
+  assert.deepEqual(encoded.flags.map(f=>[f.kind,f.line]), [['encoding',6],['encoding',7],['encoding',9],['encoding',10]]);
   assert.match(reviewChecks('acad-x','autocad',{'SKILL.md':'---\nname: other\ndescription: x\n---'}).blocked[0], /structure check/);
   assert.ok(reviewChecks('acad-x','autocad',{'SKILL.md':'---\nname: acad-x\n---'}).blocked.some(b=>/description/.test(b)));
   assert.ok(reviewChecks('acad-x','autocad',{'SKILL.md':manifest('acad-x','category: revit\n')}).blocked.some(b=>/category "revit"/.test(b)));
