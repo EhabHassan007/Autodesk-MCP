@@ -1,5 +1,6 @@
 import { createPrivateKey } from 'node:crypto';
-import { bytes, canonical, CATEGORIES, EXTENSIONS, MAX_BODY, SKILL_NAME, validateSkills } from './validation.mjs';
+import { bytes, canonical, CATEGORIES, EXTENSIONS, hash, MAX_BODY, SKILL_NAME, validateSkills } from './validation.mjs';
+import { compareSkill, folderKey } from './review.mjs';
 
 function base64url(value) { return Buffer.from(value).toString('base64url'); }
 
@@ -28,6 +29,35 @@ export function submissionCategory(name, skillText = '', approvedCategory = null
   if (/brand|identity/.test(name)) return 'branding-ci';
   return 'uncategorized';
 }
+
+// Skill folders in a git tree: name → {folder, category, files:{path:{sha,mode}}}. A name found in a
+// second folder goes to "duplicates" instead.
+export function skillFolders(tree) {
+  const prefix = '.agents/skills/', found = Object.create(null), duplicates = new Set();
+  for (const item of tree) {
+    if (item.type !== 'blob' || !item.path.startsWith(prefix)) continue;
+    const located = locateSkillFile(item.path.slice(prefix.length));
+    if (!located) continue;
+    const {name, category, folder, path} = located;
+    if (found[name] && found[name].folder !== folder) { duplicates.add(name); continue; }
+    found[name] ??= {folder, category, files:Object.create(null)};
+    found[name].files[path] = {sha:item.sha, mode:item.mode};
+  }
+  return {found, duplicates};
+}
+
+// Tree edits that put a skill's files at target and remove what is left at its old or target folder.
+// files: path → {content} or {sha} of an existing blob.
+export function placeSkill(tree, previous, target, files) {
+  const paths = new Set(Object.keys(files).map(path => target+path));
+  const edits = tree.filter(item => item.type === 'blob' && (item.path.startsWith(previous) || item.path.startsWith(target)) && !paths.has(item.path))
+    .map(item => ({path:item.path, mode:item.mode, type:'blob', sha:null}));
+  for (const [path, source] of Object.entries(files)) edits.push({path:target+path, mode:'100644', type:'blob', ...source});
+  return edits;
+}
+
+export const REVIEW_PR_LIMIT = 8;
+export const isIntakeBranch = ref => typeof ref === 'string' && ref.startsWith('skill-intake/');
 
 export class GitHubFailure extends Error {}
 export function safeGitHubDetail(error) {
@@ -90,8 +120,9 @@ export class GitHub {
     if (response.status === 404) { await response.body?.cancel(); return null; }
     return response.status === 204 ? null : response.json();
   }
-  async library() {
-    if (this.cached && Date.now()-this.cachedAt < 60000) return this.cached;
+  // fresh: re-read main's commit even when the cached copy is less than a minute old.
+  async library(fresh = false) {
+    if (!fresh && this.cached && Date.now()-this.cachedAt < 60000) return this.cached;
     const root = `/repos/${this.repo}`;
     const ref = await this.request('GET', `${root}/git/ref/heads/${encodeURIComponent(this.base)}`);
     if (this.cached?.commit === ref.object.sha) { this.cachedAt = Date.now(); return this.cached; }
@@ -144,13 +175,10 @@ export class GitHub {
     if (!await this.request('GET', refPath, undefined, [200,404])) {
       // Each skill goes to .agents/skills/<category>/<name>/; files at its previous location are removed,
       // so a re-categorised or flat legacy skill moves instead of being duplicated.
-      const target = Object.fromEntries(Object.entries(skills).map(([name,files])=>[name,
-        `.agents/skills/${submissionCategory(name,files['SKILL.md'],library.categories?.[name])}/${name}/`]));
       const previous = name => library.locations?.[name] ? `.agents/skills/${library.locations[name]}/` : `.agents/skills/${name}/`;
-      const paths = new Set(Object.entries(skills).flatMap(([name,files])=>Object.keys(files).map(path=>target[name]+path)));
-      const edits = library.tree.filter(item=>item.type==='blob' && Object.keys(skills).some(name=>item.path.startsWith(previous(name)) || item.path.startsWith(target[name])) && !paths.has(item.path))
-        .map(item=>({path:item.path,mode:item.mode,type:'blob',sha:null}));
-      for (const [name,files] of Object.entries(skills)) for (const [path,content] of Object.entries(files)) edits.push({path:target[name]+path,mode:'100644',type:'blob',content});
+      const edits = Object.entries(skills).flatMap(([name,files])=>placeSkill(library.tree, previous(name),
+        `.agents/skills/${submissionCategory(name,files['SKILL.md'],library.categories?.[name])}/${name}/`,
+        Object.fromEntries(Object.entries(files).map(([path,content])=>[path,{content}]))));
       const tree = await this.request('POST', `${root}/git/trees`, {base_tree:library.treeSha,tree:edits});
       const commit = await this.request('POST', `${root}/git/commits`, {message:'Propose saved Autodesk workflows for review',tree:tree.sha,parents:[library.commit]});
       try { await this.request('POST', `${root}/git/refs`, {ref:'refs/heads/'+branch,sha:commit.sha}); }
@@ -173,5 +201,106 @@ export class GitHub {
       if (existing) return existing;
       throw error;
     }
+  }
+  // Text of blobs by sha, 40 per GraphQL call; binary, missing or oversized blobs map to null.
+  async texts(shas) {
+    const out = Object.create(null), list = [...new Set(shas)], [owner,name] = this.repo.split('/');
+    for (let offset=0; offset<list.length; offset+=40) {
+      const group = list.slice(offset,offset+40);
+      const queries = group.map((sha,i) => `b${i}: object(oid:${JSON.stringify(sha)}) { ... on Blob { text isBinary byteSize } }`).join('\n');
+      const response = await this.request('POST','/graphql', {query:`query { repository(owner:${JSON.stringify(owner)}, name:${JSON.stringify(name)}) { ${queries} } }`});
+      if (!response?.data?.repository) throw new GitHubFailure('Uploaded files could not be read from GitHub.');
+      group.forEach((sha,i) => {
+        const blob = response.data.repository[`b${i}`];
+        out[sha] = blob && !blob.isBinary && typeof blob.text === 'string' && blob.byteSize <= 256*1024 ? blob.text.replace(/^﻿/, '') : null;
+      });
+    }
+    return out;
+  }
+  intakePR(pr) {
+    return pr?.state === 'open' && isIntakeBranch(pr.head?.ref) && pr.head?.repo?.full_name === this.repo && pr.base?.ref === this.base;
+  }
+  // Every skill an intake PR proposes that differs from the approved copy on main.
+  // The PR's own base decides what it proposes, so a stale branch never "proposes" main's older text.
+  async reviewPRs(pulls, library) {
+    const root = `/repos/${this.repo}`, approved = skillFolders(library.tree), prs = [], pending = [];
+    for (const pull of pulls) {
+      const pr = {number:pull.number, url:`https://github.com/${this.repo}/pull/${pull.number}`, title:String(pull.title ?? '').slice(0,200),
+        submitted_at:Math.floor(Date.parse(pull.created_at)/1000) || 0, head_sha:pull.head.sha, proposed:[], already_approved:[], outside:[]};
+      prs.push(pr);
+      try {
+        const head = await this.request('GET', `${root}/git/commits/${pull.head.sha}`);
+        const base = head.parents?.[0]?.sha;
+        const headTree = await this.request('GET', `${root}/git/trees/${head.tree.sha}?recursive=1`);
+        const baseTree = base === library.commit ? {tree:library.tree} : await this.request('GET', `${root}/git/trees/${base}?recursive=1`);
+        if (!headTree || !baseTree || headTree.truncated || baseTree.truncated) throw new GitHubFailure('The intake branch is too large to review here.');
+        const blobs = tree => new Map(tree.filter(i => i.type === 'blob').map(i => [i.path, i.sha+':'+i.mode]));
+        const before = blobs(baseTree.tree), after = blobs(headTree.tree);
+        pr.outside = [...new Set([...before.keys(), ...after.keys()])].filter(p => !p.startsWith('.agents/skills/') && before.get(p) !== after.get(p)).slice(0,20);
+        const proposed = skillFolders(headTree.tree), original = skillFolders(baseTree.tree);
+        for (const [name, folder] of Object.entries(proposed.found)) {
+          const was = original.found[name];
+          if (was && was.folder === folder.folder && folderKey(was.files) === folderKey(folder.files)) continue;   // untouched by this upload
+          const main = approved.found[name];
+          if (main && main.folder === folder.folder && folderKey(main.files) === folderKey(folder.files)) { pr.already_approved.push(name); continue; }
+          pr.proposed.push(name);
+          pending.push({pr, name, folder, main, duplicate:proposed.duplicates.has(name), stale:folderKey(was?.files ?? {}) !== folderKey(main?.files ?? {})});
+        }
+      } catch (error) { pr.error = error instanceof GitHubFailure ? error.message : 'This pull request could not be read.'; }
+    }
+    // Only files that differ from the approved copy are downloaded.
+    const needed = pending.flatMap(p => Object.entries(p.folder.files).filter(([path,f]) => p.main?.files[path]?.sha !== f.sha).map(([,f]) => f.sha));
+    const texts = needed.length ? await this.texts(needed) : {};
+    const items = [];
+    for (const p of pending) {
+      const compared = compareSkill(p.name, p.folder, p.main, texts, library.skills[p.name] ?? {});
+      if (p.duplicate) compared.checks.blocked.push('The upload has this skill name in more than one folder.');
+      items.push({pr:p.pr.number, pr_url:p.pr.url, head_sha:p.pr.head_sha, submitted_at:p.pr.submitted_at, name:p.name,
+        category:p.folder.category ?? 'uncategorized', folder:p.folder.folder, approved_folder:p.main?.folder ?? null,
+        status:compared.status, stale:p.stale, key:await hash(folderKey(p.folder.files)),
+        approved_key:p.main ? await hash(p.main.folder+'|'+folderKey(p.main.files)) : 'none',
+        head_files:Object.fromEntries(Object.entries(p.folder.files).map(([path,f]) => [path,f.sha])),
+        files:compared.files, checks:compared.checks});
+    }
+    return {prs, items};
+  }
+  // Pending uploads across the oldest open intake PRs; "more" says older PRs must be decided first.
+  async reviewQueue(limit = REVIEW_PR_LIMIT) {
+    const library = await this.library(true);
+    const pulls = (await this.request('GET', `/repos/${this.repo}/pulls?state=open&base=${encodeURIComponent(this.base)}&sort=created&direction=asc&per_page=100`))
+      .filter(pr => this.intakePR(pr));
+    return {library_commit:library.commit, more:pulls.length > limit, ...await this.reviewPRs(pulls.slice(0,limit), library)};
+  }
+  // One PR, re-read at decision time; null when it is no longer an open intake PR.
+  async reviewOne(number) {
+    const library = await this.library(true);
+    const pull = await this.request('GET', `/repos/${this.repo}/pulls/${number}`, undefined, [200,404]);
+    if (!this.intakePR(pull)) return null;
+    const {prs, items} = await this.reviewPRs([pull], library);
+    return {pr:prs[0], items};
+  }
+  // Writes one reviewed skill to main: exactly the blobs the owner saw, placed under the chosen category.
+  // The ref update is never forced, so a main that moved meanwhile makes this fail instead of overwriting.
+  async approveSkill(item, category) {
+    const library = await this.library();
+    const root = `/repos/${this.repo}`;
+    const previous = `.agents/skills/${item.approved_folder ?? item.name}/`, target = `.agents/skills/${category}/${item.name}/`;
+    const edits = placeSkill(library.tree, previous, target, Object.fromEntries(Object.entries(item.head_files).map(([path,sha]) => [path,{sha}])));
+    const tree = await this.request('POST', `${root}/git/trees`, {base_tree:library.treeSha, tree:edits});
+    const commit = await this.request('POST', `${root}/git/commits`, {message:`Approve ${item.name} from skill intake #${item.pr}`, tree:tree.sha, parents:[library.commit]});
+    try { await this.request('PATCH', `${root}/git/refs/heads/${encodeURIComponent(this.base)}`, {sha:commit.sha, force:false}); }
+    catch (error) {
+      this.cached = null;
+      if (/HTTP 422/.test(error?.message)) throw new GitHubFailure('Main changed while approving. Refresh and approve again.');
+      throw error;
+    }
+    this.cached = null;
+    return commit.sha;
+  }
+  // Leaves a summary and closes the intake PR without merging it.
+  async closeIntake(number, summary) {
+    const root = `/repos/${this.repo}`;
+    await this.request('POST', `${root}/issues/${number}/comments`, {body:summary});
+    await this.request('PATCH', `${root}/pulls/${number}`, {state:'closed'});
   }
 }

@@ -95,9 +95,13 @@ try {
   assert.equal(person.person_name,'Test Person');assert.equal(person.enroll_ip,'203.0.113.5');
   assert.equal(overview.usage.find(u=>u.device===member.device_id&&u.name==='revit-check').last7,5);
   assert.equal((await call('/admin')).headers.get('Content-Type'),'text/html; charset=utf-8');
+  // Review queue against real D1 (review_decisions migration) with no open uploads.
+  const reviews=await call('/admin/api/reviews','GET',admin);
+  assert.equal(reviews.status,200,await reviews.clone().text());
+  assert.equal((await reviews.json()).pending,0);
   assert.equal((await call('/admin/devices/'+member.device_id+'/block','POST',admin)).status,200);
   assert.equal((await call('/v1/library','GET',member.device_token)).status,401);
-  console.log('PASS: workerd + D1 enrollment, PKCS#1 signing, approved library, draft-only submission, restart persistence, deduplication, revocation, team join, usage and admin overview. GitHub mocked.');
+  console.log('PASS: workerd + D1 enrollment, PKCS#1 signing, approved library, draft-only submission, restart persistence, deduplication, revocation, team join, usage, admin overview and skill review queue. GitHub mocked.');
 } finally {
   await mf?.dispose();
   await rm(directory,{recursive:true,force:true});

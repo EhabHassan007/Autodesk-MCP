@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node tests/service.test.mjs",
+    "test": "node tests/service.test.mjs && node tests/review.test.mjs",
     "test:runtime": "wrangler deploy --dry-run --outdir .wrangler/check && node tests/runtime.mjs",
     "check": "wrangler deploy --dry-run",
     "dev": "wrangler dev",
