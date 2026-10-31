@@ -44,7 +44,23 @@ function Write-Step {
 # Machine-readable progress for the setup window (SetupWizard.ps1 ConvertFrom-SetupOutputLine).
 function Write-InstallPhase {
     param([string]$Step)
+    $script:CurrentInstallStep = $Step
     Write-Host ("[PHASE] {0}" -f $Step)
+}
+
+# Runs one install step so that its failure is reported against the step that was running and
+# the remaining steps still run. Setup exits with an error at the end if any step failed.
+$script:FailedInstallSteps = New-Object System.Collections.Generic.List[string]
+function Invoke-InstallStep {
+    param([string]$Step, [scriptblock]$Body)
+    Write-InstallPhase $Step
+    try { & $Body }
+    catch {
+        $failedStep = if ($script:CurrentInstallStep) { $script:CurrentInstallStep } else { $Step }
+        Write-Step ("{0} failed: {1}" -f $failedStep, $_.Exception.Message)
+        Write-InstallResult $failedStep 'failed' 'see the setup log'
+        $script:FailedInstallSteps.Add($failedStep)
+    }
 }
 
 function Write-InstallResult {
@@ -1915,36 +1931,49 @@ try {
             Write-InstallPhase 'files'
             $root = Get-Repository
             Write-InstallResult 'files' 'ok'
-            Write-InstallPhase 'skills'
-            Install-Skills $root
-            Write-InstallResult 'skills' 'ok'
-            Write-InstallPhase 'team'
-            # An administrator's enrollment file wins; otherwise the setup window's details are used.
-            if ($JoinName -and $JoinEmail -and [string]::IsNullOrWhiteSpace($EnrollmentPath)) { $null = Register-SkillServiceDevice -Root $root }
-            else { $null = Import-SkillServiceEnrollment -Root $root }
-            Write-InstallPhase 'revit'
-            if ($Product -in @('All','Revit') -and (Test-Revit2024Installed)) {
-                Install-RevitAddin $root
-                Write-InstallResult 'revit' 'ok' 'restart Revit to load it'
+            # The connector files are required by every later step; each later step fails on its own.
+            Invoke-InstallStep 'skills' {
+                Install-Skills $root
+                Write-InstallResult 'skills' 'ok'
             }
-            elseif ($Product -in @('All','Revit')) {
-                Write-Step 'Revit 2024 was not detected, so its add-in was skipped.'
-                Write-InstallResult 'revit' 'skipped' 'Revit 2024 is not installed'
+            Invoke-InstallStep 'team' {
+                # An administrator's enrollment file wins; otherwise the setup window's details are used.
+                if ($JoinName -and $JoinEmail -and [string]::IsNullOrWhiteSpace($EnrollmentPath)) { $null = Register-SkillServiceDevice -Root $root }
+                else { $null = Import-SkillServiceEnrollment -Root $root }
             }
-            if ($Product -in @('All','AutoCAD')) { Install-AutoCadBundleStep $root }
-            Write-InstallPhase 'updates'
-            $updateState = Read-UpdateState
-            if ($updateState.PSObject.Properties['notifications_user_disabled'] -and $updateState.notifications_user_disabled) {
-                Write-InstallResult 'updates' 'skipped' 'switched off in Settings'
+            Invoke-InstallStep 'revit' {
+                if ($Product -in @('All','Revit') -and (Test-Revit2024Installed)) {
+                    Install-RevitAddin $root
+                    Write-InstallResult 'revit' 'ok' 'restart Revit to load it'
+                }
+                elseif ($Product -in @('All','Revit')) {
+                    Write-Step 'Revit 2024 was not detected, so its add-in was skipped.'
+                    Write-InstallResult 'revit' 'skipped' 'Revit 2024 is not installed'
+                }
             }
-            else {
-                Enable-UpdateNotifications
-                Write-InstallResult 'updates' 'ok'
+            if ($Product -in @('All','AutoCAD')) { Invoke-InstallStep 'autocad' { Install-AutoCadBundleStep $root } }
+            Invoke-InstallStep 'updates' {
+                $updateState = Read-UpdateState
+                if ($updateState.PSObject.Properties['notifications_user_disabled'] -and $updateState.notifications_user_disabled) {
+                    Write-InstallResult 'updates' 'skipped' 'switched off in Settings'
+                }
+                else {
+                    Enable-UpdateNotifications
+                    Write-InstallResult 'updates' 'ok'
+                }
             }
-            Register-DetectedAiClients $root
-            if ($Product -in @('All','AutoCAD')) { Test-AutoCadSetup }
-            if ($Product -in @('All','Revit')) { Test-RevitSetup }
-            Test-AutodeskRegistration
+            Invoke-InstallStep 'codex' { Register-DetectedAiClients $root }
+            # Final checks only report; they never undo a completed step.
+            $script:CurrentInstallStep = ''
+            foreach ($check in @(
+                    $(if ($Product -in @('All','AutoCAD')) { { Test-AutoCadSetup } }),
+                    $(if ($Product -in @('All','Revit')) { { Test-RevitSetup } }),
+                    { Test-AutodeskRegistration }) | Where-Object { $_ }) {
+                try { & $check } catch { Write-Step ("Check needs attention: {0}" -f $_.Exception.Message) }
+            }
+            if ($script:FailedInstallSteps.Count) {
+                throw ("Setup finished, but these steps failed: {0}. The other steps were completed; see the setup log." -f (($script:FailedInstallSteps | Select-Object -Unique) -join ', '))
+            }
             Write-Step 'Setup complete. Restart Codex, Claude, and any running Revit session, then open AutoCAD or Revit.'
         }
         'Update' {

@@ -50,3 +50,18 @@ Live-verified on AutoCAD 2025 (ProgID `AutoCAD.Application.25`) through PowerShe
 - `StartUndoMark`/`EndUndoMark` around each stage; log handles.
 - AutoCAD deadlocked after a PowerShell task was stopped mid-COM-call. If calls start failing, stop and ask the user about dialogs. If AutoCAD is frozen, back up the `.sv$` autosave first.
 - After `save_drawing`, the connector's `saved` flag can stay false when DBMOD has only window/view bits (e.g. 24). Confirm with the file timestamp instead.
+
+## Lessons from the first live run of annotate-sheet.ps1 (2026-10-31, central bar sheet)
+
+- **Logging:** in PowerShell 5.1, `@($genericList) | ConvertTo-Json` throws "Argument types do not match". The objects were already created, so a failed log write leaves real, unlogged objects behind. Fixed with `ConvertTo-Json -InputObject ([object[]]$log.ToArray())`. If a run fails at the log line, inspect the layout before retrying.
+- **Viewport views on a new layout:** COM `ActivePViewport`/`MSpace` fail with "There is no active modelspace viewport", the `MSPACE` + `CVPORT` route fails too, and `entmod` of DXF 12/45 returns nil. What works is COM properties only: read the DCS view offset (DXF 12), set `Target = wanted centre - offset`, then `CustomScale`.
+- **Copying a sheet inside one drawing:** `(command "_.-LAYOUT" "_C" "old" "new")` sent through `SendCommand` as LISP; a space in a layout name breaks plain command-line input. Make the new layout current (CTAB), then strip viewports, OLE frames (old renders are `AcDbOle2Frame`, not `AcDbRasterImage`), annotation blocks, dimensions and view titles. Change the drawing title and sheet number texts on that layout only.
+- **Copying between drawings:** `CopyObjects` needs a typed `AcadEntity[]`, which needs a small C# helper compiled against `Autodesk.AutoCAD.Interop.Common.dll`, loaded with `Add-Type -Path` first.
+- **Bringing in generated geometry:** `ModelSpace.InsertBlock(<dwg>)`, `Explode`, delete the reference and the temporary block definition, and drop the standalone note and dimension layers. Check that the target area is empty by testing every object's bounding box; window selection only sees what is on screen.
+- **Linetypes:** a DXF whose layers reference an undefined linetype (e.g. HIDDEN) fails in the core console ("Invalid or incomplete DXF") and stalls the GUI open. Define every linetype in the generator.
+- **DXF to DWG without touching the user's session:** `accoreconsole.exe /i in.dxf /s saveas.scr` with `FILEDIA 0`, `_.SAVEAS 2018 "out.dwg"`.
+- **Close levels:** on 1:30 elevations, levels 200 apart (+0.90/+1.10) overlap; give the upper one its own `x` in the spec.
+- **Security prompts:** if AutoCAD shows "Security - Unsigned Executable File", stop and let the user decide. Never answer it for them.
+- **Never change global layer state in a project drawing.** Switching off `A-ANNO-DIMS` to hide generated model notes also hid the project's own radial dimensions on other sheets. Drop the generated annotation entities at insert time instead, and leave layers alone. If a layer must change, record its prior state and restore it.
+- **A failed run can leave objects you never logged.** Before rerunning a stage that failed, scan the layout for duplicates (e.g. a second GENERAL NOTES MText) and remove only objects this task created.
+- **Swapping in revised geometry:** delete the logged model handles and logged annotation, confirm the model count returns to its original value, reinsert at the same origin, and rerun the spec. Viewports and view titles can stay.

@@ -126,7 +126,7 @@ try {
     }
     finally {
         $doc.EndUndoMark()
-        if ($log.Count) { @($log) | ConvertTo-Json | Set-Content -Encoding utf8 $LogFile }
+        if ($log.Count) { ConvertTo-Json -InputObject ([object[]]$log.ToArray()) | Set-Content -Encoding utf8 $LogFile }   # @($list) throws "Argument types do not match" in PS 5.1
     }
     "created $($log.Count): " + (($log | Group-Object kind | ForEach-Object { "$($_.Name)=$($_.Count)" }) -join ' ')
 }
