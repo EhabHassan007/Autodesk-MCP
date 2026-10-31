@@ -1368,10 +1368,33 @@ function New-AutoCadCuix {
     finally { $zip.Dispose() }
 }
 
+# With SECURELOAD=1 AutoCAD asks before loading the LISP from %APPDATA% ("not located in a trusted folder",
+# seen live on AutoCAD 2025). Trusting only the bundle's Contents folder, in every AutoCAD profile of this user,
+# removes that prompt (approved by the owner). Profiles exist once AutoCAD has started; it reads the value at start.
+function Add-AutoCadTrustedPath {
+    param([string]$Path, [string]$RegistryRoot = 'HKCU:\Software\Autodesk\AutoCAD')
+    $updated = 0
+    foreach ($release in @(Get-ChildItem -LiteralPath $RegistryRoot -ErrorAction SilentlyContinue)) {
+        foreach ($product in @(Get-ChildItem -LiteralPath $release.PSPath -ErrorAction SilentlyContinue)) {
+            foreach ($profile in @(Get-ChildItem -LiteralPath (Join-Path $product.PSPath 'Profiles') -ErrorAction SilentlyContinue)) {
+                $variables = Join-Path $profile.PSPath 'Variables'
+                if (-not (Test-Path -LiteralPath $variables)) { continue }
+                $current = [string](Get-ItemProperty -LiteralPath $variables -ErrorAction SilentlyContinue).TRUSTEDPATHS
+                $entries = @($current -split ';' | Where-Object { $_ })
+                if (@($entries | Where-Object { $_.TrimEnd('\') -ieq $Path.TrimEnd('\') }).Count) { continue }
+                Set-ItemProperty -LiteralPath $variables -Name TRUSTEDPATHS -Value (@($entries + $Path) -join ';')
+                $updated++
+            }
+        }
+    }
+    $updated
+}
+
 # Adds the Smart Autodesk Connector panel to the AutoCAD Add-ins tab for this user (no admin rights needed).
 # AutoCAD loads it at its next start.
 function Install-AutoCadBundle {
-    param([string]$Root, [string]$PluginsRoot = (Join-Path $env:APPDATA 'Autodesk\ApplicationPlugins'))
+    param([string]$Root, [string]$PluginsRoot = (Join-Path $env:APPDATA 'Autodesk\ApplicationPlugins'),
+        [string]$RegistryRoot = 'HKCU:\Software\Autodesk\AutoCAD')
     $source = Join-Path $Root 'src\autocad\SmartAutodeskConnector.bundle'
     $target = Join-Path $PluginsRoot 'SmartAutodeskConnector.bundle'
     $staging = Join-Path ([IO.Path]::GetTempPath()) ('SmartAutodeskConnector-' + [Guid]::NewGuid().ToString('N'))
@@ -1390,6 +1413,8 @@ function Install-AutoCadBundle {
     finally {
         if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue }
     }
+    $trusted = Add-AutoCadTrustedPath -Path (Join-Path $target 'Contents') -RegistryRoot $RegistryRoot
+    if ($trusted -gt 0) { Write-Step ("Added the panel's folder to AutoCAD's trusted paths in {0} profile(s)." -f $trusted) }
     Write-Step ("Installed the AutoCAD Add-ins panel at {0}. Restart AutoCAD to load it." -f $target)
 }
 

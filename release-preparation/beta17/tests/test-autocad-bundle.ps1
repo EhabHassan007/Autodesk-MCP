@@ -64,7 +64,15 @@ try{
  . (Join-Path $runtime 'installer/Setup-BimCad.ps1') -LibraryOnly
  function Write-Step {param($Message)}
  $plugins=Join-Path $t 'ApplicationPlugins'
- Install-AutoCadBundle -Root (Resolve-Path $runtime).Path -PluginsRoot $plugins
+ # A throwaway registry tree shaped like HKCU\Software\Autodesk\AutoCAD: one profile already trusting a folder,
+ # one with no trusted paths, and a product with no profiles yet.
+ $registry='HKCU:\Software\SmartAutodeskConnectorTest-'+[guid]::NewGuid().ToString('N')
+ $profileA="$registry\R25.0\ACAD-8101:409\Profiles\<<Unnamed Profile>>\Variables"
+ $profileB="$registry\R25.0\ACAD-8101:409\Profiles\Second\Variables"
+ New-Item -Path $profileA -Force|Out-Null; New-Item -Path $profileB -Force|Out-Null; New-Item -Path "$registry\R24.3\ACAD-7101:409" -Force|Out-Null
+ Set-ItemProperty -LiteralPath $profileA -Name TRUSTEDPATHS -Value 'C:\Existing'
+ $registryTest=$registry
+ Install-AutoCadBundle -Root (Resolve-Path $runtime).Path -PluginsRoot $plugins -RegistryRoot $registry
  $installed=Join-Path $plugins 'SmartAutodeskConnector.bundle'
  foreach($file in 'PackageContents.xml','Contents/SmartAutodeskConnector.lsp','Contents/SmartAutodeskConnector.cuix'){ Assert (Test-Path -LiteralPath (Join-Path $installed $file)) "Installed bundle lacks $file" }
  Assert (-not (Test-Path -LiteralPath (Join-Path $installed 'Contents/cuix-source'))) 'CUIX source parts were copied into the installed bundle'
@@ -73,7 +81,12 @@ try{
  try{ $names=@($zip.Entries|ForEach-Object{$_.FullName}) } finally { $zip.Dispose() }
  foreach($name in '[Content_Types].xml','_rels/.rels','Header.cui','MenuGroup.cui','RibbonRoot.cui'){ Assert ($names -contains $name) "Built .cuix lacks $name" }
  foreach($image in $menu.SelectNodes('//SmallImage|//LargeImage')){ Assert ($names -contains $image.Name) "Built .cuix lacks $($image.Name)" }
- Install-AutoCadBundle -Root (Resolve-Path $runtime).Path -PluginsRoot $plugins   # a reinstall replaces the files in place
+ $contents=Join-Path $installed 'Contents'
+ Assert ((Get-ItemProperty -LiteralPath $profileA).TRUSTEDPATHS -eq "C:\Existing;$contents") 'Existing trusted path not kept, or bundle folder not added'
+ Assert ((Get-ItemProperty -LiteralPath $profileB).TRUSTEDPATHS -eq $contents) 'Bundle folder not trusted in a profile without trusted paths'
+ Install-AutoCadBundle -Root (Resolve-Path $runtime).Path -PluginsRoot $plugins -RegistryRoot $registry   # a reinstall replaces the files in place
+ Assert ((Get-ItemProperty -LiteralPath $profileA).TRUSTEDPATHS -eq "C:\Existing;$contents") 'Reinstall added the bundle folder twice'
+ Assert ((Add-AutoCadTrustedPath -Path $contents -RegistryRoot $registry) -eq 0) 'Already-trusted profiles were rewritten'
  function Get-AutoCadReleases { @() }
  $out=Install-AutoCadBundleStep (Resolve-Path $runtime).Path 6>&1|Out-String
  Assert ($out -match '\[PHASE\] autocad' -and $out -match '\[RESULT\] autocad=skipped') "No AutoCAD should skip the step: $out"
@@ -101,8 +114,10 @@ try{
  function Start-ConnectorAgent {}
  Request-ConnectorUpdate
  Assert (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'AutodeskMcpConnector/update-requested.flag')) 'Update now did not write update-requested.flag'
- $o=Get-ConnectionStatusOutcome "[10:00:00] AutoCAD installation detected: R25.0`n[10:00:01] Live AutoCAD connection passed: version 25.0; a.dwg; 3 layer(s).`n[10:00:02] Codex has the Smart Autodesk Connector registration." $true
+ # Live AutoCAD 2025 run: the installer also echoes raw `codex mcp get` output, which must not reach the window.
+ $o=Get-ConnectionStatusOutcome "Smart Autodesk Connector - Status`n[10:00:00] AutoCAD installation detected: R25.0`n[10:00:01] Live AutoCAD connection passed: version 25.0; a.dwg; 3 layer(s).`nautodesk`n  enabled: true`n  transport: stdio`n[10:00:02] Codex has the Smart Autodesk Connector registration." $true
  Assert ($o.Kind -eq 'Good' -and $o.Body -match 'Codex has' -and $o.Body -match 'agent is running' -and $o.Body -notmatch '\[10:') "Status lines wrong: $($o.Body)"
+ Assert ($o.Body -notmatch 'transport|enabled|- Status' -and @($o.Body -split "`n").Count -eq 4) "Raw command output leaked into Status: $($o.Body)"
  Assert ((Get-ConnectionStatusOutcome '[10:00:00] AutoCAD is running, but no drawing is open.' $false).Title -eq 'Open a drawing to connect') 'No-drawing state not recognised'
  Assert ((Get-ConnectionStatusOutcome '' $false).Kind -eq 'Bad') 'Unreachable AutoCAD not reported'
  'PASS: ConnectorActions outcomes'
@@ -110,5 +125,6 @@ try{
 finally{
  $env:LOCALAPPDATA=$savedLocal
  Remove-Item -LiteralPath $t -Recurse -Force -ErrorAction SilentlyContinue
+ if ($registryTest) { Remove-Item -LiteralPath $registryTest -Recurse -Force -ErrorAction SilentlyContinue }
 }
 'PASS: AutoCAD Add-ins bundle'

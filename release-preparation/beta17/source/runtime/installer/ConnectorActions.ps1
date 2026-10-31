@@ -112,8 +112,10 @@ function Get-ConnectionStatusOutcome {
     param([string]$Output, [bool]$AgentRunning)
     $lines = @()
     foreach ($line in ($Output -split "`r?`n")) {
-        $text = ($line -replace '^\[\d{2}:\d{2}:\d{2}\]\s*', '').Trim()
-        if (-not $text -or $text -like 'Revit*') { continue }
+        # Only the installer's own timestamped findings; the raw `codex mcp get` output it echoes is left out.
+        if ($line -notmatch '^\[\d{2}:\d{2}:\d{2}\]\s*(.+)$') { continue }
+        $text = $Matches[1].Trim()
+        if ($text -like 'Revit*') { continue }
         $good = $text -match 'passed|has the Smart Autodesk Connector registration|installation detected|is running at'
         $lines += $(if ($good) { [char]0x2713 } else { [char]0x2022 }) + '  ' + $text
     }
@@ -146,6 +148,8 @@ function Show-ConnectorAction {
     $buttons = New-Object Windows.Forms.FlowLayoutPanel
     $buttons.FlowDirection = 'RightToLeft'
     $buttons.Bounds = New-Object Drawing.Rectangle(0, ($height - 56), 508, 50)
+    # Bottom-anchored, so they follow when the window grows to fit a long result.
+    foreach ($control in $progress, $option, $buttons) { $control.Anchor = 'Bottom, Left' }
     $form.Controls.AddRange(@($title, $body, $progress, $option, $buttons))
     $timer = New-Object Windows.Forms.Timer
     $timer.Interval = 250
@@ -153,6 +157,10 @@ function Show-ConnectorAction {
     $showResult = {
         param($Outcome)
         $title.Text = $Outcome.Title; $title.ForeColor = $C[$Outcome.Kind]; $body.Text = $Outcome.Body; $progress.Visible = $false
+        # Grow (never shrink) so the result and the buttons below it stay visible; measured in scaled pixels.
+        $needed = $body.Bottom + 12 + ($form.ClientSize.Height - $progress.Top)
+        $limit = [int]([Windows.Forms.Screen]::FromControl($form).WorkingArea.Height * 0.9)
+        if ($needed -gt $form.ClientSize.Height) { $form.ClientSize = New-Object Drawing.Size($form.ClientSize.Width, [Math]::Min($needed, $limit)) }
     }
     $addButton = {
         param([string]$Text, [bool]$Primary, [scriptblock]$OnClick)
