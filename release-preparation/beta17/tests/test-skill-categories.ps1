@@ -70,6 +70,20 @@ try{
  New-Skill (Join-Path $intake '.agents/skills') 'general/revit-a' 'revit-a' 'general'
  & $git -C $intake add -A; & $git -C $intake -c user.name=t -c user.email=t@example.test commit -qm dup
  & $validate $false 'A duplicate skill name in another category was accepted'
+ # Moving approved text into a category folder is not re-flagged by the secret scan; a newly added secret still is.
+ & $git -C $intake checkout -q main
+ New-Skill (Join-Path $intake '.agents/skills') 'revit/revit-old' 'revit-old' 'revit'
+ Add-Content (Join-Path $intake '.agents/skills/revit/revit-old/SKILL.md') "`nKeep batch model lists free of access tokens.`nStep one.`nStep two.`nStep three."
+ & $git -C $intake add -A; & $git -C $intake -c user.name=t -c user.email=t@example.test commit -qm approved
+ & $git -C $intake checkout -q skill-intake/test; & $git -C $intake reset -q --hard main
+ New-Item -ItemType Directory (Join-Path $intake '.agents/skills/general') -Force|Out-Null
+ & $git -C $intake mv .agents/skills/revit/revit-old .agents/skills/general/revit-old
+ $moved=Join-Path $intake '.agents/skills/general/revit-old/SKILL.md'; [IO.File]::WriteAllText($moved,([IO.File]::ReadAllText($moved) -replace 'category: revit','category: general'))
+ & $git -C $intake -c user.name=t -c user.email=t@example.test commit -qam move
+ & $validate $true 'Approved text moved into another category was flagged as a new secret'
+ Add-Content $moved 'password: example-only'
+ & $git -C $intake -c user.name=t -c user.email=t@example.test commit -qam leak
+ & $validate $false 'A newly added secret was accepted'
 
  # 5. The approved library itself: every skill in a category folder, names unique, categories declared.
  $approved=@(Get-SkillFolders (Join-Path $repoRoot '.agents/skills'))

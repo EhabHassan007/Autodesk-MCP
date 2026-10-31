@@ -43,6 +43,14 @@ $skillFolders = @($changedRows | ForEach-Object {
 $blockedExtensions = @('.rvt','.rfa','.rte','.rft','.dwg','.dxf','.dgn','.nwc','.nwd','.ifc','.pdf','.doc','.docx','.xls','.xlsx','.ppt','.pptx','.zip','.7z','.rar','.exe','.dll','.msi','.pfx','.key','.pem','.png','.jpg','.jpeg','.gif')
 $sensitivePattern = '(?i)(api[_ -]?key|access[_ -]?token|client[_ -]?secret|password\s*[:=]|github_pat_|gh[pousr]_[a-z0-9_]+|begin (rsa|openssh|ec) private key|[a-z]:\\users\\|\\\\[^\\\s]+\\[^\\\s]+|autodesk docs://|bim 360://|acc://|\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b)'
 
+# Lines added under .agents/skills, by file. Diffing the whole library lets git match moved files to their old paths.
+$addedLines = New-Object System.Collections.Generic.List[object]
+$currentPath = ''
+foreach ($line in Invoke-Git diff -M --unified=0 "$BaseRef...HEAD" -- .agents/skills) {
+    if ($line -match '^\+\+\+ (?:b/)?(.+)$') { $currentPath = $matches[1]; continue }
+    if ($line.StartsWith('+')) { $addedLines.Add([pscustomobject]@{ Path = $currentPath; Text = $line.Substring(1) }) }
+}
+
 foreach ($folder in $skillFolders) {
     $name = ($folder -split '/')[-1]
     $category = if ($folder.Contains('/')) { ($folder -split '/')[0] } else { '' }
@@ -63,9 +71,12 @@ foreach ($folder in $skillFolders) {
         if ($item.PSIsContainer) { continue }
         if ($item.Length -gt 256KB) { throw "File exceeds 256 KB: $($item.FullName)" }
         if ($blockedExtensions -contains $item.Extension.ToLowerInvariant()) { throw "Binary or project file is blocked: $($item.FullName)" }
-        if (Select-String -LiteralPath $item.FullName -Pattern $sensitivePattern -Quiet -ErrorAction SilentlyContinue) {
-            throw "Potential secret or private project information found: $($item.FullName)"
-        }
+    }
+
+    # Scan only lines this branch adds, so approved text that was moved into a category folder is not re-flagged.
+    $flagged = @($addedLines | Where-Object { $_.Path.StartsWith(".agents/skills/$folder/") -and $_.Text -match $sensitivePattern } | ForEach-Object Text)
+    if ($flagged.Count -gt 0) {
+        throw "Potential secret or private project information found in $folder`n$($flagged -join [Environment]::NewLine)"
     }
 }
 
