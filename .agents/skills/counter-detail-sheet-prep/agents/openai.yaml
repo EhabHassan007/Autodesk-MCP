@@ -1,4 +1,0 @@
-interface:
-  display_name: "Counter details and sheet prep"
-  short_description: "Counter detail DXF/DWG and reference-style sheet annotation"
-  default_prompt: "Use $counter-detail-sheet-prep to annotate the counter sheet layout in the style of the reference layout, with short specification leaders, straight arrows, plain dimensions, levels and section callouts."
