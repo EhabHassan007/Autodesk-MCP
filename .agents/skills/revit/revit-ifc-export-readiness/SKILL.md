@@ -18,15 +18,15 @@ Perform a pre-export review without changing the model unless fixes are explicit
 
 Check:
 
-1. **File and model segregation** — one agreed building/discipline/part per file, consistent naming, no duplicated scope across exports, and a clear rule for podiums, towers, shared basements, or size-based splits.
-2. **Storeys and levels** — unique and standard-compliant names, correct elevations, intended building-storey status, reference/dummy levels excluded, and cross-model agreement.
-3. **Rooms and spaces** — placed and enclosed spaces, unique identifiers, correct boundaries and heights, required usage data, unit grouping, parking data, and area reconciliation against the project's declared calculations.
-4. **Classification and mapping** — intended IFC class and predefined type for every required category; explicit exclusion for items that should not export; no reliance on category defaults where the exchange requirement expects a deliberate mapping.
-5. **Required information** — property sets, shared parameters, type/instance placement, data types, controlled vocabulary, and completeness at the stated project stage. Distinguish a missing parameter binding from a bound but empty value.
-6. **Geometry and modelling** — correct host/storey, no unintended multi-storey elements, duplicate geometry, major gaps, floating objects, unresolved links, inappropriate placeholder content, or known hard clashes that affect the delivery.
-7. **Coordinates and units** — agreed coordinate reference, shared position, easting/northing/elevation, project and export units, true north, site placement, and gate/benchmark elevation when required.
-8. **Export configuration** — schema and model view definition, user-defined property sets, base quantities, space boundaries, linked-file handling, selected-view scope, phase, splitting settings, and geographic reference. Compare values, not only the setup name.
-9. **Package readiness** — file names, revision, issue status, expected companion files, folder structure, and package-size or compression constraints from the current delivery requirement.
+1. **File and model segregation** â one agreed building/discipline/part per file, consistent naming, no duplicated scope across exports, and a clear rule for podiums, towers, shared basements, or size-based splits.
+2. **Storeys and levels** â unique and standard-compliant names, correct elevations, intended building-storey status, reference/dummy levels excluded, and cross-model agreement.
+3. **Rooms and spaces** â placed and enclosed spaces, unique identifiers, correct boundaries and heights, required usage data, unit grouping, parking data, and area reconciliation against the project's declared calculations.
+4. **Classification and mapping** â intended IFC class and predefined type for every required category; explicit exclusion for items that should not export; no reliance on category defaults where the exchange requirement expects a deliberate mapping.
+5. **Required information** â property sets, shared parameters, type/instance placement, data types, controlled vocabulary, and completeness at the stated project stage. Distinguish a missing parameter binding from a bound but empty value.
+6. **Geometry and modelling** â correct host/storey, no unintended multi-storey elements, duplicate geometry, major gaps, floating objects, unresolved links, inappropriate placeholder content, or known hard clashes that affect the delivery.
+7. **Coordinates and units** â agreed coordinate reference, shared position, easting/northing/elevation, project and export units, true north, site placement, and gate/benchmark elevation when required.
+8. **Export configuration** â schema and model view definition, user-defined property sets, base quantities, space boundaries, linked-file handling, selected-view scope, phase, splitting settings, and geographic reference. Compare values, not only the setup name.
+9. **Package readiness** â file names, revision, issue status, expected companion files, folder structure, and package-size or compression constraints from the current delivery requirement.
 
 ## Exported IFC verification
 

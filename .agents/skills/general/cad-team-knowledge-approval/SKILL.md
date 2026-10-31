@@ -16,7 +16,7 @@ Use this skill when a team member asks to enable, run, or troubleshoot shared da
 
    > Review the CAD/BIM-related chats accessible to this signed-in user that changed since the previous run. Extract only demonstrated, reusable workflow knowledge. Create or update candidate skills under `%LOCALAPPDATA%\BIM-CAD-MCP\team-candidates\<skill-name>\SKILL.md`. Use generic names and examples. Do not copy chat transcripts, client or project names, model paths, cloud paths, element IDs, usernames, email addresses, credentials, screenshots, drawings, models, or generated logs. State whether each workflow was instruction-only, file-tested, read-tested, or write-tested with read-back. Then run `%LOCALAPPDATA%\BIM-CAD-MCP\scripts\submit-team-knowledge.ps1`. Stay quiet when there are no new candidates. When a pull request is created, report its link and that repository-owner approval is still required. If authentication or the privacy gate blocks submission, report the exact local problem without uploading anything.
 
-4. Keep notifications for meaningful results: a created pull request, a blocked privacy/authentication check, or required user action. Do not send a daily “nothing changed” message.
+4. Keep notifications for meaningful results: a created pull request, a blocked privacy/authentication check, or required user action. Do not send a daily ânothing changedâ message.
 
 Each team member needs this one-time local setup because one Codex account cannot read another person's chats.
 

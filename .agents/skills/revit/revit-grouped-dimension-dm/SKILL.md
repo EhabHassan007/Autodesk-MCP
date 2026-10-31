@@ -36,6 +36,6 @@ Use this workflow when dimensions in selected Revit views must change type and s
 
 ## Revit 2024 behavior
 
-In this environment, changing a group member through the API outside Edit Group raises “Changes to groups are allowed only in group edit mode” and offers Ungroup. Cancelling that dialog rolls back the attempted group-member transaction. Revit 2024 does not expose a usable `GroupEditScope` through this connection, and MCP external events do not run while the interactive Edit Group command is active. Use the Revit UI for the member-type change and the API for auditing, duplication, reassignment, and ungrouped dimensions.
+In this environment, changing a group member through the API outside Edit Group raises âChanges to groups are allowed only in group edit modeâ and offers Ungroup. Cancelling that dialog rolls back the attempted group-member transaction. Revit 2024 does not expose a usable `GroupEditScope` through this connection, and MCP external events do not run while the interactive Edit Group command is active. Use the Revit UI for the member-type change and the API for auditing, duplication, reassignment, and ungrouped dimensions.
 
 Keep mutations small and independently committed. Long bulk transactions can time out or roll back even when an intermediate response looks successful.
