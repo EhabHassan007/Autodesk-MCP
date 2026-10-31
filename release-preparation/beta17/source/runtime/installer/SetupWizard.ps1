@@ -9,6 +9,7 @@ $script:WizardSteps = @(
     @{ Id = 'files';          Label = 'Install connector files' },
     @{ Id = 'skills';         Label = 'Install workflow skills for Codex and Claude' },
     @{ Id = 'revit';          Label = 'Revit 2024 add-in' },
+    @{ Id = 'autocad';        Label = 'AutoCAD Add-ins panel' },
     @{ Id = 'codex';          Label = 'Connect Codex' },
     @{ Id = 'claude_desktop'; Label = 'Connect Claude Desktop' },
     @{ Id = 'claude_code';    Label = 'Connect Claude Code' },

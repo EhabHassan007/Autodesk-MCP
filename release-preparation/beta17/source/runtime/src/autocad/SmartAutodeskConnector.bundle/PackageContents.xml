@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Smart Autodesk Connector panel on the AutoCAD Add-ins tab. No compiled code: a partial CUIX adds the
+     buttons and a LISP file defines their commands. Setup-BimCad.ps1 (Install-AutoCadBundle) builds
+     Contents\SmartAutodeskConnector.cuix from Contents\cuix-source and copies this bundle to
+     %APPDATA%\Autodesk\ApplicationPlugins. -->
+<ApplicationPackage
+    SchemaVersion="1.0"
+    AutodeskProduct="AutoCAD"
+    Name="Smart Autodesk Connector"
+    Description="Skills Sync, Check Updates, Settings and Connection Status for the Smart Autodesk Connector."
+    AppVersion="1.0.0"
+    FriendlyVersion="1.0.0"
+    ProductType="Application"
+    SupportedLocales="Enu"
+    AppNameSpace="smartautodeskconnector.local"
+    Author="Smart Autodesk Connector"
+    ProductCode="{6B1E3C1A-5D2F-4F0B-9A47-3C8E2D7A9B10}"
+    UpgradeCode="{0E7C4B92-8A13-4D6E-B2F5-71A9C3D84E26}">
+  <CompanyDetails Name="Smart Autodesk Connector" Url="https://github.com/EhabHassan007/Autodesk-MCP" Phone=" " />
+  <RuntimeRequirements OS="Win64" Platform="AutoCAD*" SeriesMin="R23.0" />
+  <Components Description="AutoCAD 2019 and later">
+    <RuntimeRequirements OS="Win64" Platform="AutoCAD*" SeriesMin="R23.0" />
+    <ComponentEntry AppName="SmartAutodeskConnectorRibbon" Version="1.0.0" ModuleName="./Contents/SmartAutodeskConnector.cuix" AppDescription="Smart Autodesk Connector panel on the Add-ins tab" />
+    <ComponentEntry AppName="SmartAutodeskConnectorCommands" Version="1.0.0" ModuleName="./Contents/SmartAutodeskConnector.lsp" AppDescription="Commands behind the Smart Autodesk Connector buttons" LoadOnAutoCADStartup="True" PerDocument="True">
+      <Commands GroupName="SMARTAUTODESKCONNECTOR">
+        <Command Local="SACSKILLSSYNC" Global="SACSKILLSSYNC" />
+        <Command Local="SACCHECKUPDATES" Global="SACCHECKUPDATES" />
+        <Command Local="SACSETTINGS" Global="SACSETTINGS" />
+        <Command Local="SACSTATUS" Global="SACSTATUS" />
+      </Commands>
+    </ComponentEntry>
+  </Components>
+</ApplicationPackage>

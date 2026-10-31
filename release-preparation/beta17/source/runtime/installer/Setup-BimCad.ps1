@@ -1340,6 +1340,79 @@ function Test-AutoCadSetup {
     else { Write-Step 'AutoCAD is not currently available for a live test. Start AutoCAD and open a drawing.' }
 }
 
+function Get-AutoCadReleases {
+    $root = 'HKLM:\SOFTWARE\Autodesk\AutoCAD'
+    if (-not (Test-Path -LiteralPath $root)) { return @() }
+    @(Get-ChildItem -LiteralPath $root -ErrorAction SilentlyContinue | Select-Object -ExpandProperty PSChildName)
+}
+
+# A .cuix is an OPC zip: the parts in the bundle's cuix-source folder plus the button icons from assets.
+function New-AutoCadCuix {
+    param([string]$SourceDirectory, [string]$AssetsDirectory, [string]$Destination)
+    Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
+    $parts = @('[Content_Types].xml', '_rels/.rels', 'Header.cui', 'MenuGroup.cui', 'RibbonRoot.cui')
+    $images = @(Get-ChildItem -LiteralPath $AssetsDirectory -Filter 'sac-*.png' -File | Sort-Object Name)
+    if ($images.Count -eq 0) { throw "The AutoCAD button icons are missing from $AssetsDirectory." }
+    if (Test-Path -LiteralPath $Destination) { Remove-Item -LiteralPath $Destination -Force }
+    $zip = [IO.Compression.ZipFile]::Open($Destination, 'Create')
+    try {
+        foreach ($part in $parts) {
+            $source = Join-Path $SourceDirectory ($part -replace '/', '\')
+            if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "CUIX part $part is missing from $SourceDirectory." }
+            $null = [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $source, $part, [IO.Compression.CompressionLevel]::Optimal)
+        }
+        foreach ($image in $images) {
+            $null = [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $image.FullName, $image.Name, [IO.Compression.CompressionLevel]::Optimal)
+        }
+    }
+    finally { $zip.Dispose() }
+}
+
+# Adds the Smart Autodesk Connector panel to the AutoCAD Add-ins tab for this user (no admin rights needed).
+# AutoCAD loads it at its next start.
+function Install-AutoCadBundle {
+    param([string]$Root, [string]$PluginsRoot = (Join-Path $env:APPDATA 'Autodesk\ApplicationPlugins'))
+    $source = Join-Path $Root 'src\autocad\SmartAutodeskConnector.bundle'
+    $target = Join-Path $PluginsRoot 'SmartAutodeskConnector.bundle'
+    $staging = Join-Path ([IO.Path]::GetTempPath()) ('SmartAutodeskConnector-' + [Guid]::NewGuid().ToString('N'))
+    try {
+        New-Item -ItemType Directory -Path (Join-Path $staging 'Contents') -Force | Out-Null
+        Copy-Item -LiteralPath (Join-Path $source 'PackageContents.xml') -Destination $staging -Force
+        Get-ChildItem -LiteralPath (Join-Path $source 'Contents') -File | Copy-Item -Destination (Join-Path $staging 'Contents') -Force
+        New-AutoCadCuix -SourceDirectory (Join-Path $source 'Contents\cuix-source') -AssetsDirectory (Join-Path $Root 'assets') `
+            -Destination (Join-Path $staging 'Contents\SmartAutodeskConnector.cuix')
+        New-Item -ItemType Directory -Path (Join-Path $target 'Contents') -Force | Out-Null
+        # File by file, so a copy AutoCAD has open is reported instead of leaving a half-removed bundle.
+        Get-ChildItem -LiteralPath $staging -Recurse -File | ForEach-Object {
+            Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $target $_.FullName.Substring($staging.Length).TrimStart('\')) -Force
+        }
+    }
+    finally {
+        if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+    Write-Step ("Installed the AutoCAD Add-ins panel at {0}. Restart AutoCAD to load it." -f $target)
+}
+
+function Install-AutoCadBundleStep {
+    param([string]$Root)
+    Write-InstallPhase 'autocad'
+    $releases = @(Get-AutoCadReleases)
+    if ($releases.Count -eq 0) {
+        Write-Step 'AutoCAD was not detected, so its Add-ins panel was skipped.'
+        Write-InstallResult 'autocad' 'skipped' 'AutoCAD is not installed'
+        return
+    }
+    try {
+        Install-AutoCadBundle $Root
+        Write-InstallResult 'autocad' 'ok' 'restart AutoCAD to load it'
+    }
+    catch {
+        # The connector itself works without the panel; report and carry on.
+        Write-Warning ('The AutoCAD Add-ins panel could not be installed: ' + $_.Exception.Message)
+        Write-InstallResult 'autocad' 'failed' 'close AutoCAD and run setup again'
+    }
+}
+
 function Test-AutodeskRegistration {
     $codex = Get-OptionalCommand 'codex'
     if ($codex) {
@@ -1758,6 +1831,7 @@ try {
                 Write-Step 'Revit 2024 was not detected, so its add-in was skipped.'
                 Write-InstallResult 'revit' 'skipped' 'Revit 2024 is not installed'
             }
+            if ($Product -in @('All','AutoCAD')) { Install-AutoCadBundleStep $root }
             Write-InstallPhase 'updates'
             $updateState = Read-UpdateState
             if ($updateState.PSObject.Properties['notifications_user_disabled'] -and $updateState.notifications_user_disabled) {
@@ -1794,6 +1868,7 @@ try {
             elseif ($Product -in @('All','Revit')) {
                 Write-Step 'Revit 2024 was not detected, so its add-in was skipped.'
             }
+            if ($Product -in @('All','AutoCAD')) { Install-AutoCadBundleStep $root }
             Register-DetectedAiClients $root
             Set-InstalledRelease -Version ((Get-Content -LiteralPath (Join-Path $root 'VERSION') -Raw).Trim()) `
                 -Sha256 $(if ((Test-Path -LiteralPath (Join-Path $root '.bim-cad-source.json'))) {
