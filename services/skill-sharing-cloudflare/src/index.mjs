@@ -1,6 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import { GitHub, safeGitHubDetail } from './github.mjs';
-import { bytes, canonical, hash, MAX_BODY, validateProfile, validateSkills, validateUsage, VERSION } from './validation.mjs';
+import { bytes, canonical, CATEGORIES, hash, MAX_BODY, SKILL_NAME, validateProfile, validateSkills, validateUsage, VERSION } from './validation.mjs';
+import { groupReviews, reviewSummary, undecided } from './review.mjs';
 import { DASHBOARD_CSS, DASHBOARD_HTML, DASHBOARD_JS } from './dashboard.mjs';
 
 class HTTPError extends Error {
@@ -70,6 +71,34 @@ async function readJSON(request) {
   for (const chunk of chunks) { buffer.set(chunk,offset); offset+=chunk.byteLength; }
   try { return JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(buffer)); }
   catch { throw new HTTPError(422,'Invalid JSON body.'); }
+}
+
+// Decided uploads ("pr/skill") and rejected content ("skill/key"), so neither comes back for review.
+async function reviewState(db) {
+  const rows = (await db.prepare('SELECT pr,skill,decision,content_key FROM review_decisions').all()).results;
+  return {decisions:new Set(rows.map(r=>`${r.pr}/${r.skill}`)),rejected:new Set(rows.filter(r=>r.decision === 'reject').map(r=>`${r.skill}/${r.content_key}`))};
+}
+// Who sent each intake PR: the team member's name (never the email), plus anyone who later sent the same batch.
+async function sendersFor(db, urls) {
+  if (!urls.length) return {};
+  const rows = (await db.prepare(`SELECT b.url,l.at,COALESCE(d.person_name,d.label) AS name FROM batches b
+    JOIN submission_log l ON l.digest=b.digest JOIN devices d ON d.id=l.device
+    WHERE b.url IN (${urls.map(()=>'?').join(',')}) AND l.status IN ('submitted_for_approval','already_submitted') ORDER BY l.at`).bind(...urls).all()).results;
+  const senders = {};
+  for (const row of rows) {
+    const sender = senders[row.url] ??= {name:row.name,at:row.at,also:[]};
+    if (row.name !== sender.name && !sender.also.includes(row.name)) sender.also.push(row.name);
+  }
+  return senders;
+}
+// Closes an intake PR with a summary once every skill it proposes is decided; false while any is open.
+async function closeWhenDecided(db, gh, pr, items) {
+  const known = await reviewState(db);
+  if (undecided(items,pr,known.decisions,known.rejected).length) return false;
+  const rows = (await db.prepare('SELECT skill,decision,category FROM review_decisions WHERE pr=? ORDER BY skill').bind(pr).all()).results;
+  const decided = new Set(rows.map(r=>r.skill));
+  await gh.closeIntake(pr,reviewSummary(rows,items.filter(i=>i.pr === pr && !decided.has(i.name)).map(i=>i.name)));
+  return true;
 }
 
 // Cached token/library belongs to this binding configuration, never to another app.
@@ -210,6 +239,63 @@ export async function handle(request, env, backend) {
         await env.DB.prepare('UPDATE batches SET lease_until=0,lease_owner=NULL WHERE digest=? AND lease_owner=?').bind(digest,owner).run();
         throw new HTTPError(502,'GitHub submission failed. Retry later; no approval was recorded.');
       }
+    }
+    // Owner review of uploaded skills. Approving writes one skill to main; nothing else does.
+    if (path === '/admin/api/reviews' && request.method === 'GET') {
+      await admin(request,env);
+      let queue;
+      try { queue = await (backend || github(env)).reviewQueue(); }
+      catch (error) { throw new HTTPError(502,safeGitHubDetail(error)); }
+      const known = await reviewState(env.DB);
+      const senders = await sendersFor(env.DB,queue.prs.map(pr=>pr.url));
+      const prs = queue.prs.map(pr=>({...pr,sender:senders[pr.url] ?? null,undecided:undecided(queue.items,pr.number,known.decisions,known.rejected)}));
+      return json({generated_at:now(),library_commit:queue.library_commit,more:queue.more,categories_available:[...CATEGORIES].filter(c=>c!=='uncategorized'),
+        prs,...groupReviews(queue.items,{...known,senders})});
+    }
+    if (path === '/admin/api/reviews/decide' && request.method === 'POST') {
+      await admin(request,env);
+      const data = await readJSON(request);
+      const {pr,skill,decision,head_sha,key,approved_key,category} = data ?? {};
+      if (!Number.isInteger(pr) || pr < 1 || typeof skill !== 'string' || !SKILL_NAME.test(skill) || !['approve','reject'].includes(decision)
+        || ![head_sha,key,approved_key].every(v=>typeof v === 'string' && v.length <= 100)) throw new HTTPError(422,'Invalid review decision.');
+      if (decision === 'approve' && (!CATEGORIES.has(category) || category === 'uncategorized')) throw new HTTPError(422,'Choose the category this skill belongs to.');
+      const gh = backend || github(env);
+      let current;
+      try { current = await gh.reviewOne(pr); }
+      catch (error) { throw new HTTPError(502,safeGitHubDetail(error)); }
+      // The decision applies only to the exact upload and approved copy the owner looked at.
+      const item = current?.items.find(i=>i.name === skill);
+      if (!item || item.head_sha !== head_sha || item.key !== key || item.approved_key !== approved_key)
+        throw new HTTPError(409,'This upload or the approved copy changed, or it was already handled. Refresh and review it again.');
+      if (decision === 'approve' && item.checks.blocked.length) throw new HTTPError(422,'This upload fails a required check and cannot be approved.');
+      if (decision === 'approve' && item.checks.flags.length && data.accept_flags !== true) throw new HTTPError(422,'Confirm that you checked the flagged lines before approving.');
+      const claimed = await env.DB.prepare(`INSERT INTO review_decisions(pr,skill,head_sha,content_key,decision,category,at) VALUES(?,?,?,?,?,?,?)
+        ON CONFLICT(pr,skill) DO NOTHING RETURNING pr`).bind(pr,skill,head_sha,key,decision,decision === 'approve' ? category : null,now()).first();
+      if (!claimed) throw new HTTPError(409,'This upload was already decided.');
+      let commit = null;
+      if (decision === 'approve') {
+        try { commit = await gh.approveSkill(item,category); }
+        catch (error) {
+          await env.DB.prepare('DELETE FROM review_decisions WHERE pr=? AND skill=?').bind(pr,skill).run();
+          throw new HTTPError(502,safeGitHubDetail(error));
+        }
+        await env.DB.prepare('UPDATE review_decisions SET commit_sha=? WHERE pr=? AND skill=?').bind(commit,pr,skill).run();
+      }
+      let closed = false;
+      try { closed = await closeWhenDecided(env.DB,gh,pr,current.items); } catch { /* The decision stands; the PR can be closed from the dashboard. */ }
+      return json({pr,skill,decision,commit,closed});
+    }
+    if (path === '/admin/api/reviews/close' && request.method === 'POST') {
+      await admin(request,env);
+      const pr = (await readJSON(request))?.pr;
+      if (!Number.isInteger(pr) || pr < 1) throw new HTTPError(422,'Invalid pull request number.');
+      const gh = backend || github(env);
+      try {
+        const current = await gh.reviewOne(pr);
+        if (!current) throw new HTTPError(409,'That pull request is not an open skill upload.');
+        if (!await closeWhenDecided(env.DB,gh,pr,current.items)) throw new HTTPError(409,'Approve or reject every skill in this upload first.');
+      } catch (error) { throw error instanceof HTTPError ? error : new HTTPError(502,safeGitHubDetail(error)); }
+      return json({pr,closed:true});
     }
     throw new HTTPError(404,'Not found.');
   } catch (error) {

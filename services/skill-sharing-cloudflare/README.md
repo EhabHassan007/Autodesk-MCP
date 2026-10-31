@@ -50,6 +50,24 @@ Migration `0002_team_enrollment.sql` adds the person profile, last-seen data and
   - Block/Unblock calls `POST /admin/devices/<id>/block|unblock`.
   - A strict CSP, `no-store` and `X-Frame-Options: DENY` apply.
 
+## Skill review (owner approval, one skill at a time)
+
+Migration `0004_review_decisions.sql` adds the `review_decisions` table. Run `npm run migrate:remote` before deploying this version.
+
+Skills Sync sends all of a person's saved skills in one `skill-intake/*` draft PR. The **Skill review** tab in `/admin` turns those PRs into one queue:
+
+- **What is listed.** The 8 oldest open intake PRs are read; decide those and refresh to see more. A skill is listed only when the upload changed it compared with the PR's own base, and it still differs from `main` today. Skills that are already approved are counted, not listed. Uploads are grouped by category folder, then by skill. When two people send the same skill, both uploads are shown, oldest first.
+- **For each upload**, the tab shows:
+  - the sender's team name, from the device that sent the batch (never the email), and the upload time;
+  - whether the skill is new, changed or moved to another category;
+  - a line diff of each changed file against the approved copy. The diff is worked out in the browser, which keeps Worker CPU low;
+  - the checks. "Blocked" means the service structure check failed, or `description:` is missing, or the declared category doesn't match the folder, or a file is a link, binary or too large. Flags are possible secrets, personal paths (`C:\Users\…`, UNC paths) and email or ACC/BIM 360 links, found on the lines the upload adds. These are the same patterns as `scripts/validate-team-skill-intake.ps1`.
+  - a warning when `main` changed that skill after the upload was made, so approving it could undo newer edits.
+- **Approve** (`POST /admin/api/reviews/decide`): the owner chooses the category. The service re-reads the PR and refuses (409) if the upload or the approved copy changed since the page loaded. Blocked uploads cannot be approved, and flagged ones need the "I checked the flagged lines" box. The service then commits exactly the reviewed blobs for that one skill to `main`. The ref update is never forced, so if `main` moved meanwhile, the approval fails and nothing is overwritten. Team PCs receive the skill on their next Skills Sync. These commits go straight to `main`, so the PR workflow check does not run on them; the dashboard checks above stand in for it.
+- **Reject** records the decision. An identical later upload of the same skill is hidden automatically.
+- **Closing.** Once every skill in an intake PR is decided, the service comments a summary and closes the PR **without merging**. A PR with nothing left to decide can also be closed with **Close on GitHub**.
+- **What else stays the same.** Uploads still arrive as draft PRs, and nothing reaches `main` without the owner's click. The GitHub App keeps its existing `contents:write` and `pull_requests:write` permissions. Merging an intake PR on GitHub still works, but it is all-or-nothing.
+
 ## Connect team PCs
 
 On Windows, use `tools/New-DeviceEnrollment.ps1`; it needs no Python and defaults to the deployed URL. Each PC/user gets a unique revocable device token:
@@ -76,6 +94,8 @@ npm run migrate:local
 ```
 
 Unit/contract tests use actual SQLite with a D1 adapter. Runtime tests execute the **production bundle** in workerd with real local D1 and mocked GitHub responses. They generate a disposable RSA test key in memory, exercise signing, enrollment, approved library download, draft submission, restart persistence, duplicate suppression and revocation. They never use real credentials or create live PRs. The runtime test caught and fixed a Worker-specific unbound `fetch` invocation that Node alone did not catch.
+
+Verified on 2026-10-31: 27 service and 8 review unit/contract tests pass, and the workerd/D1 runtime test now also applies migration 0004 and reads an empty review queue. The review tab was checked in a browser against a local Node server with sample uploads (GitHub not contacted). Live approval against GitHub has not been run yet.
 
 Verified on 2026-10-29: all 14 unit/contract tests pass, including controlled secret-safe diagnostics and escaped/JSON-encoded PEM signatures; production bundle dry run and workerd/D1 integration test pass, including process restart. Local and remote D1 migrations passed previously. Runtime checks also required `redirect: manual` because Workers does not support Fetch's `error` redirect mode. Redirect statuses are rejected and credentials are never forwarded to a redirect target. These checks do not establish live library CPU usage, GitHub App authorization, or Revit operation.
 

@@ -395,3 +395,83 @@ test('dashboard page is static, locked down and renders data only as text',async
   assert.ok(DASHBOARD_CSS.includes('[hidden]{display:none!important}'),'signed-out header buttons stay hidden');
   assert.equal((await s.request('/admin','POST')).status,404);
 });
+
+// Review endpoints against real SQLite; GitHub is a stub that records writes.
+function reviewBackend(s, items) {
+  const pr = {number:7,url,submitted_at:100,head_sha:'h7',proposed:items.map(i=>i.name),already_approved:[],outside:[]};
+  Object.assign(s.backend, {approved:[], closed:[],
+    async reviewQueue() { return {library_commit:'main',more:false,prs:[pr],items}; },
+    async reviewOne(n) { return n===7 ? {pr,items} : null; },
+    async approveSkill(item,category) { if (this.failNext) { this.failNext=false; throw new Error('boom'); } this.approved.push([item.name,category]); return 'c'+this.approved.length; },
+    async closeIntake(n,summary) { this.closed.push([n,summary]); }});
+  return s.backend;
+}
+const pending = (name,extra={}) => ({pr:7,pr_url:url,head_sha:'h7',submitted_at:100,name,category:'autocad',key:'k-'+name,approved_key:'none',
+  status:'new',stale:false,folder:'autocad/'+name,approved_folder:null,head_files:{'SKILL.md':'s'},files:[],checks:{blocked:[],flags:[]},...extra});
+const decide = (s,u,decision,extra={}) => s.request('/admin/api/reviews/decide','POST',admin,{pr:u.pr,skill:u.name,decision,head_sha:u.head_sha,key:u.key,approved_key:u.approved_key,category:u.category,...extra});
+
+test('review queue groups uploads by category and names the sender, never the email',async t=>{
+  const s=setup(t),d=await joinAs(s);
+  assert.equal((await s.request('/v1/submissions','POST',d.device_token,body)).status,200);
+  reviewBackend(s,[pending('acad-x'),pending('revit-y',{category:'revit'}),pending('loose',{category:'uncategorized'})]);
+  assert.equal((await s.request('/admin/api/reviews','GET',d.device_token)).status,403);
+  const r=await s.request('/admin/api/reviews','GET',admin);
+  assert.equal(r.status,200);
+  const q=await r.json();
+  assert.deepEqual(q.categories.map(c=>c.category),['revit','autocad','uncategorized']);
+  assert.equal(q.categories[1].skills[0].uploads[0].sender.name,'Ahmed Ali');
+  assert.equal(q.prs[0].sender.name,'Ahmed Ali');
+  assert.deepEqual(q.prs[0].undecided,['acad-x','revit-y','loose']);
+  assert.ok(!JSON.stringify(q).toLowerCase().includes('ahmed.ali@example.com'),'email is not sent to the page');
+  assert.ok(!q.categories_available.includes('uncategorized'));
+  assert.equal(q.pending,3);
+});
+
+test('each skill is approved or rejected on its own; the upload closes once all are decided',async t=>{
+  const s=setup(t);
+  const flagged=pending('flagged',{checks:{blocked:[],flags:[{kind:'secret',path:'SKILL.md',line:3,text:'api_key'}]}});
+  const items=[pending('acad-x'),pending('revit-y',{category:'revit'}),flagged,pending('broken',{checks:{blocked:['bad'],flags:[]}})];
+  const gh=reviewBackend(s,items);
+  assert.equal((await decide(s,items[0],'approve',{head_sha:'old'})).status,409,'a changed upload must be reviewed again');
+  assert.equal((await decide(s,items[0],'approve',{category:'uncategorized'})).status,422,'approval needs a real category');
+  assert.equal((await decide(s,flagged,'approve')).status,422,'flagged lines need the owner\'s acknowledgement');
+  assert.equal((await decide(s,items[3],'approve')).status,422,'a failed required check blocks approval');
+  assert.equal((await s.request('/admin/api/reviews/decide','POST',join,{})).status,403);
+  gh.failNext=true;
+  assert.equal((await decide(s,items[0],'approve')).status,502);
+  let r=await decide(s,items[0],'approve',{category:'general'});
+  assert.equal(r.status,200,'a failed GitHub write releases the decision for retry');
+  assert.deepEqual(await r.json(),{pr:7,skill:'acad-x',decision:'approve',commit:'c1',closed:false});
+  assert.deepEqual(gh.approved,[['acad-x','general']],'only the one skill is written, in the chosen category');
+  assert.equal((await decide(s,items[0],'approve')).status,409,'decided once only');
+  assert.equal((await decide(s,items[1],'reject')).status,200);
+  assert.equal((await decide(s,flagged,'approve',{accept_flags:true})).status,200);
+  assert.equal((await s.request('/admin/api/reviews/close','POST',admin,{pr:7})).status,409,'cannot close while a skill waits');
+  r=await decide(s,items[3],'reject');
+  assert.equal((await r.json()).closed,true);
+  assert.deepEqual(gh.approved.map(a=>a[0]),['acad-x','flagged'],'rejected skills never reach main');
+  assert.equal(gh.closed.length,1);
+  assert.match(gh.closed[0][1],/`revit-y`: rejected/);
+  assert.match(gh.closed[0][1],/`acad-x`: approved into `general`/);
+  const q=await (await s.request('/admin/api/reviews','GET',admin)).json();
+  assert.equal(q.pending,0);
+  assert.deepEqual(s.sqlite.prepare('SELECT skill,decision,commit_sha FROM review_decisions ORDER BY skill').all().map(r=>({...r})),
+    [{skill:'acad-x',decision:'approve',commit_sha:'c1'},{skill:'broken',decision:'reject',commit_sha:null},{skill:'flagged',decision:'approve',commit_sha:'c2'},{skill:'revit-y',decision:'reject',commit_sha:null}]);
+});
+
+test('content rejected before stays hidden in later uploads, and such an upload can be closed',async t=>{
+  const s=setup(t);
+  const gh=reviewBackend(s,[pending('revit-y')]);
+  assert.equal((await decide(s,pending('revit-y'),'reject')).status,200);
+  assert.equal(gh.closed.length,1);
+  // The same content arrives again in a later upload.
+  const later={...pending('revit-y'),pr:8,pr_url:url.replace('/7','/8')};
+  s.backend.reviewQueue=async()=>({library_commit:'main',more:false,prs:[{number:8,url:later.pr_url,submitted_at:200,head_sha:'h7',proposed:['revit-y'],already_approved:[],outside:[]}],items:[later]});
+  s.backend.reviewOne=async n=>n===8?{pr:{number:8},items:[later]}:null;
+  const q=await (await s.request('/admin/api/reviews','GET',admin)).json();
+  assert.equal(q.pending,0);assert.equal(q.hidden_rejected,1);
+  assert.deepEqual(q.prs[0].undecided,[]);
+  assert.equal((await s.request('/admin/api/reviews/close','POST',admin,{pr:8})).status,200);
+  assert.match(gh.closed[1][1],/rejected earlier with the same content/);
+  assert.equal((await s.request('/admin/api/reviews/close','POST',admin,{pr:99})).status,409,'only open intake PRs can be closed here');
+});
