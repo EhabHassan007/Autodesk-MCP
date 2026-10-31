@@ -11,7 +11,7 @@ param(
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
 $b = $PSScriptRoot; $s = Join-Path $b 'source'; $r = Join-Path $s 'runtime'
-$version = '1.0.0-beta.17'
+$version = (Get-Content -LiteralPath (Join-Path $r 'VERSION') -Raw).Trim()
 $utf8 = New-Object Text.UTF8Encoding($false)
 
 function Get-Files([string]$Root) {

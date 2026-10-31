@@ -25,7 +25,10 @@ param(
     # Typed by the person in the team join dialog; used only with a TEAM build's installer\team-join.json.
     [string]$JoinName = '',
 
-    [string]$JoinEmail = ''
+    [string]$JoinEmail = '',
+
+    # Version of the terms of use the person accepted in the setup window; sent when joining the team.
+    [string]$TermsVersion = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -36,6 +39,17 @@ $updateTaskName = 'Autodesk MCP Connector Update Alerts'
 function Write-Step {
     param([string]$Message)
     Write-Host ("[{0}] {1}" -f (Get-Date -Format 'HH:mm:ss'), $Message)
+}
+
+# Machine-readable progress for the setup window (SetupWizard.ps1 ConvertFrom-SetupOutputLine).
+function Write-InstallPhase {
+    param([string]$Step)
+    Write-Host ("[PHASE] {0}" -f $Step)
+}
+
+function Write-InstallResult {
+    param([string]$Step, [ValidateSet('ok', 'skipped', 'failed')][string]$Status, [string]$Detail = '')
+    Write-Host ("[RESULT] {0}={1} {2}" -f $Step, $Status, $Detail).TrimEnd()
 }
 
 function Get-Sha256Hex {
@@ -270,7 +284,9 @@ function Read-UpdateState {
             installed_version = ''
             installed_sha256 = ''
             installed_commit = ''
-            notifications_enabled = $false
+            # Automatic updates are on by default; only an explicit choice in Settings turns them off.
+            notifications_enabled = $true
+            notifications_user_disabled = $false
             last_checked_utc = ''
         }
     }
@@ -305,7 +321,7 @@ function Write-UpdateState {
 }
 
 function Get-PublicReleaseManifest {
-    Write-Step 'Checking the public Autodesk MCP release channel...'
+    Write-Step 'Checking the Smart Autodesk Connector release channel...'
     try { $manifestUri = [Uri]$ReleaseManifestUrl }
     catch { throw "The release manifest address is invalid: $ReleaseManifestUrl" }
     if ($manifestUri.Scheme -ne 'https') {
@@ -376,6 +392,9 @@ function Test-ApprovedUpdate {
     Set-StateProperty $state 'release_manifest' $ReleaseManifestUrl
     Set-StateProperty $state 'installed_version' $installedVersion
     Set-StateProperty $state 'last_checked_utc' ([DateTime]::UtcNow.ToString('o'))
+    # The agent and the Revit add-in read this to say "version X is ready" without going online again.
+    $newer = -not [string]::IsNullOrWhiteSpace($installedVersion) -and (Compare-ConnectorVersion -Left $release.Version -Right $installedVersion) -gt 0
+    Set-StateProperty $state 'available_version' $(if ($newer) { $release.Version } else { '' })
     Write-UpdateState $state
 
     if ([string]::IsNullOrWhiteSpace($installedVersion)) {
@@ -384,52 +403,47 @@ function Test-ApprovedUpdate {
     }
     $comparison = Compare-ConnectorVersion -Left $release.Version -Right $installedVersion
     if ($comparison -gt 0) {
-        Write-Output ("[{0}] [UPDATE_AVAILABLE] Version {1} is available. Press Update to install it." -f (Get-Date -Format 'HH:mm:ss'), $release.Version)
+        Write-Output ("[{0}] [UPDATE_AVAILABLE] Version {1} is available." -f (Get-Date -Format 'HH:mm:ss'), $release.Version)
         return
     }
     if ($comparison -lt 0) {
         Write-Output ("[{0}] [UP_TO_DATE] Installed version {1} is newer than public version {2}; no downgrade will be performed." -f (Get-Date -Format 'HH:mm:ss'), $installedVersion, $release.Version)
         return
     }
-    Write-Output ("[{0}] [UP_TO_DATE] Autodesk MCP Connector {1} and approved skills are up to date." -f (Get-Date -Format 'HH:mm:ss'), $installedVersion)
+    Write-Output ("[{0}] [UP_TO_DATE] Smart Autodesk Connector {1} and approved skills are up to date." -f (Get-Date -Format 'HH:mm:ss'), $installedVersion)
 }
 
+function Remove-LegacyUpdateTask {
+    # Before the connector agent, a separate scheduled task installed updates at 9:00; the agent replaces it.
+    if (Get-ScheduledTask -TaskName $updateTaskName -ErrorAction SilentlyContinue) {
+        Unregister-ScheduledTask -TaskName $updateTaskName -Confirm:$false
+    }
+}
+
+# The connector agent (scripts\connector-agent.ps1) reads this switch; it never needs network access here.
 function Enable-UpdateNotifications {
-    $release = Get-PublicReleaseManifest
     $state = Read-UpdateState
     Set-StateProperty $state 'repository' $RepositoryUrl
     Set-StateProperty $state 'release_manifest' $ReleaseManifestUrl
     Set-StateProperty $state 'installed_version' (Get-InstalledVersion)
     Set-StateProperty $state 'notifications_enabled' $true
-    Set-StateProperty $state 'last_checked_utc' ([DateTime]::UtcNow.ToString('o'))
+    Set-StateProperty $state 'notifications_user_disabled' $false
     Write-UpdateState $state
-
-    $notifier = Join-Path $RepositoryPath 'scripts\autodesk-mcp-update-notifier.ps1'
-    if (-not (Test-Path -LiteralPath $notifier -PathType Leaf)) {
-        throw "The update notifier is missing: $notifier"
-    }
-    $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-    $arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "{0}" -RepositoryUrl "{1}" -ReleaseManifestUrl "{2}" -RepositoryPath "{3}"' -f $notifier, $RepositoryUrl, $ReleaseManifestUrl, $RepositoryPath
-    $taskAction = New-ScheduledTaskAction -Execute $powershell -Argument $arguments
-    $identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-    $taskTrigger = @(
-        (New-ScheduledTaskTrigger -AtLogOn -User $identity),
-        (New-ScheduledTaskTrigger -Daily -At '09:00')
-    )
-    $principal = New-ScheduledTaskPrincipal -UserId $identity -LogonType Interactive -RunLevel Limited
-    Register-ScheduledTask -TaskName $updateTaskName -Action $taskAction -Trigger $taskTrigger -Principal $principal -Description 'Install approved Autodesk MCP Connector and skill updates automatically, then notify the signed-in user.' -Force | Out-Null
-    Write-Step ("Automatic public release updates are enabled at sign-in and daily at 9:00 AM. Current approved release: {0}." -f $release.Version)
+    Remove-LegacyUpdateTask
+    Write-Step 'Automatic updates are on: updates install by themselves when Revit and AutoCAD are closed.'
 }
 
 function Disable-UpdateNotifications {
-    $task = Get-ScheduledTask -TaskName $updateTaskName -ErrorAction SilentlyContinue
-    if ($task) {
-        Unregister-ScheduledTask -TaskName $updateTaskName -Confirm:$false
-    }
+    Remove-LegacyUpdateTask
     $state = Read-UpdateState
-    $state.notifications_enabled = $false
+    Set-StateProperty $state 'notifications_enabled' $false
+    Set-StateProperty $state 'notifications_user_disabled' $true
     Write-UpdateState $state
-    Write-Step 'Automatic approved updates are disabled.'
+    Write-Step 'Automatic updates are off. Use Check Updates to look for a new version.'
+}
+
+function Get-RunningAutodeskApps {
+    @(Get-Process -Name 'Revit', 'acad' -ErrorAction SilentlyContinue | ForEach-Object { if ($_.ProcessName -eq 'acad') { 'AutoCAD' } else { 'Revit' } } | Sort-Object -Unique)
 }
 
 function Get-GitHubArchiveUrl {
@@ -735,7 +749,7 @@ function Get-Repository {
             }
             Write-Step 'Installing the downloaded package to a permanent local folder...'
             New-Item -ItemType Directory -Path $destination -Force | Out-Null
-            foreach ($entry in @('installer','scripts','src','.agents','README.md','REMOTE-CLAUDE.md','SKILL-SUBMISSIONS.md','VERSION','TESTING.md')) {
+            foreach ($entry in @('installer','scripts','src','assets','.agents','README.md','REMOTE-CLAUDE.md','SKILL-SUBMISSIONS.md','VERSION','TESTING.md')) {
                 $item = Join-Path $source $entry
                 if (Test-Path -LiteralPath $item) {
                     Copy-Item -LiteralPath $item -Destination $destination -Recurse -Force
@@ -772,7 +786,7 @@ function Get-Repository {
                     Write-Step ("Installed version {0} is newer than public version {1}; the update was skipped to prevent a downgrade." -f $installedVersion, $release.Version)
                 }
                 else {
-                    Write-Step ("Autodesk MCP Connector {0} is already up to date." -f $installedVersion)
+                    Write-Step ("Smart Autodesk Connector {0} is already up to date." -f $installedVersion)
                 }
                 return (Resolve-Path -LiteralPath $RepositoryPath).Path
             }
@@ -803,6 +817,23 @@ function Install-Skills {
     Write-Step 'Installing the same saved skills for Claude Code...'
     $result = Invoke-External 'powershell.exe' @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $syncScript, '-Action', 'Install', '-Destination', $claudeSkills)
     $null = $result
+}
+
+function Test-OwnConnectorEntry {
+    param([string]$Text)
+    # Only entries that launch this connector's own bridges count as duplicates; another
+    # tool's server with a similar name is left alone.
+    $Text -match '(?i)BIM-CAD-MCP|autodesk-bridge\.ps1|autocad-bridge\.ps1|revit-bridge\.ps1'
+}
+
+function Remove-LegacyMcpEntries {
+    param([string]$Client, [string]$Command, [string[]]$LegacyNames, [string[]]$RemoveArguments = @())
+    foreach ($legacy in $LegacyNames) {
+        $existing = Invoke-External $Command @('mcp', 'get', $legacy) -AllowFailure
+        if ($existing.ExitCode -ne 0 -or -not (Test-OwnConnectorEntry ($existing.Output -join "`n"))) { continue }
+        $removed = Invoke-External $Command (@('mcp', 'remove', $legacy) + $RemoveArguments) -AllowFailure
+        if ($removed.ExitCode -eq 0) { Write-Step ("Removed the older duplicate {0} MCP entry '{1}'." -f $Client, $legacy) }
+    }
 }
 
 function Register-McpServer {
@@ -837,13 +868,15 @@ function Register-McpServer {
                 $expectedArgs = @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',$Bridge) + $BridgeArguments
                 if ($entry.enabled -ne $false -and $entry.transport.command -eq 'powershell.exe' -and
                     (($entry.transport.args | ConvertTo-Json -Compress) -ceq ($expectedArgs | ConvertTo-Json -Compress))) {
-                    Write-Step 'The Autodesk MCP registration in Codex is already correct.'
+                    Write-Step 'The Smart Autodesk Connector registration in Codex is already correct.'
+                    Remove-LegacyMcpEntries 'Codex' $codex $LegacyNames
                     return
                 }
             }
             catch { Write-Step 'Existing Codex registration could not be compared; registering the requested command.' }
         }
-        # mcp add replaces this named entry. Preserve unrelated and legacy entries.
+        Remove-LegacyMcpEntries 'Codex' $codex $LegacyNames
+        # mcp add replaces this named entry and leaves unrelated servers alone.
         $command = @(
             'mcp', 'add', $Name, '--',
             'powershell.exe', '-NoProfile', '-NonInteractive',
@@ -988,7 +1021,7 @@ function Restart-ClaudeDesktopIfRunning {
         if ($Installation -and $Installation.Executable) { [string]$Installation.Executable }
     ) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) } | Select-Object -First 1
 
-    Write-Step 'Restarting Claude Desktop so it loads the Autodesk MCP Connector registration...'
+    Write-Step 'Restarting Claude Desktop so it loads the Smart Autodesk Connector registration...'
     foreach ($process in $running) {
         try { $null = $process.CloseMainWindow() } catch { }
     }
@@ -1043,7 +1076,7 @@ function Install-ClaudeDesktop {
     for ($attempt = 0; $attempt -lt 20; $attempt++) {
         $installed = Get-ClaudeDesktopInstallation
         if ($installed) {
-            Write-Step 'Claude Desktop is installed. The local Autodesk MCP registration will now be added.'
+            Write-Step 'Claude Desktop is installed. The Smart Autodesk Connector registration will now be added.'
             return $installed
         }
         Start-Sleep -Seconds 1
@@ -1076,6 +1109,7 @@ function Register-ClaudeCodeMcpServer {
 
     Write-Step ("Registering the {0} MCP server in Claude Code..." -f $Name)
     try {
+        Remove-LegacyMcpEntries 'Claude Code' $claude $LegacyNames @('--scope', 'user')
         $existing = Invoke-External $claude @('mcp','get',$Name) -AllowFailure
         if ($existing.ExitCode -eq 0) {
             $removed = Invoke-External $claude @('mcp','remove',$Name,'--scope','user') -AllowFailure
@@ -1189,55 +1223,68 @@ function Register-DetectedAiClients {
     $bridge = Join-Path $Root 'src\autodesk\autodesk-bridge.ps1'
     $arguments = @('-RevitVersion','2024')
     $legacyNames = @('autocad','revit','AutoCAD MCP','Revit Connector','revit-mcp')
-    $claudeDesktopLegacyNames = @($legacyNames + 'autodesk')
+    # Claude Desktop shows the key as the connector's name; the previous product name is retired.
+    $claudeDesktopLegacyNames = @($legacyNames + 'autodesk' + 'Autodesk MCP Connector')
     $detected = 0
     $registrationErrors = @()
 
     $claudeDesktopProcesses = @(Get-ClaudeDesktopProcesses)
     $claudeDesktopInstallation = Get-ClaudeDesktopInstallation
 
-    if ($InstallClaudeDesktopIfMissing -and -not $claudeDesktopInstallation) {
-        $claudeDesktopInstallation = Install-ClaudeDesktop
-    }
-
+    Write-InstallPhase 'codex'
     if (Get-OptionalCommand 'codex') {
         try {
             Register-McpServer 'autodesk' $bridge $arguments $legacyNames
             $detected++
+            Write-InstallResult 'codex' 'ok'
         }
         catch {
             $registrationErrors += 'Codex: ' + $_.Exception.Message
             Write-Warning ('Codex registration failed; continuing with other clients: ' + $_.Exception.Message)
+            Write-InstallResult 'codex' 'failed' 'see the setup log'
         }
     }
-    else { Write-Step 'Codex was not detected, so its MCP registration was skipped.' }
+    else { Write-Step 'Codex was not detected, so its MCP registration was skipped.'; Write-InstallResult 'codex' 'skipped' 'Codex is not installed' }
 
+    Write-InstallPhase 'claude_code'
     if (Get-OptionalCommand 'claude') {
         try {
             Register-ClaudeCodeMcpServer 'autodesk' $bridge $arguments $legacyNames
             $detected++
+            Write-InstallResult 'claude_code' 'ok'
         }
         catch {
             $registrationErrors += 'Claude Code: ' + $_.Exception.Message
             Write-Warning ('Claude Code registration failed; continuing with Claude Desktop: ' + $_.Exception.Message)
+            Write-InstallResult 'claude_code' 'failed' 'see the setup log'
         }
     }
-    else { Write-Step 'Claude Code was not detected, so its MCP registration was skipped.' }
+    else { Write-Step 'Claude Code was not detected, so its MCP registration was skipped.'; Write-InstallResult 'claude_code' 'skipped' 'Claude Code is not installed' }
 
+    Write-InstallPhase 'claude_desktop'
+    if ($InstallClaudeDesktopIfMissing -and -not $claudeDesktopInstallation) {
+        $claudeDesktopInstallation = Install-ClaudeDesktop
+    }
     if ($claudeDesktopInstallation -or $InstallClaudeDesktopIfMissing) {
+        $desktopFailed = $false
         foreach ($configPath in @(Get-ClaudeDesktopConfigPaths)) {
             try {
-                Register-ClaudeDesktopMcpServer -Name 'Autodesk MCP Connector' -Bridge $bridge -BridgeArguments $arguments -LegacyNames $claudeDesktopLegacyNames -ConfigPath $configPath
+                Register-ClaudeDesktopMcpServer -Name 'Smart Autodesk Connector' -Bridge $bridge -BridgeArguments $arguments -LegacyNames $claudeDesktopLegacyNames -ConfigPath $configPath
                 $detected++
             }
             catch {
+                $desktopFailed = $true
                 $registrationErrors += ('Claude Desktop at {0}: {1}' -f $configPath, $_.Exception.Message)
                 Write-Warning ('Could not update Claude config at {0}; continuing with other paths.' -f $configPath)
             }
         }
+        Write-InstallResult 'claude_desktop' $(if ($desktopFailed) { 'failed' } else { 'ok' }) $(if ($desktopFailed) { 'see the setup log' } else { 'Claude restarts to load it' })
         Restart-ClaudeDesktopIfRunning -Processes $claudeDesktopProcesses -Installation $claudeDesktopInstallation
     }
-    else { Write-Step 'Claude Desktop was not detected. Its local MCP registration was skipped; Claude web and mobile require the separate remote connector.' }
+    else {
+        Write-Step 'Claude Desktop was not detected. Its local MCP registration was skipped; Claude web and mobile require the separate remote connector.'
+        Write-InstallResult 'claude_desktop' 'skipped' 'Claude Desktop is not installed'
+    }
 
     if ($registrationErrors.Count -gt 0) {
         throw ('Some AI client registrations failed. Other registrations were still attempted. Repair these clients and run setup again: ' + ($registrationErrors -join '; '))
@@ -1295,16 +1342,16 @@ function Test-AutodeskRegistration {
     $codex = Get-OptionalCommand 'codex'
     if ($codex) {
         $registration = Invoke-External $codex @('mcp','get','autodesk') -AllowFailure
-        if ($registration.ExitCode -eq 0) { Write-Step 'Codex has the Autodesk MCP Connector registration.' }
-        else { Write-Step 'Autodesk MCP Connector is not registered yet.' }
+        if ($registration.ExitCode -eq 0) { Write-Step 'Codex has the Smart Autodesk Connector registration.' }
+        else { Write-Step 'Smart Autodesk Connector is not registered yet.' }
     }
     else { Write-Step 'Codex command was not detected.' }
 
     $claude = Get-OptionalCommand 'claude'
     if ($claude) {
         $registration = Invoke-External $claude @('mcp','get','autodesk') -AllowFailure
-        if ($registration.ExitCode -eq 0) { Write-Step 'Claude Code has the Autodesk MCP Connector registration.' }
-        else { Write-Step 'Autodesk MCP Connector is not registered in Claude Code yet.' }
+        if ($registration.ExitCode -eq 0) { Write-Step 'Claude Code has the Smart Autodesk Connector registration.' }
+        else { Write-Step 'Smart Autodesk Connector is not registered in Claude Code yet.' }
     }
     else { Write-Step 'Claude Code command was not detected.' }
 
@@ -1312,10 +1359,10 @@ function Test-AutodeskRegistration {
         $configPath = Get-ClaudeDesktopConfigPath
         try {
             $config = Get-Content -LiteralPath $configPath -Raw -ErrorAction Stop | ConvertFrom-Json
-            if ($config.mcpServers.PSObject.Properties['Autodesk MCP Connector']) {
-                Write-Step ("Claude Desktop has the Autodesk MCP Connector registration at {0}." -f $configPath)
+            if ($config.mcpServers.PSObject.Properties['Smart Autodesk Connector']) {
+                Write-Step ("Claude Desktop has the Smart Autodesk Connector registration at {0}." -f $configPath)
             }
-            else { Write-Step 'Autodesk MCP Connector is not registered in Claude Desktop yet.' }
+            else { Write-Step 'Smart Autodesk Connector is not registered in Claude Desktop yet.' }
         }
         catch { Write-Step 'Claude Desktop was detected, but its local MCP configuration is missing or invalid.' }
     }
@@ -1388,12 +1435,12 @@ function Install-RevitAddin {
 <?xml version="1.0" encoding="utf-8"?>
 <RevitAddIns>
   <AddIn Type="Application">
-    <Name>Autodesk MCP Connector</Name>
+    <Name>Smart Autodesk Connector</Name>
     <Assembly>$escapedAssembly</Assembly>
     <AddInId>2DCE7E67-4495-4F3B-A740-3D7C9D2DA124</AddInId>
     <FullClassName>BimCadMcp.Revit.Application</FullClassName>
     <VendorId>BIMC</VendorId>
-    <VendorDescription>Autodesk MCP Connector for local Revit sessions</VendorDescription>
+    <VendorDescription>Smart Autodesk Connector for Codex and Claude</VendorDescription>
   </AddIn>
 </RevitAddIns>
 "@
@@ -1401,7 +1448,18 @@ function Install-RevitAddin {
     if (Test-Path -LiteralPath $legacyManifestPath -PathType Leaf) {
         Remove-Item -LiteralPath $legacyManifestPath -Force
     }
+    Remove-OldRevitAddinBuilds -Directory $assemblyDirectory -Keep $assembly
     Write-Step ("Installed Revit add-in {0} and manifest {1}. Restart Revit to load it." -f (Split-Path -Leaf $assembly), $manifestPath)
+}
+
+function Remove-OldRevitAddinBuilds {
+    param([string]$Directory, [string]$Keep)
+    # Every build gets a content-hashed name; older ones pile up. A copy Revit still has loaded is
+    # locked and simply stays until the next install.
+    foreach ($old in @(Get-ChildItem -LiteralPath $Directory -Filter 'BimCadMcp.Revit.*.dll' -File -ErrorAction SilentlyContinue)) {
+        if ([string]::Equals($old.FullName, $Keep, [StringComparison]::OrdinalIgnoreCase)) { continue }
+        try { Remove-Item -LiteralPath $old.FullName -Force -ErrorAction Stop } catch { }
+    }
 }
 
 function Test-RevitSetup {
@@ -1410,9 +1468,9 @@ function Test-RevitSetup {
     else { Write-Step 'Revit 2024 was not detected.' }
 
     $manifest = Join-Path $env:APPDATA 'Autodesk\Revit\Addins\2024\AutodeskMcpConnector.addin'
-    if (Test-Path -LiteralPath $manifest -PathType Leaf) { Write-Step 'Autodesk MCP Connector add-in is installed for Revit 2024.' }
-    else { Write-Step 'Autodesk MCP Connector add-in is not installed for Revit 2024 yet.' }
-    if ($installed) { Write-Step 'In Revit, open the Autodesk MCP Connector ribbon tab and click Connection Status.' }
+    if (Test-Path -LiteralPath $manifest -PathType Leaf) { Write-Step 'Smart Autodesk Connector add-in is installed for Revit 2024.' }
+    else { Write-Step 'Smart Autodesk Connector add-in is not installed for Revit 2024 yet.' }
+    if ($installed) { Write-Step 'In Revit, open the Smart Autodesk Connector ribbon tab and click Connection Status.' }
 
     $pipeName = 'BimCadMcp.Revit.2024'
     $sessionDirectory = Join-Path $env:LOCALAPPDATA 'BIM-CAD-MCP\runtime\revit-sessions'
@@ -1550,7 +1608,9 @@ function Register-SkillServiceDevice {
         if ($uri.Scheme -ne 'https' -or $uri.UserInfo -or $uri.Query -or $uri.Fragment) { throw 'The team join file has an invalid service address.' }
         $versionPath = Join-Path $Root 'VERSION'
         $version = if (Test-Path -LiteralPath $versionPath) { (Get-Content -LiteralPath $versionPath -Raw).Trim() } else { 'unknown' }
-        $body = @{ name = $Name.Trim(); email = $Email.Trim(); pc_name = $env:COMPUTERNAME; windows_user = $env:USERNAME; connector_version = $version } | ConvertTo-Json -Compress
+        $profile = @{ name = $Name.Trim(); email = $Email.Trim(); pc_name = $env:COMPUTERNAME; windows_user = $env:USERNAME; connector_version = $version }
+        if ($TermsVersion -match '^[0-9A-Za-z.-]{1,20}$') { $profile.terms_version = $TermsVersion }
+        $body = $profile | ConvertTo-Json -Compress
         $headers = @{ Authorization = 'Bearer ' + [string]$join.join_code; 'X-Connector-Version' = $version }
         Write-Step ("Joining the team skill service as {0}..." -f $Name.Trim())
         try {
@@ -1593,7 +1653,7 @@ function Register-SkillServiceDevice {
 if ($LibraryOnly) { return }
 
 try {
-    Write-Step ("Autodesk MCP Connector - {0}" -f $Action)
+    Write-Step ("Smart Autodesk Connector - {0}" -f $Action)
 
     if ($Action -eq 'Collect') {
         $root = Get-Repository
@@ -1677,16 +1737,33 @@ try {
             Test-RemoteClaudeSetup $(if (Test-Path -LiteralPath $RepositoryPath) { $RepositoryPath } else { (Split-Path -Parent $PSScriptRoot) })
         }
         'Install' {
+            Write-InstallPhase 'files'
             $root = Get-Repository
+            Write-InstallResult 'files' 'ok'
+            Write-InstallPhase 'skills'
             Install-Skills $root
-            # An administrator's enrollment file wins; otherwise the team join dialog's answers are used.
+            Write-InstallResult 'skills' 'ok'
+            Write-InstallPhase 'team'
+            # An administrator's enrollment file wins; otherwise the setup window's details are used.
             if ($JoinName -and $JoinEmail -and [string]::IsNullOrWhiteSpace($EnrollmentPath)) { $null = Register-SkillServiceDevice -Root $root }
             else { $null = Import-SkillServiceEnrollment -Root $root }
+            Write-InstallPhase 'revit'
             if ($Product -in @('All','Revit') -and (Test-Revit2024Installed)) {
                 Install-RevitAddin $root
+                Write-InstallResult 'revit' 'ok' 'restart Revit to load it'
             }
             elseif ($Product -in @('All','Revit')) {
                 Write-Step 'Revit 2024 was not detected, so its add-in was skipped.'
+                Write-InstallResult 'revit' 'skipped' 'Revit 2024 is not installed'
+            }
+            Write-InstallPhase 'updates'
+            $updateState = Read-UpdateState
+            if ($updateState.PSObject.Properties['notifications_user_disabled'] -and $updateState.notifications_user_disabled) {
+                Write-InstallResult 'updates' 'skipped' 'switched off in Settings'
+            }
+            else {
+                Enable-UpdateNotifications
+                Write-InstallResult 'updates' 'ok'
             }
             Register-DetectedAiClients $root
             if ($Product -in @('All','AutoCAD')) { Test-AutoCadSetup }
@@ -1695,6 +1772,12 @@ try {
             Write-Step 'Setup complete. Restart Codex, Claude, and any running Revit session, then open AutoCAD or Revit.'
         }
         'Update' {
+            # Revit and AutoCAD keep connector files open; replacing the install folder under them fails.
+            $openApps = Get-RunningAutodeskApps
+            if ($openApps.Count) {
+                Write-Output ("[{0}] [UPDATE_DEFERRED] {1} is open. The update installs automatically after you close it." -f (Get-Date -Format 'HH:mm:ss'), ($openApps -join ' and '))
+                break
+            }
             $script:UpdateDownloaded = $false
             $root = Get-Repository
             $null = Import-SkillServiceEnrollment -Root $root
@@ -1714,7 +1797,7 @@ try {
                 -Sha256 $(if ((Test-Path -LiteralPath (Join-Path $root '.bim-cad-source.json'))) {
                     [string]((Get-Content -LiteralPath (Join-Path $root '.bim-cad-source.json') -Raw | ConvertFrom-Json).sha256)
                 } else { '' })
-            Write-Step 'Skills and Autodesk MCP Connector are up to date from the verified public release channel. Restart Codex, Claude, and any running Revit session.'
+            Write-Output ("[{0}] [UPDATE_INSTALLED] Smart Autodesk Connector {1} is installed." -f (Get-Date -Format 'HH:mm:ss'), (Get-InstalledVersion))
         }
     }
 }

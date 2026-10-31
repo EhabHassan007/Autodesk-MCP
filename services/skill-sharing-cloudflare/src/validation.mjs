@@ -38,14 +38,17 @@ const plain = (value, max) => typeof value === 'string' && value.isWellFormed() 
 export const VERSION = /^[0-9A-Za-z.+-]{1,40}$/;
 export function validateProfile(data) {
   const fail = message => { throw new Error(message); };
-  const keys = ['name', 'email', 'pc_name', 'windows_user', 'connector_version'];
+  const keys = ['name', 'email', 'pc_name', 'windows_user', 'connector_version', 'terms_version'];
   if (!object(data) || Object.keys(data).some(k => !keys.includes(k))) fail('Unexpected fields.');
   if (!plain(data.name, 80)) fail('Enter your name (up to 80 characters).');
   if (!plain(data.email, 254) || !/^[^\s@"]+@[^\s@"]+\.[^\s@"]{2,}$/.test(data.email)) fail('Enter a valid email address.');
   if (typeof data.pc_name !== 'string' || !/^[A-Za-z0-9._-]{1,63}$/.test(data.pc_name)) fail('Invalid PC name.');
   if (!plain(data.windows_user, 64) || /[\\/:*?"|]/.test(data.windows_user)) fail('Invalid Windows user name.');
   if (data.connector_version !== undefined && (typeof data.connector_version !== 'string' || !VERSION.test(data.connector_version))) fail('Invalid connector version.');
-  return {name: data.name, email: data.email.toLowerCase(), pc_name: data.pc_name, windows_user: data.windows_user, connector_version: data.connector_version ?? null};
+  // The version of the terms of use the person accepted in the setup window.
+  if (data.terms_version !== undefined && (typeof data.terms_version !== 'string' || !/^[0-9A-Za-z.-]{1,20}$/.test(data.terms_version))) fail('Invalid terms version.');
+  return {name: data.name, email: data.email.toLowerCase(), pc_name: data.pc_name, windows_user: data.windows_user,
+    connector_version: data.connector_version ?? null, terms_version: data.terms_version ?? null};
 }
 
 // Usage arrives pre-aggregated per day: names only, never arguments or content.

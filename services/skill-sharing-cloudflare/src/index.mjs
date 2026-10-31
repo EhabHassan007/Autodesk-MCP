@@ -123,7 +123,7 @@ export async function handle(request, env, backend) {
       const today = now();
       await env.DB.prepare('DELETE FROM usage WHERE day<?').bind(isoDay(today-180*DAY)).run();
       const devices = (await env.DB.prepare(`SELECT id,label,active,source,person_name,email,pc_name,windows_user,connector_version,
-        created_at,enroll_ip,last_seen,last_ip FROM devices ORDER BY last_seen DESC`).all()).results;
+        terms_version,created_at,enroll_ip,last_seen,last_ip FROM devices ORDER BY last_seen DESC`).all()).results;
       const usage = (await env.DB.prepare(`SELECT device,kind,name,
         SUM(CASE WHEN day>=? THEN count ELSE 0 END) AS last7,SUM(count) AS last30,MAX(day) AS last_day
         FROM usage WHERE day>=? GROUP BY device,kind,name ORDER BY last30 DESC`).bind(isoDay(today-6*DAY),isoDay(today-29*DAY)).all()).results;
@@ -147,10 +147,10 @@ export async function handle(request, env, backend) {
       try { profile = validateProfile(await readJSON(request)); }
       catch (error) { throw error instanceof HTTPError ? error : new HTTPError(422,error.message); }
       const token = random(), id = crypto.randomUUID().replaceAll('-','');
-      await env.DB.prepare(`INSERT INTO devices(id,hash,label,active,source,person_name,email,pc_name,windows_user,connector_version,created_at,enroll_ip,last_seen,last_ip)
-        VALUES(?,?,?,1,'join',?,?,?,?,?,?,?,?,?)`)
+      await env.DB.prepare(`INSERT INTO devices(id,hash,label,active,source,person_name,email,pc_name,windows_user,connector_version,terms_version,created_at,enroll_ip,last_seen,last_ip)
+        VALUES(?,?,?,1,'join',?,?,?,?,?,?,?,?,?,?)`)
         .bind(id,await hash(token),`${profile.name} (${profile.pc_name})`.slice(0,80),profile.name,profile.email,profile.pc_name,profile.windows_user,
-          profile.connector_version,now(),clientIP(request),now(),clientIP(request)).run();
+          profile.connector_version,profile.terms_version,now(),clientIP(request),now(),clientIP(request)).run();
       return json({device_id:id,device_token:token});
     }
     if (path === '/v1/usage' && request.method === 'POST') {

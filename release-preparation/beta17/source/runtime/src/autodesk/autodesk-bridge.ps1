@@ -149,7 +149,7 @@ function Invoke-AutodeskMcpRequest {
             $response.result = @{
                 protocolVersion = $protocol
                 capabilities = @{tools=@{}}
-                serverInfo = @{name='Autodesk MCP Connector';version=$connectorVersion}
+                serverInfo = @{name='Smart Autodesk Connector';version=$connectorVersion}
                 instructions = 'Use list_skill_workflows and read_skill_workflow to load relevant shared guidance before CAD/BIM tasks; no separate skill upload is required to read this guidance. Authenticated Autodesk connector for Codex and Claude with AutoCAD and Revit tools. Model-changing calls are serialized across AI clients. For AutoCAD, read drawing_info before edits and save only when explicitly requested. For Revit, call list_sessions when multiple sessions may be open, read document_info before writes, pass expected_document, and verify every write with a separate read.'
             }
         }

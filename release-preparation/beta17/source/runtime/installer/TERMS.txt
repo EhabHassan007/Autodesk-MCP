@@ -1,0 +1,38 @@
+SMART AUTODESK CONNECTOR - TERMS OF USE
+Version 2026-10-30 (DRAFT - to be reviewed by the owner and company legal/HR before rollout)
+
+Please read these terms. Ticking "I accept" and installing means you agree to them.
+
+1. What this tool is
+Smart Autodesk Connector is an internal company tool. It connects Revit and AutoCAD on this computer to AI assistants (Codex and Claude) so they can read and, when you ask them to, change your open model or drawing. It also installs shared company workflow guidance ("skills") and keeps it up to date.
+
+2. You stay in control of your work
+The AI assistants only act when you ask them to in Codex or Claude. You are responsible for reviewing what they do before you save, issue or rely on any model, drawing or document. Keep normal backups and save your work before large automated changes.
+
+3. Information reported to the administrator
+When this computer joins the team service, the following is sent to your company administrator:
+ - your name and email address, as you enter them during setup
+ - the computer name and your Windows user name
+ - the internet (IP) address the service sees, and when this computer last connected
+ - the connector version
+ - which connector skills and tools are used, as names and daily counts only
+ - the skills you save that are submitted for review
+The tool does NOT send your drawings, models, file names or paths, the text of your chats, or anything you type into Revit, AutoCAD, Codex or Claude. The administrator can view this information on a private dashboard and can block a computer. Usage records are deleted after 180 days.
+
+4. Skills you share
+Skills you save may be collected weekly (or when you choose Skills Sync) and sent to the administrator for review. Do not put client names, project data, passwords or personal information into skills. You can keep a personal skill private by listing it in the exclusion list described in the user guide. Nothing you submit is shared with the team until the administrator approves it.
+
+5. Updates
+The connector checks for approved updates and, unless you switch this off in Settings, installs them automatically when Revit and AutoCAD are closed. You will be told when an update is ready or installed.
+
+6. Keep the team installer private
+The team installer contains a company access code. Do not share it outside the company, upload it to public websites, or give it to anyone who is not a member of the team.
+
+7. Acceptable use
+Use the tool only for company work and in line with company policies, client agreements and the Autodesk and AI-provider terms that apply to you. Do not use it to access models, drawings or data you are not authorised to use.
+
+8. No warranty
+The tool is provided "as is" for internal use. The company does not guarantee that it, or the AI assistants it connects to, will be error-free. To the extent permitted by law, the company is not liable for losses arising from its use beyond what company policy provides.
+
+9. Changes and questions
+These terms may be updated; you will be asked to accept a new version when it changes. Questions about the tool or the information it reports: contact your administrator.

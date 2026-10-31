@@ -9,7 +9,7 @@ param($Action,$RepositoryRoot,$StateRoot,$Day='Friday',$Time='16:30',$Additional
 @{action=$Action;day=$Day;time=$Time;roots=$AdditionalSkillRoots}|ConvertTo-Json|Set-Content (Join-Path $StateRoot 'test-call.json')
 $global:LASTEXITCODE=0
 '@|Set-Content (Join-Path $fixtureScripts 'weekly-skill-collection.ps1')
-foreach($n in @('collect-skills-for-review.ps1','submit-team-knowledge.ps1','central-skill-sync.ps1','Initialize-SkillService.ps1','send-usage.ps1')){'# test placeholder'|Set-Content (Join-Path $fixtureScripts $n)}
+foreach($n in @('collect-skills-for-review.ps1','submit-team-knowledge.ps1','central-skill-sync.ps1','Initialize-SkillService.ps1','send-usage.ps1','connector-agent.ps1')){'# test placeholder'|Set-Content (Join-Path $fixtureScripts $n)}
 $script:updates=0
 function Invoke-TaskSetup {param($Script,$ScriptArguments) $script:updates++}
 $source=Get-Content (Join-Path $PSScriptRoot '../source/runtime/scripts/configure-connector-tasks.ps1') -Raw
@@ -22,9 +22,13 @@ try {
  Remove-Item (Join-Path $state 'test-call.json')
  @{enabled=$false;day='Monday';time='10:00';additional_skill_roots=@('custom')}|ConvertTo-Json|Set-Content (Join-Path $state 'settings.json')
  $u=Join-Path $env:LOCALAPPDATA 'AutodeskMcpConnector';New-Item -ItemType Directory $u|Out-Null
+ # Older versions saved "off" by mistake on fresh installs; only the person's own choice keeps it off.
  '{"notifications_enabled":false}'|Set-Content (Join-Path $u 'update-state.json')
  & $body
- if((Test-Path (Join-Path $state 'test-call.json')) -or $script:updates -ne 1){throw 'Disabled tasks re-enabled'}
+ if($script:updates -ne 2){throw 'Accidental "off" from an older version was not repaired'}
+ '{"notifications_enabled":false,"notifications_user_disabled":true}'|Set-Content (Join-Path $u 'update-state.json')
+ & $body
+ if((Test-Path (Join-Path $state 'test-call.json')) -or $script:updates -ne 2){throw 'Disabled tasks re-enabled'}
  @{enabled=$true;day='Monday';time='10:00';additional_skill_roots=@('custom')}|ConvertTo-Json|Set-Content (Join-Path $state 'settings.json')
  & $body
  $call=Get-Content (Join-Path $state 'test-call.json') -Raw|ConvertFrom-Json

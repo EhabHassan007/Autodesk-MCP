@@ -137,7 +137,7 @@ namespace BimCadMcp.Revit
             }
             catch (Exception exception)
             {
-                System.Diagnostics.Debug.WriteLine("Autodesk MCP Connector session registration error: " + exception);
+                System.Diagnostics.Debug.WriteLine("Smart Autodesk Connector session registration error: " + exception);
             }
         }
 
@@ -150,84 +150,8 @@ namespace BimCadMcp.Revit
             }
             catch (Exception exception)
             {
-                System.Diagnostics.Debug.WriteLine("Autodesk MCP Connector session cleanup error: " + exception);
+                System.Diagnostics.Debug.WriteLine("Smart Autodesk Connector session cleanup error: " + exception);
             }
-        }
-    }
-
-    internal static class RibbonUi
-    {
-        internal static void Create(UIControlledApplication application)
-        {
-            try
-            {
-                const string tabName = "Autodesk MCP Connector";
-                try { application.CreateRibbonTab(tabName); }
-                catch (Autodesk.Revit.Exceptions.ArgumentException) { }
-
-                RibbonPanel panel = application.GetRibbonPanels(tabName).FirstOrDefault(item => item.Name == "Connection");
-                if (panel == null) panel = application.CreateRibbonPanel(tabName, "Connection");
-
-                string assemblyPath = Assembly.GetExecutingAssembly().Location;
-                PushButtonData data = new PushButtonData(
-                    "BimCadMcpConnectionStatus",
-                    "Connection\nStatus",
-                    assemblyPath,
-                    typeof(ConnectionStatusCommand).FullName);
-                data.ToolTip = "Check whether Autodesk MCP Connector is ready and whether an AI client has connected recently.";
-                PushButton button = panel.AddItem(data) as PushButton;
-                if (button != null) button.LargeImage = CreateConnectionIcon();
-
-                PushButtonData updateData = new PushButtonData(
-                    "BimCadMcpCheckUpdates",
-                    "Check\nUpdates",
-                    assemblyPath,
-                    typeof(CheckUpdatesCommand).FullName);
-                updateData.ToolTip = "Open Autodesk MCP Connector and check the approved update channel. Nothing is installed until you select Update; restart Revit after an add-in update.";
-                PushButton updateButton = panel.AddItem(updateData) as PushButton;
-                if (updateButton != null) updateButton.LargeImage = CreateUpdateIcon();
-            }
-            catch (Exception exception)
-            {
-                System.Diagnostics.Debug.WriteLine("Autodesk MCP Connector ribbon error: " + exception);
-            }
-        }
-
-        private static ImageSource CreateConnectionIcon()
-        {
-            DrawingGroup group = new DrawingGroup();
-            using (DrawingContext context = group.Open())
-            {
-                context.DrawRoundedRectangle(new SolidColorBrush(System.Windows.Media.Color.FromRgb(31, 41, 55)), null, new System.Windows.Rect(1, 1, 30, 30), 6, 6);
-                Pen whitePen = new Pen(Brushes.White, 2.6);
-                context.DrawEllipse(null, whitePen, new System.Windows.Point(11, 16), 5, 5);
-                context.DrawEllipse(null, whitePen, new System.Windows.Point(21, 16), 5, 5);
-                context.DrawLine(whitePen, new System.Windows.Point(14.5, 16), new System.Windows.Point(17.5, 16));
-                context.DrawEllipse(new SolidColorBrush(System.Windows.Media.Color.FromRgb(34, 197, 94)), null, new System.Windows.Point(25.5, 6.5), 3.5, 3.5);
-            }
-            group.Freeze();
-            DrawingImage image = new DrawingImage(group);
-            image.Freeze();
-            return image;
-        }
-
-        private static ImageSource CreateUpdateIcon()
-        {
-            DrawingGroup group = new DrawingGroup();
-            using (DrawingContext context = group.Open())
-            {
-                context.DrawRoundedRectangle(new SolidColorBrush(System.Windows.Media.Color.FromRgb(31, 41, 55)), null, new System.Windows.Rect(1, 1, 30, 30), 6, 6);
-                Pen whitePen = new Pen(Brushes.White, 2.6);
-                context.DrawLine(whitePen, new System.Windows.Point(16, 7), new System.Windows.Point(16, 20));
-                context.DrawLine(whitePen, new System.Windows.Point(10.5, 15), new System.Windows.Point(16, 20.5));
-                context.DrawLine(whitePen, new System.Windows.Point(21.5, 15), new System.Windows.Point(16, 20.5));
-                context.DrawLine(whitePen, new System.Windows.Point(9, 25), new System.Windows.Point(23, 25));
-                context.DrawEllipse(new SolidColorBrush(System.Windows.Media.Color.FromRgb(59, 130, 246)), null, new System.Windows.Point(25.5, 6.5), 3.5, 3.5);
-            }
-            group.Freeze();
-            DrawingImage image = new DrawingImage(group);
-            image.Freeze();
-            return image;
         }
     }
 
@@ -246,10 +170,10 @@ namespace BimCadMcp.Revit
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "AutodeskMcpConnector", "remote", "remote-config.json");
             string remoteSetup = File.Exists(remoteConfig)
-                ? "Configured (verify gateway status in Autodesk MCP Setup)"
+                ? "Configured (see Smart Autodesk Connector setup)"
                 : "Not configured";
 
-            TaskDialog dialog = new TaskDialog("Autodesk MCP Connector");
+            TaskDialog dialog = new TaskDialog(Brand.Name);
             dialog.MainInstruction = snapshot.ServerRunning
                 ? (recent ? "An AI client recently connected" : "Local MCP server is ready")
                 : "MCP server is stopped";
@@ -265,7 +189,7 @@ namespace BimCadMcp.Revit
                 "Last operation: " + EmptyAsDash(snapshot.LastOperation) + "\n" +
                 "Last client connection: " + FormatUtc(snapshot.LastClientUtc) + "\n" +
                 "Last error: " + EmptyAsDash(snapshot.LastError) + "\n\n" +
-                "For Claude web or mobile, configure and enable the remote connector named Autodesk MCP Connector.";
+                "For Claude web or mobile, configure and enable the remote connector named Smart Autodesk Connector.";
             dialog.CommonButtons = TaskDialogCommonButtons.Close;
             dialog.Show();
             return Result.Succeeded;
@@ -280,59 +204,6 @@ namespace BimCadMcp.Revit
         private static string EmptyAsDash(string value)
         {
             return String.IsNullOrWhiteSpace(value) ? "None" : value;
-        }
-    }
-
-    [Transaction(TransactionMode.Manual)]
-    [Regeneration(RegenerationOption.Manual)]
-    public sealed class CheckUpdatesCommand : IExternalCommand
-    {
-        public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
-        {
-            try
-            {
-                string root = FindInstallationRoot();
-                string setup = Path.Combine(root, "installer", "BIM-CAD-Setup.ps1");
-                if (!File.Exists(setup))
-                    throw new FileNotFoundException("The Autodesk MCP Connector updater was not found. Run Install / Repair from the latest package.", setup);
-
-                ProcessStartInfo startInfo = new ProcessStartInfo();
-                startInfo.FileName = "powershell.exe";
-                startInfo.Arguments =
-                    "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File " + Quote(setup) +
-                    " -RepositoryPath " + Quote(root) + " -InitialAction CheckUpdate";
-                startInfo.UseShellExecute = true;
-                startInfo.WindowStyle = ProcessWindowStyle.Hidden;
-                Process.Start(startInfo);
-                return Result.Succeeded;
-            }
-            catch (Exception exception)
-            {
-                TaskDialog.Show("Autodesk MCP Connector", exception.Message);
-                return Result.Failed;
-            }
-        }
-
-        private static string FindInstallationRoot()
-        {
-            string directory = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
-            for (int index = 0; index < 8 && !String.IsNullOrWhiteSpace(directory); index++)
-            {
-                if (File.Exists(Path.Combine(directory, "installer", "BIM-CAD-Setup.ps1"))) return directory;
-                DirectoryInfo parent = Directory.GetParent(directory);
-                directory = parent == null ? null : parent.FullName;
-            }
-
-            string defaultRoot = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "BIM-CAD-MCP");
-            if (File.Exists(Path.Combine(defaultRoot, "installer", "BIM-CAD-Setup.ps1"))) return defaultRoot;
-            throw new DirectoryNotFoundException("The Autodesk MCP Connector installation folder could not be located.");
-        }
-
-        private static string Quote(string value)
-        {
-            return "\"" + value.Replace("\"", "\\\"") + "\"";
         }
     }
 
@@ -439,7 +310,7 @@ namespace BimCadMcp.Revit
             string resultText;
             if (mode == "transaction")
             {
-                using (Transaction transaction = new Transaction(document, "Autodesk MCP Connector: " + transactionName))
+                using (Transaction transaction = new Transaction(document, "Smart Autodesk Connector: " + transactionName))
                 {
                     transaction.Start();
                     try

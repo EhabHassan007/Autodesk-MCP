@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('Enable','Disable','Status','Run','Preview')][string]$Action = 'Status',
+    # Sync is the on-demand Skills Sync button: upload and download now, even if the weekly run is off.
+    [ValidateSet('Enable','Disable','Status','Run','Preview','Sync')][string]$Action = 'Status',
     [string]$RepositoryRoot = (Join-Path $env:LOCALAPPDATA 'BIM-CAD-MCP'),
     [string[]]$AdditionalSkillRoots = @(),
     [ValidateSet('Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday')][string]$Day = 'Friday',
@@ -17,7 +18,7 @@ if ($Action -in @('Enable','Disable','Status')) {
 }
 
 if ($Action -eq 'Enable') {
-    if (-not (Test-Path (Join-Path $RepositoryRoot '.agents\skills'))) { throw 'Install Autodesk MCP Connector before enabling skill collection.' }
+    if (-not (Test-Path (Join-Path $RepositoryRoot '.agents\skills'))) { throw 'Install Smart Autodesk Connector before enabling skill collection.' }
 
     New-Item -ItemType Directory -Path $StateRoot -Force | Out-Null
     $installRoot = Join-Path $StateRoot 'scripts'
@@ -77,15 +78,26 @@ try {
     if (-not (Test-Path (Join-Path $RepositoryRoot '.agents\skills'))) { throw 'The installed connector skill library is missing.' }
     # Usage is reported first and independently, so a failed skill submission never holds it back.
     $usageSender = Join-Path $PSScriptRoot 'send-usage.ps1'
-    if ($Action -eq 'Run' -and (Test-Path -LiteralPath $usageSender)) {
+    if ($Action -in @('Run','Sync') -and (Test-Path -LiteralPath $usageSender)) {
         try { $null = & $usageSender -Action Run -StateRoot $StateRoot 2>$null } catch { }
     }
     $central=Join-Path $PSScriptRoot 'central-skill-sync.ps1'
-    $output=@(& $central -RepositoryRoot $RepositoryRoot -StateRoot $StateRoot -AdditionalSkillRoots $AdditionalSkillRoots -Preview:($Action -eq 'Preview') 3>&1)
-    $text = ($output | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine
+    # Collect lines as they arrive so the summary survives even when the sync then fails.
+    $output = New-Object System.Collections.Generic.List[string]
+    $failure = $null
+    try { & $central -RepositoryRoot $RepositoryRoot -StateRoot $StateRoot -AdditionalSkillRoots $AdditionalSkillRoots -Preview:($Action -eq 'Preview') 3>&1 | ForEach-Object { $output.Add($_.ToString()) } }
+    catch { $failure = $_.Exception.Message }
+    $text = ($output + @($(if ($failure) { "FAILED: $failure" }))) -join [Environment]::NewLine
     [IO.File]::AppendAllText($logPath, "[$(Get-Date -Format o)] $Action`r`n$text`r`n")
-    [IO.File]::WriteAllText($resultPath, (@{completed_at=(Get-Date -Format o);action=$Action;status='completed';details=$text}|ConvertTo-Json -Depth 5))
+    $result = [ordered]@{completed_at=(Get-Date -Format o);action=$Action;status=$(if ($failure) { 'failed' } else { 'completed' });details=$text}
+    $summaryLine = $output | Where-Object { $_.StartsWith('[SYNC_RESULT] ') } | Select-Object -Last 1
+    if ($summaryLine) {
+        $summary = $summaryLine.Substring(14) | ConvertFrom-Json
+        foreach ($property in $summary.PSObject.Properties) { $result['sync_' + $property.Name] = $property.Value }
+    }
+    [IO.File]::WriteAllText($resultPath, ($result | ConvertTo-Json -Depth 5))
     Write-Output $text
+    if ($failure) { exit 1 }
 }
 catch {
     $message = $_.Exception.Message

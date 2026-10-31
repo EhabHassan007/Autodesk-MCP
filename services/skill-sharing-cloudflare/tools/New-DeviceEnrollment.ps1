@@ -90,5 +90,5 @@ finally {
 
 Write-Host ''
 Write-Host ("{0} enrollment file(s) in {1}" -f $created.Count, $OutputDirectory)
-Write-Host 'For each PC: copy <label>\enrollment.json beside "INSTALL Autodesk MCP Connector.cmd" and run setup as that PC''s user.'
+Write-Host 'For each PC: copy <label>\enrollment.json beside "INSTALL Smart Autodesk Connector.cmd" and run setup as that PC''s user.'
 Write-Host 'Setup imports it and deletes it. Deliver files privately and never reuse one on a second PC.'

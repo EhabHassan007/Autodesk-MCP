@@ -28,6 +28,8 @@ namespace BimCadMcp.Revit
             ConnectionState.MarkServerStarted(application.ControlledApplication.VersionNumber, _host.SessionId, _host.PipeName);
             SessionRegistry.Register(_host.SessionId, application.ControlledApplication.VersionNumber, _host.PipeName);
             RibbonUi.Create(application);
+            // Starts the notification-area agent so update notices also appear for this Revit session.
+            Connector.EnsureAgentRunning();
             return Result.Succeeded;
         }
 
@@ -90,7 +92,7 @@ namespace BimCadMcp.Revit
 
         public string GetName()
         {
-            return "Autodesk MCP Connector request handler";
+            return "Smart Autodesk Connector request handler";
         }
     }
 
@@ -125,7 +127,7 @@ namespace BimCadMcp.Revit
         internal void Start()
         {
             _thread = new Thread(ListenLoop);
-            _thread.Name = "Autodesk MCP Connector Revit pipe";
+            _thread.Name = "Smart Autodesk Connector Revit pipe";
             _thread.IsBackground = true;
             _thread.Start();
         }
@@ -191,7 +193,7 @@ namespace BimCadMcp.Revit
                 {
                     if (!_stopping)
                     {
-                        System.Diagnostics.Debug.WriteLine("Autodesk MCP Connector pipe error: " + exception);
+                        System.Diagnostics.Debug.WriteLine("Smart Autodesk Connector pipe error: " + exception);
                         Thread.Sleep(250);
                     }
                 }
@@ -352,7 +354,7 @@ namespace BimCadMcp.Revit
             if (parameter == null) throw new InvalidOperationException("Parameter was not found: " + parameterName);
             if (parameter.IsReadOnly) throw new InvalidOperationException("Parameter is read-only: " + parameterName);
 
-            using (Transaction transaction = new Transaction(document, "Autodesk MCP Connector: Set parameter"))
+            using (Transaction transaction = new Transaction(document, "Smart Autodesk Connector: Set parameter"))
             {
                 transaction.Start();
                 bool changed;

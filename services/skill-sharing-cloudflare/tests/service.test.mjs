@@ -10,7 +10,7 @@ import { DASHBOARD_CSS, DASHBOARD_HTML, DASHBOARD_JS } from '../src/dashboard.mj
 
 const admin = 'test-only-admin-token-at-least-32-characters';
 const join = 'test-only-team-join-code-at-least-32-characters';
-const person = {name:'Ahmed Ali',email:'Ahmed.Ali@Example.com',pc_name:'DESK-07',windows_user:'ahmed',connector_version:'1.0.0-beta.17'};
+const person = {name:'Ahmed Ali',email:'Ahmed.Ali@Example.com',pc_name:'DESK-07',windows_user:'ahmed',connector_version:'1.0.0-beta.18',terms_version:'2026-10-30'};
 const skill = {name:'revit-check',files:{'SKILL.md':'---\nname: revit-check\n---\nRead document information.'}};
 const body = {skills:[skill]};
 const url = 'https://github.com/owner/repo/pull/7';
@@ -226,7 +226,7 @@ test('team join creates a working device with profile and IP; the code is checke
   const row=s.sqlite.prepare('SELECT * FROM devices WHERE id=?').get(d.device_id);
   assert.equal(row.source,'join');assert.equal(row.person_name,'Ahmed Ali');assert.equal(row.email,'ahmed.ali@example.com');
   assert.equal(row.pc_name,'DESK-07');assert.equal(row.windows_user,'ahmed');assert.equal(row.enroll_ip,'203.0.113.7');
-  assert.equal(row.label,'Ahmed Ali (DESK-07)');assert.ok(row.created_at>0);
+  assert.equal(row.label,'Ahmed Ali (DESK-07)');assert.ok(row.created_at>0);assert.equal(row.terms_version,'2026-10-30');
   assert.ok(!Object.values(row).includes(d.device_token));
   assert.equal((await s.request('/v1/library','GET',d.device_token)).status,200);
 });
@@ -234,7 +234,8 @@ test('team join creates a working device with profile and IP; the code is checke
 test('team join validates the profile and is disabled without a strong JOIN_CODE',async t=>{
   const s=setup(t);
   for (const bad of [{...person,name:''},{...person,name:'x'.repeat(81)},{...person,name:'<script>'},{...person,email:'not-an-email'},
-    {...person,pc_name:'bad pc'},{...person,windows_user:'a\\b'},{...person,extra:'field'},{...person,connector_version:'1.0 beta'}]) {
+    {...person,pc_name:'bad pc'},{...person,windows_user:'a\\b'},{...person,extra:'field'},{...person,connector_version:'1.0 beta'},
+    {...person,terms_version:'<script>'},{...person,terms_version:'x'.repeat(21)}]) {
     const r=await s.request('/v1/enroll','POST',join,bad,office);
     assert.equal(r.status,422,JSON.stringify(bad));
     assert.ok((await r.json()).detail);
