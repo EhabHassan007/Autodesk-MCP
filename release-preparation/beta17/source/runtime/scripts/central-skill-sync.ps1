@@ -3,6 +3,8 @@ param(
  [string]$RepositoryRoot=(Split-Path -Parent $PSScriptRoot),
  [string]$StateRoot=(Join-Path $env:LOCALAPPDATA 'AutodeskMcpSkillCollection'),
  [string[]]$AdditionalSkillRoots=@(),
+ # Approved categories to download (see Get-SyncCategories); empty downloads every category.
+ [string[]]$Categories=@(),
  [switch]$Preview,
  [switch]$LibraryOnly
 )
@@ -49,7 +51,7 @@ function Set-ApprovedSkillDirectory {
 }
 
 function Install-ApprovedLibrary {
- param($Library,[string]$State,[string]$Repository,[string[]]$ClientRoots)
+ param($Library,[string]$State,[string]$Repository,[string[]]$ClientRoots,[string[]]$Categories=@())
  $cache=Join-Path $State 'approved-skills'
  $ledgerPath=Join-Path $State 'managed-skill-hashes.json'
  $managed=@{}
@@ -59,9 +61,17 @@ function Install-ApprovedLibrary {
  # Per-skill outcome for the Skills Sync summary: added, updated, preserved (local edits kept) or current.
  $outcome=@{}
  # Installed copies of the shipped library, which may be in category folders, by skill name.
- $baselines=@{}
- foreach($shipped in Get-SkillFolders (Join-Path $Repository '.agents/skills')){$baselines[$shipped.Name]=$shipped.Path}
- foreach($skill in @($Library.skills)){
+ $baselines=@{};$shippedCategories=@{}
+ foreach($shipped in Get-SkillFolders (Join-Path $Repository '.agents/skills')){$baselines[$shipped.Name]=$shipped.Path;$shippedCategories[$shipped.Name]=$shipped.Category}
+ $selected=@($Library.skills)
+ if($Categories.Count){
+  # Only the requested categories are downloaded; skills of other categories are left exactly as they are.
+  $selected=@($selected|Where-Object {
+   $category=if($_.PSObject.Properties['category'] -and $_.category){[string]$_.category}elseif($shippedCategories[[string]$_.name]){$shippedCategories[[string]$_.name]}else{'uncategorized'}
+   $Categories -contains $category
+  })
+ }
+ foreach($skill in $selected){
   $outcome[$skill.name]='current'
   Test-RemoteSkillFiles $skill
   $temp=Join-Path $State ('download-'+[guid]::NewGuid().ToString('N'))
@@ -173,7 +183,7 @@ $token=$null
 try{
  $base=$uri.AbsoluteUri.TrimEnd('/')
  $submissionFailure=$null
- $summary=@{status='ok';candidates=$skills.Count;submitted=0;submission='none';pull_request=''}
+ $summary=@{status='ok';candidates=$skills.Count;submitted=0;submission='none';pull_request='';categories=@($Categories)}
  try {
  if($submissionBlocked){throw 'Conflicting saved skills need administrator review.'}
  if($skills.Count){
@@ -191,7 +201,7 @@ try{
  try{
   $approved=Invoke-RestMethod -Uri ($base+'/v1/library') -Headers $headers -TimeoutSec 120
   $codexRoot=if($env:CODEX_HOME){Join-Path $env:CODEX_HOME 'skills'}else{Join-Path $env:USERPROFILE '.codex/skills'}
-  $library=Install-ApprovedLibrary -Library $approved -State $StateRoot -Repository $RepositoryRoot -ClientRoots @($codexRoot,(Join-Path $env:USERPROFILE '.claude/skills'))
+  $library=Install-ApprovedLibrary -Library $approved -State $StateRoot -Repository $RepositoryRoot -ClientRoots @($codexRoot,(Join-Path $env:USERPROFILE '.claude/skills')) -Categories $Categories
  }
  catch{
   $summary.status='failed'

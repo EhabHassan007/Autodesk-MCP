@@ -496,8 +496,9 @@ namespace BimCadMcp.Revit
                     window.ContinueInBackgroundAfter(15, "Syncing in the background",
                         "Skills Sync is still working. You can close this window and keep working; " +
                         "a Windows notification shows the result when it is done.");
-                    window.Run("Syncing skills…", "Sending your saved skills for review and downloading the latest approved team skills.",
-                        runner, "-Action Sync -StateRoot " + Connector.Quote(Connector.StateRoot),
+                    // From Revit, only approved Revit skills are downloaded; your saved skills of any kind are still sent.
+                    window.Run("Syncing skills…", "Sending your saved skills for review and downloading the latest approved Revit skills.",
+                        runner, "-Action Sync -Product Revit -StateRoot " + Connector.Quote(Connector.StateRoot),
                         delegate(string output, int code) { ShowOutcome(window, output); });
                     window.ShowDialog(Owner.Of(commandData));
                 }
@@ -531,9 +532,9 @@ namespace BimCadMcp.Revit
                 int submitted = number("sync_submitted"), added = number("sync_added"), updated = number("sync_updated"), kept = number("sync_preserved");
                 string body =
                     "Sent for review:  " + submitted + " saved skill" + (submitted == 1 ? "" : "s") + "\n" +
-                    "Downloaded:  " + added + " new and " + updated + " updated approved skill" + (added + updated == 1 ? "" : "s") + "\n" +
+                    "Downloaded:  " + added + " new and " + updated + " updated approved Revit skill" + (added + updated == 1 ? "" : "s") + "\n" +
                     (kept > 0 ? "Kept your local edits:  " + kept + " skill" + (kept == 1 ? "" : "s") + "\n" : "") +
-                    "Approved team skills available:  " + number("sync_approved_total") +
+                    "Approved Revit skills available:  " + number("sync_approved_total") +
                     (status == "partial" ? "\n\n" + reason : "\n\nRestart Codex or Claude to see new skills.");
                 window.ShowResult(status == "ok" ? "Skills are in sync" : "Skills downloaded, but not sent", body, status == "ok" ? Brand.Good : Brand.Bad);
             }

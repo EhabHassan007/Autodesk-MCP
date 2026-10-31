@@ -2,6 +2,9 @@
 param(
     # Sync is the on-demand Skills Sync button: upload and download now, even if the weekly run is off.
     [ValidateSet('Enable','Disable','Status','Run','Preview','Sync')][string]$Action = 'Status',
+    # The software whose Skills Sync button was pressed; it then downloads only that software's approved skills.
+    # Empty (the weekly run, the notification-area menu): the installed Autodesk products plus General.
+    [ValidateSet('', 'Revit', 'AutoCAD', '3dsMax')][string]$Product = '',
     [string]$RepositoryRoot = (Join-Path $env:LOCALAPPDATA 'BIM-CAD-MCP'),
     [string[]]$AdditionalSkillRoots = @(),
     [ValidateSet('Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday')][string]$Day = 'Friday',
@@ -82,14 +85,17 @@ try {
         try { $null = & $usageSender -Action Run -StateRoot $StateRoot 2>$null } catch { }
     }
     $central=Join-Path $PSScriptRoot 'central-skill-sync.ps1'
+    . (Join-Path $PSScriptRoot 'SkillLibrary.ps1')
+    $categories = @(Get-SyncCategories -Product $Product)
     # Collect lines as they arrive so the summary survives even when the sync then fails.
     $output = New-Object System.Collections.Generic.List[string]
+    $output.Add('Downloading approved skills in: ' + ($categories -join ', '))
     $failure = $null
-    try { & $central -RepositoryRoot $RepositoryRoot -StateRoot $StateRoot -AdditionalSkillRoots $AdditionalSkillRoots -Preview:($Action -eq 'Preview') 3>&1 | ForEach-Object { $output.Add($_.ToString()) } }
+    try { & $central -RepositoryRoot $RepositoryRoot -StateRoot $StateRoot -AdditionalSkillRoots $AdditionalSkillRoots -Categories $categories -Preview:($Action -eq 'Preview') 3>&1 | ForEach-Object { $output.Add($_.ToString()) } }
     catch { $failure = $_.Exception.Message }
     $text = ($output + @($(if ($failure) { "FAILED: $failure" }))) -join [Environment]::NewLine
     [IO.File]::AppendAllText($logPath, "[$(Get-Date -Format o)] $Action`r`n$text`r`n")
-    $result = [ordered]@{completed_at=(Get-Date -Format o);action=$Action;status=$(if ($failure) { 'failed' } else { 'completed' });details=$text}
+    $result = [ordered]@{completed_at=(Get-Date -Format o);action=$Action;product=$Product;status=$(if ($failure) { 'failed' } else { 'completed' });details=$text}
     $summaryLine = $output | Where-Object { $_.StartsWith('[SYNC_RESULT] ') } | Select-Object -Last 1
     if ($summaryLine) {
         $summary = $summaryLine.Substring(14) | ConvertFrom-Json
