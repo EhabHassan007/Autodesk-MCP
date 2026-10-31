@@ -19,21 +19,29 @@ $autoCadModule = New-Module -Name AutodeskMcpAutoCad -ArgumentList $autoCadBridg
     . $Bridge -LibraryOnly
     function Get-McpTools { @($toolList) }
     function Invoke-McpTool($Name, $Arguments) { Invoke-CadTool $Name $Arguments }
-    Export-ModuleMember -Function Get-McpTools, Invoke-McpTool
+    function Get-McpConnectionStatus($Arguments) { Get-AutoCadConnectionStatus }
+    Export-ModuleMember -Function Get-McpTools, Invoke-McpTool, Get-McpConnectionStatus
 }
 $revitModule = New-Module -Name AutodeskMcpRevit -ArgumentList $revitBridge, $RevitVersion -ScriptBlock {
     param([string]$Bridge, [string]$Version)
     . $Bridge -LibraryOnly -RevitVersion $Version
     function Get-McpTools { @($toolList) }
     function Invoke-McpTool($Name, $Arguments) { Invoke-RevitTool $Name $Arguments }
-    Export-ModuleMember -Function Get-McpTools, Invoke-McpTool
+    function Get-McpConnectionStatus($Arguments) { Get-RevitConnectionStatus $Arguments }
+    Export-ModuleMember -Function Get-McpTools, Invoke-McpTool, Get-McpConnectionStatus
 }
 
 Import-Module $autoCadModule -Prefix AutoCad -Force
 Import-Module $revitModule -Prefix Revit -Force
 
 $autoCadTools = @(Get-AutoCadMcpTools)
-$revitTools = @(Get-RevitMcpTools)
+# connection_status is answered here for both products, so it is described for both.
+$revitTools = @(Get-RevitMcpTools | ForEach-Object {
+    if ([string]$_['name'] -ne 'connection_status') { return $_ }
+    $tool = $_.Clone()
+    $tool['description'] = 'Check whether the Smart Autodesk Connector can reach AutoCAD and Revit. Reports AutoCAD (running full AutoCAD over COM, version, active drawing) and Revit (add-in sessions, active document, last error) separately. Succeeds when either product is reachable; a product that is closed is reported, not an error. Optional session_id selects a Revit session.'
+    $tool
+})
 $workflowTools = @(
     @{name='list_skill_workflows';description='List shared workflow guidance available through this connector, each with its category (revit, autocad, 3ds-max, other-software, linkedin-marketing, branding-ci, general). Read the relevant workflow before a task.';inputSchema=@{type='object';properties=@{}};annotations=@{readOnlyHint=$true}},
     @{name='read_skill_workflow';description='Read a shared Autodesk workflow or its supporting text file. This returns guidance and does not execute code or modify a model.';inputSchema=@{type='object';properties=@{name=@{type='string';description='Skill folder name from list_skill_workflows'};file=@{type='string';description='Relative text file within the skill; defaults to SKILL.md'}};required=@('name')};annotations=@{readOnlyHint=$true}}
@@ -93,6 +101,19 @@ function Read-SharedWorkflow {
     $item=Get-Item -LiteralPath $path
     if($item.Length -gt 256KB -or $item.Extension.ToLowerInvariant() -notin @('.md','.txt','.json','.yaml','.yml','.toml','.py','.ps1','.js','.ts','.sh','.csv','.xml')){throw 'Only small skill text files can be read.'}
     @{name=$Name;file=$File;content=([IO.File]::ReadAllText($path, [Text.Encoding]::UTF8))}
+}
+
+# Read-only status for both products. Succeeds when either is reachable; otherwise the error
+# message carries both product summaries so the client can tell the user what to start.
+function Get-AutodeskConnectionStatus {
+    param([object]$Arguments)
+    $autoCad = Get-AutoCadMcpConnectionStatus $Arguments
+    $revit = Get-RevitMcpConnectionStatus $Arguments
+    $summary = "AutoCAD: $($autoCad.summary) Revit: $($revit.summary)"
+    if (-not ($autoCad.available -or $revit.available)) {
+        throw "Smart Autodesk Connector is running, but neither AutoCAD nor Revit is reachable. $summary"
+    }
+    @{connected=$true; summary=$summary; autocad=$autoCad; revit=$revit}
 }
 
 function Invoke-WithWriteLock {
@@ -168,6 +189,9 @@ function Invoke-AutodeskMcpRequest {
                 }
                 elseif ($name -eq 'read_skill_workflow') {
                     $data = Read-SharedWorkflow -Name ([string]$Request.params.arguments.name) -File ([string]$Request.params.arguments.file)
+                }
+                elseif ($name -eq 'connection_status') {
+                    $data = Get-AutodeskConnectionStatus $Request.params.arguments
                 }
                 elseif ($name -in $autoCadToolNames) {
                     $data = Invoke-WithWriteLock $name { Invoke-AutoCadMcpTool $name $Request.params.arguments }

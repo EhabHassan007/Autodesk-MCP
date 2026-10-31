@@ -6,6 +6,7 @@ This is an administrator pilot. Automatic team sharing requires the dedicated Gi
 - Simplified Install / Repair, Update, Test connection and Settings interface.
 - 27 shared workflows, including Create unfolded walls and AutoCAD project title update.
 - Fixes a Windows PowerShell 5.1 hang when reading workflow text through MCP. Workflow content is now read as plain UTF-8, preventing file metadata from expanding during JSON serialization.
+- `connection_status` now checks AutoCAD and Revit together and succeeds when either is reachable, so an AutoCAD-only user is no longer told the connector is not connected while Revit is closed.
 - Existing local skill edits and disabled-update preferences are preserved.
 
 Validation on 2026-10-28: six regression scripts passed on a GitHub-hosted Windows runner using Windows PowerShell 5.1: parser/client registration isolation, approved-library sync, offline central preview, task preference preservation, MCP workflow reading/path validation, and a simulated beta15 upgrade with checksum rejection and downgrade protection. The installer interface smoke test also passed. Six Python service tests previously passed with a fake GitHub backend.
@@ -17,4 +18,4 @@ Still outstanding: live GitHub App and HTTPS hosting, Windows device enrollment/
 
 Keep this release as a pilot until those checks pass. Beta15 remains the public Latest release; no team update notification has been enabled for beta17.
 
-SHA-256: C475ED6B018AE091A7984324AB71EBBCCC161589745754DCA1D0C22D9B5706F6
+SHA-256: D82659EDB8B87CA0F3668E6BD3298FD699A52CC2FFF6ACD067ABB0D393B523F2

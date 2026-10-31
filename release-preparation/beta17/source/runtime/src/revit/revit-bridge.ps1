@@ -160,6 +160,31 @@ function Invoke-RevitPipe([string]$operation, [string[]]$arguments, [string]$ses
     catch { throw "Revit $RevitVersion MCP session is not available. Start Revit or call list_sessions. $($_.Exception.Message)" }
 }
 
+# Read-only Revit part of the combined connection_status. Never throws; reports why Revit is unavailable.
+function Get-RevitConnectionStatus($arguments) {
+    Assert-Args 'connection_status' $arguments
+    $sessionId = Get-OptionalArgument $arguments 'session_id'
+    $running = @(Get-Process -Name Revit -ErrorAction SilentlyContinue).Count -gt 0
+    if (-not [string]::IsNullOrWhiteSpace($sessionId)) {
+        try {
+            $status = Invoke-RevitPipeName (Resolve-RevitPipe $sessionId) 'connection_status' @() 1000
+            return @{available=$true; running=$true; revit_version=$RevitVersion; status=$status; summary="Revit $RevitVersion session $sessionId is connected."}
+        }
+        catch { return @{available=$false; running=$running; revit_version=$RevitVersion; summary="Revit $RevitVersion session $sessionId is not available: $($_.Exception.Message)"} }
+    }
+    $sessions = @(Get-RevitSessions)
+    $online = @($sessions | Where-Object online)
+    $result = @{available=($online.Count -gt 0); running=($running -or $online.Count -gt 0); revit_version=$RevitVersion; sessions=$sessions}
+    if ($online.Count -eq 1) {
+        try { $result.status = Invoke-RevitPipeName (Resolve-RevitPipe $online[0].session_id) 'connection_status' @() 500 } catch { }
+    }
+    $result.summary = if ($online.Count -eq 1) { "Revit $RevitVersion is connected (session $($online[0].session_id))." }
+        elseif ($online.Count -gt 1) { "Revit $RevitVersion is connected with $($online.Count) sessions; pass session_id to choose one." }
+        elseif ($sessions.Count -gt 0 -or $running) { "Revit is running, but the Revit $RevitVersion add-in is not answering; it may still be loading or busy." }
+        else { 'Revit is not running.' }
+    $result
+}
+
 function Invoke-RevitTool($name,$arguments) {
     Assert-Args $name $arguments
     $sessionId = Get-OptionalArgument $arguments 'session_id'
