@@ -33,6 +33,44 @@ $listed=((Call 'list_skill_workflows' @{}).result.content[0].text|ConvertFrom-Js
 if($listed.category -ne 'revit'){throw 'Category lost for a skill served from the approved cache'}
 "PASS: $($shipped.Count) workflow entries available over MCP with categories; approved cache preferred; workflow content readable; path traversal rejected"
 
+# connection_status covers AutoCAD and Revit and succeeds when either one is reachable.
+$statusTools=@((Invoke-AutodeskMcpRequest ([pscustomobject]@{id=1;method='tools/list'})).result.tools|Where-Object {$_['name'] -eq 'connection_status'})
+if($statusTools.Count -ne 1 -or $statusTools[0]['description'] -notmatch 'AutoCAD' -or $statusTools[0]['description'] -notmatch 'Revit'){throw 'connection_status is not described for both products'}
+$cadUp=@{available=$true;version='25.0s';drawing_open=$true;active_drawing='A.dwg';summary='AutoCAD 25.0s is connected; active drawing: A.dwg.'}
+$cadDown=@{available=$false;running=$false;summary='AutoCAD is not running.'}
+$revitUp=@{available=$true;running=$true;sessions=@();summary='Revit 2024 is connected (session s1).'}
+$revitDown=@{available=$false;running=$false;sessions=@();summary='Revit is not running.'}
+$script:revitArgs=$null
+function Get-RevitMcpConnectionStatus($Arguments){$script:revitArgs=$Arguments;$script:revitState}
+function Get-AutoCadMcpConnectionStatus($Arguments){$script:cadState}
+foreach($case in @(@($cadUp,$revitDown,'AutoCAD 25.0s is connected'),@($cadDown,$revitUp,'Revit 2024 is connected'),@($cadUp,$revitUp,'A.dwg'))){
+ $script:cadState=$case[0];$script:revitState=$case[1]
+ $r=Call 'connection_status' ([pscustomobject]@{})
+ $d=$r.result.content[0].text|ConvertFrom-Json
+ if($r.result.isError -or -not $d.connected -or $d.summary -notmatch [regex]::Escape($case[2]) -or $null -eq $d.autocad -or $null -eq $d.revit){throw "connection_status failed with one product reachable: $($r.result.content[0].text)"}
+}
+$script:cadState=$cadDown;$script:revitState=$revitDown
+$r=Call 'connection_status' ([pscustomobject]@{})
+if(-not $r.result.isError -or $r.result.content[0].text -notmatch 'AutoCAD is not running' -or $r.result.content[0].text -notmatch 'Revit is not running'){throw 'connection_status must fail with both product summaries when neither is reachable'}
+$script:cadState=$cadUp;$script:revitState=$revitDown
+$null=Call 'connection_status' ([pscustomobject]@{session_id='s1'})
+if($script:revitArgs.session_id -ne 's1'){throw 'session_id was not passed to the Revit status'}
+# Product probes report a closed product instead of throwing, without a live AutoCAD or Revit.
+& {
+ . (Join-Path $PSScriptRoot '../source/runtime/src/revit/revit-bridge.ps1') -LibraryOnly -SessionDirectory (Join-Path $testLocalAppData 'no-sessions')
+ function Get-Process { @() }
+ function Invoke-RevitPipeName { throw 'The operation has timed out.' }
+ $s=Get-RevitConnectionStatus ([pscustomobject]@{})
+ if($s.available -or $s.summary -ne 'Revit is not running.'){throw "Closed Revit was not reported: $($s.summary)"}
+ $s=Get-RevitConnectionStatus ([pscustomobject]@{session_id='missing'})
+ if($s.available -or $s.summary -notmatch 'not available'){throw 'Unknown Revit session was not reported'}
+ . (Join-Path $PSScriptRoot '../source/runtime/src/autocad/autocad-bridge.ps1') -LibraryOnly
+ function Get-AutoCadProgIds { @('BimCadMcp.Test.NoSuchApplication') }
+ $s=Get-AutoCadConnectionStatus
+ if($s.available -or $s.summary -notmatch '^AutoCAD is (not running|running but not reachable)'){throw "Unreachable AutoCAD was not reported: $($s.summary)"}
+}
+'PASS: connection_status reports AutoCAD and Revit separately, succeeds when either is reachable, fails clearly when neither is, and probes report closed products'
+
 } finally {
  $env:LOCALAPPDATA = $previousLocalAppData
  Remove-Item $testLocalAppData -Recurse -Force

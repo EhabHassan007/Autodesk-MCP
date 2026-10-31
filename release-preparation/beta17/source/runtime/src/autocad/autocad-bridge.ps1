@@ -79,6 +79,48 @@ function Connect-Cad {
     }
     throw "No running full AutoCAD instance was found. Start AutoCAD and open a drawing. Tried: $($attempted -join ', ')."
 }
+# Read-only reachability probe for connection_status. Never throws. COM calls run on a separate
+# runspace so an AutoCAD that is busy in a command or dialog cannot block the tool past the timeout.
+function Get-AutoCadConnectionStatus([int]$TimeoutMilliseconds = 3000) {
+    $probe = [PowerShell]::Create()
+    $null = $probe.AddScript({
+        param([string[]]$ProgIds)
+        foreach ($progId in $ProgIds) {
+            try { $cad = [Runtime.InteropServices.Marshal]::GetActiveObject($progId) } catch { continue }
+            # A briefly busy AutoCAD can answer with empty values (no version, zero drawings); re-read.
+            for ($attempt = 0; $attempt -lt 3; $attempt++) {
+                if ($attempt) { Start-Sleep -Milliseconds 250 }
+                $version = [string]$cad.Version
+                $count = [int]$cad.Documents.Count
+                if ($version -and $count -gt 0) { break }
+            }
+            $doc = if ($count -gt 0) { $cad.ActiveDocument } else { $null }
+            return @{available=$true; version=$version; prog_id=$progId; drawing_open=($count -gt 0); open_drawings=$count
+                active_drawing=$(if ($doc) { [string]$doc.Name } else { '' }); active_drawing_path=$(if ($doc) { [string]$doc.FullName } else { '' })}
+        }
+        @{available=$false; running=(@(Get-Process -Name acad -ErrorAction SilentlyContinue).Count -gt 0)}
+    }).AddArgument([string[]]@(Get-AutoCadProgIds))
+    $handle = $probe.BeginInvoke()
+    if (-not $handle.AsyncWaitHandle.WaitOne($TimeoutMilliseconds)) {
+        # Leave the stuck runspace to finish on its own; disposing it would block on the COM call.
+        $null = $probe.BeginStop($null, $null)
+        return @{available=$false; running=$true; summary="AutoCAD is running but did not answer within $([int]($TimeoutMilliseconds / 1000)) s; it may be busy in a command or dialog."}
+    }
+    try {
+        $result = @($probe.EndInvoke($handle))[0]
+        if ($null -eq $result) { throw 'AutoCAD probe returned no result.' }
+        $status = @{}
+        foreach ($key in $result.Keys) { $status[$key] = $result[$key] }
+    }
+    catch { return @{available=$false; running=$false; summary="AutoCAD status could not be read: $($_.Exception.Message)"} }
+    finally { $probe.Dispose() }
+    $status.summary = if ($status.available -and -not $status.version) { 'AutoCAD is connected but busy and returned no details; retry in a moment.' }
+        elseif ($status.available -and $status.drawing_open) { "AutoCAD $($status.version) is connected; active drawing: $($status.active_drawing)." }
+        elseif ($status.available) { "AutoCAD $($status.version) is connected, but no drawing is open." }
+        elseif ($status.running) { 'AutoCAD is running but not reachable over COM; it may still be starting, or it is not a full AutoCAD (for example AutoCAD LT).' }
+        else { 'AutoCAD is not running.' }
+    $status
+}
 function Drawing-Id($doc) { if ($doc.Path) { $doc.FullName } else { $doc.Name } }
 function Assert-Target($doc,$expected) { if ((Drawing-Id $doc) -ine $expected) { throw 'Active drawing changed or expected_drawing is incorrect. Read drawing_info again.' } }
 function Read-Entity($entity) {
