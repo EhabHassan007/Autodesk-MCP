@@ -20,7 +20,11 @@ try{
  $cuixEntry=$entries|Where-Object{$_.ModuleName -eq './Contents/SmartAutodeskConnector.cuix'}
  $lspEntry=$entries|Where-Object{$_.ModuleName -eq './Contents/SmartAutodeskConnector.lsp'}
  Assert ($null -ne $cuixEntry) 'PackageContents does not load the .cuix'
- Assert ($lspEntry -and $lspEntry.LoadOnAutoCADStartup -eq 'True' -and $lspEntry.PerDocument -eq 'True') 'LISP is not loaded on startup per document'
+ # Loading at startup raised a SECURELOAD prompt for every drawing and AutoCAD looked hung; the LISP is demand-loaded.
+ Assert ($lspEntry -and $lspEntry.LoadOnCommandInvocation -eq 'True') 'LISP is not demand-loaded on command invocation'
+ Assert (-not $package.SelectSingleNode('//ComponentEntry[@LoadOnAutoCADStartup="True"]')) 'Something of ours still loads when AutoCAD starts'
+ $declared=@($lspEntry.SelectNodes('Commands/Command')|ForEach-Object{$_.Global})
+ Assert (($declared -join ',') -eq 'SACSKILLSSYNC,SACCHECKUPDATES,SACSETTINGS,SACSTATUS') "Demand-load command list wrong: $($declared -join ',')"
  'PASS: PackageContents.xml'
 
  # 2. CUIX parts: every part is XML, every macro and panel the ribbon references exists, the Add-ins alias is set.
@@ -65,12 +69,15 @@ try{
  function Write-Step {param($Message)}
  $plugins=Join-Path $t 'ApplicationPlugins'
  # A throwaway registry tree shaped like HKCU\Software\Autodesk\AutoCAD: one profile already trusting a folder,
- # one with no trusted paths, and a product with no profiles yet.
+ # one with no trusted paths, a current profile AutoCAD has not written Variables for, and a product with no profiles.
  $registry='HKCU:\Software\SmartAutodeskConnectorTest-'+[guid]::NewGuid().ToString('N')
- $profileA="$registry\R25.0\ACAD-8101:409\Profiles\<<Unnamed Profile>>\Variables"
- $profileB="$registry\R25.0\ACAD-8101:409\Profiles\Second\Variables"
+ $profiles="$registry\R25.0\ACAD-8101:409\Profiles"
+ $profileA="$profiles\<<Unnamed Profile>>\Variables"
+ $profileB="$profiles\Second\Variables"
  New-Item -Path $profileA -Force|Out-Null; New-Item -Path $profileB -Force|Out-Null; New-Item -Path "$registry\R24.3\ACAD-7101:409" -Force|Out-Null
  Set-ItemProperty -LiteralPath $profileA -Name TRUSTEDPATHS -Value 'C:\Existing'
+ $profilesC="$registry\R26.0\ACAD-9101:409\Profiles"
+ New-Item -Path "$profilesC\Office" -Force|Out-Null; Set-Item -LiteralPath $profilesC -Value 'Office'
  $registryTest=$registry
  Install-AutoCadBundle -Root (Resolve-Path $runtime).Path -PluginsRoot $plugins -RegistryRoot $registry
  $installed=Join-Path $plugins 'SmartAutodeskConnector.bundle'
@@ -87,6 +94,12 @@ try{
  Install-AutoCadBundle -Root (Resolve-Path $runtime).Path -PluginsRoot $plugins -RegistryRoot $registry   # a reinstall replaces the files in place
  Assert ((Get-ItemProperty -LiteralPath $profileA).TRUSTEDPATHS -eq "C:\Existing;$contents") 'Reinstall added the bundle folder twice'
  Assert ((Add-AutoCadTrustedPath -Path $contents -RegistryRoot $registry) -eq 0) 'Already-trusted profiles were rewritten'
+ Assert ((Get-ItemProperty -LiteralPath "$profilesC\Office\Variables").TRUSTEDPATHS -eq $contents) 'Current profile without a Variables key was not trusted'
+ Uninstall-AutoCadBundle -PluginsRoot $plugins -RegistryRoot $registry
+ Assert (-not (Test-Path -LiteralPath $installed)) 'Uninstall left the bundle folder'
+ Assert ((Get-ItemProperty -LiteralPath $profileA).TRUSTEDPATHS -eq 'C:\Existing') 'Uninstall did not restore the other trusted paths exactly'
+ Assert ((Get-ItemProperty -LiteralPath $profileB).TRUSTEDPATHS -eq '') 'Uninstall left the bundle folder trusted'
+ Install-AutoCadBundle -Root (Resolve-Path $runtime).Path -PluginsRoot $plugins -RegistryRoot $registry
  function Get-AutoCadReleases { @() }
  $out=Install-AutoCadBundleStep (Resolve-Path $runtime).Path 6>&1|Out-String
  Assert ($out -match '\[PHASE\] autocad' -and $out -match '\[RESULT\] autocad=skipped') "No AutoCAD should skip the step: $out"

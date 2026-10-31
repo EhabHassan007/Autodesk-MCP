@@ -1,6 +1,6 @@
 ;; Smart Autodesk Connector commands behind the buttons on the AutoCAD Add-ins tab.
 ;; Each command starts a hidden PowerShell that shows its own branded window, so AutoCAD stays free.
-;; Loaded per document by PackageContents.xml; safe to load more than once.
+;; Demand-loaded by PackageContents.xml when one of these commands is first used; safe to load more than once.
 
 (defun sac:root () (strcat (getenv "LOCALAPPDATA") "\\BIM-CAD-MCP"))
 

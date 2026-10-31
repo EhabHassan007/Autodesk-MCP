@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('Status', 'Install', 'Update', 'Test', 'Collect', 'TeamStatus', 'RemoteStatus', 'CheckUpdate', 'EnableNotifications', 'DisableNotifications', 'ConnectGitHub')]
+    [ValidateSet('Status', 'Install', 'Update', 'Test', 'Collect', 'TeamStatus', 'RemoteStatus', 'CheckUpdate', 'EnableNotifications', 'DisableNotifications', 'ConnectGitHub', 'UninstallAutoCadPanel')]
     [string]$Action = 'Status',
 
     [ValidateSet('All', 'AutoCAD', 'Revit')]
@@ -1368,26 +1368,70 @@ function New-AutoCadCuix {
     finally { $zip.Dispose() }
 }
 
-# With SECURELOAD=1 AutoCAD asks before loading the LISP from %APPDATA% ("not located in a trusted folder",
-# seen live on AutoCAD 2025). Trusting only the bundle's Contents folder, in every AutoCAD profile of this user,
-# removes that prompt (approved by the owner). Profiles exist once AutoCAD has started; it reads the value at start.
-function Add-AutoCadTrustedPath {
-    param([string]$Path, [string]$RegistryRoot = 'HKCU:\Software\Autodesk\AutoCAD')
-    $updated = 0
+# AutoCAD keeps SECURELOAD and TRUSTEDPATHS per profile, in
+# HKCU\Software\Autodesk\AutoCAD\<release>\<product>\Profiles\<profile>\Variables; the Profiles key's default
+# value names the current profile (checked on AutoCAD 2025: <<Unnamed Profile>>). Returns the Variables keys of
+# every profile, creating the current profile's key if AutoCAD has not written it yet.
+function Get-AutoCadProfileVariableKeys {
+    param([string]$RegistryRoot = 'HKCU:\Software\Autodesk\AutoCAD')
     foreach ($release in @(Get-ChildItem -LiteralPath $RegistryRoot -ErrorAction SilentlyContinue)) {
         foreach ($product in @(Get-ChildItem -LiteralPath $release.PSPath -ErrorAction SilentlyContinue)) {
-            foreach ($profile in @(Get-ChildItem -LiteralPath (Join-Path $product.PSPath 'Profiles') -ErrorAction SilentlyContinue)) {
+            $profiles = Join-Path $product.PSPath 'Profiles'
+            if (-not (Test-Path -LiteralPath $profiles)) { continue }
+            $currentProfile = [string](Get-Item -LiteralPath $profiles).GetValue('')
+            if ($currentProfile) {
+                $currentVariables = Join-Path (Join-Path $profiles $currentProfile) 'Variables'
+                if (-not (Test-Path -LiteralPath $currentVariables)) { New-Item -Path $currentVariables -Force | Out-Null }
+            }
+            foreach ($profile in @(Get-ChildItem -LiteralPath $profiles -ErrorAction SilentlyContinue)) {
                 $variables = Join-Path $profile.PSPath 'Variables'
-                if (-not (Test-Path -LiteralPath $variables)) { continue }
-                $current = [string](Get-ItemProperty -LiteralPath $variables -ErrorAction SilentlyContinue).TRUSTEDPATHS
-                $entries = @($current -split ';' | Where-Object { $_ })
-                if (@($entries | Where-Object { $_.TrimEnd('\') -ieq $Path.TrimEnd('\') }).Count) { continue }
-                Set-ItemProperty -LiteralPath $variables -Name TRUSTEDPATHS -Value (@($entries + $Path) -join ';')
-                $updated++
+                if (Test-Path -LiteralPath $variables) { $variables }
             }
         }
     }
+}
+
+function Get-TrustedPathEntries {
+    param([string]$Key)
+    @(([string](Get-ItemProperty -LiteralPath $Key -ErrorAction SilentlyContinue).TRUSTEDPATHS) -split ';' | Where-Object { $_ })
+}
+
+# With SECURELOAD=1 AutoCAD asks before loading the LISP from %APPDATA% ("not located in a trusted folder",
+# seen live on AutoCAD 2025). Trusting only the bundle's Contents folder removes that prompt (approved by the
+# owner). Existing entries are kept; AutoCAD reads the value when it starts.
+function Add-AutoCadTrustedPath {
+    param([string]$Path, [string]$RegistryRoot = 'HKCU:\Software\Autodesk\AutoCAD')
+    $updated = 0
+    foreach ($variables in @(Get-AutoCadProfileVariableKeys $RegistryRoot)) {
+        $entries = @(Get-TrustedPathEntries $variables)
+        if (@($entries | Where-Object { $_.TrimEnd('\') -ieq $Path.TrimEnd('\') }).Count) { continue }
+        Set-ItemProperty -LiteralPath $variables -Name TRUSTEDPATHS -Value (@($entries + $Path) -join ';')
+        $updated++
+    }
     $updated
+}
+
+function Remove-AutoCadTrustedPath {
+    param([string]$Path, [string]$RegistryRoot = 'HKCU:\Software\Autodesk\AutoCAD')
+    $updated = 0
+    foreach ($variables in @(Get-AutoCadProfileVariableKeys $RegistryRoot)) {
+        $entries = @(Get-TrustedPathEntries $variables)
+        $kept = @($entries | Where-Object { $_.TrimEnd('\') -ine $Path.TrimEnd('\') })
+        if ($kept.Count -eq $entries.Count) { continue }
+        Set-ItemProperty -LiteralPath $variables -Name TRUSTEDPATHS -Value ($kept -join ';')
+        $updated++
+    }
+    $updated
+}
+
+# Removes the panel and its trusted path. AutoCAD drops the panel at its next start.
+function Uninstall-AutoCadBundle {
+    param([string]$PluginsRoot = (Join-Path $env:APPDATA 'Autodesk\ApplicationPlugins'),
+        [string]$RegistryRoot = 'HKCU:\Software\Autodesk\AutoCAD')
+    $target = Join-Path $PluginsRoot 'SmartAutodeskConnector.bundle'
+    $null = Remove-AutoCadTrustedPath -Path (Join-Path $target 'Contents') -RegistryRoot $RegistryRoot
+    if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Recurse -Force }
+    Write-Step 'Removed the AutoCAD Add-ins panel and its trusted path. Restart AutoCAD to finish.'
 }
 
 # Adds the Smart Autodesk Connector panel to the AutoCAD Add-ins tab for this user (no admin rights needed).
@@ -1824,6 +1868,7 @@ try {
     }
 
     switch ($Action) {
+        'UninstallAutoCadPanel' { Uninstall-AutoCadBundle }
         'Status' {
             if ($Product -in @('All','AutoCAD')) { Test-AutoCadSetup }
             if ($Product -in @('All','Revit')) { Test-RevitSetup }

@@ -21,7 +21,8 @@
   <Components Description="AutoCAD 2019 and later">
     <RuntimeRequirements OS="Win64" Platform="AutoCAD*" SeriesMin="R23.0" />
     <ComponentEntry AppName="SmartAutodeskConnectorRibbon" Version="1.0.0" ModuleName="./Contents/SmartAutodeskConnector.cuix" AppDescription="Smart Autodesk Connector panel on the Add-ins tab" />
-    <ComponentEntry AppName="SmartAutodeskConnectorCommands" Version="1.0.0" ModuleName="./Contents/SmartAutodeskConnector.lsp" AppDescription="Commands behind the Smart Autodesk Connector buttons" LoadOnAutoCADStartup="True" PerDocument="True">
+    <!-- Demand-loaded: opening AutoCAD or a drawing runs nothing of ours; the LISP loads on the first button click. -->
+    <ComponentEntry AppName="SmartAutodeskConnectorCommands" Version="1.0.0" ModuleName="./Contents/SmartAutodeskConnector.lsp" AppDescription="Commands behind the Smart Autodesk Connector buttons" LoadOnCommandInvocation="True" PerDocument="True">
       <Commands GroupName="SMARTAUTODESKCONNECTOR">
         <Command Local="SACSKILLSSYNC" Global="SACSKILLSSYNC" />
         <Command Local="SACCHECKUPDATES" Global="SACCHECKUPDATES" />
