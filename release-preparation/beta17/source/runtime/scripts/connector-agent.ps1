@@ -118,7 +118,9 @@ Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 [Windows.Forms.Application]::EnableVisualStyles()
 . (Join-Path $InstallRoot 'installer\Brand.ps1')
 
-$script:agent = @{ Job = $null; JobKind = ''; LastApps = @(Get-RunningApps); NotifiedVersion = ''; LastCheck = [DateTime]::MinValue; FailedVersion = '' }
+$script:agent = @{ Job = $null; JobKind = ''; LastApps = @(Get-RunningApps); NotifiedVersion = ''; LastCheck = [DateTime]::MinValue; FailedVersion = ''; LastResultStamp = '' }
+# Remember the last finished run so only syncs that finish from now on are announced.
+try { $script:agent.LastResultStamp = [string](Get-Content -LiteralPath (Join-Path $StateRoot 'last-result.json') -Raw | ConvertFrom-Json).completed_at } catch { }
 
 $icon = New-Object Windows.Forms.NotifyIcon
 $icon.Icon = Get-BrandIcon
@@ -201,15 +203,24 @@ function Complete-Job {
             }
         }
         'sync' {
-            $result = $null
-            try { $result = Get-Content -LiteralPath (Join-Path $StateRoot 'last-result.json') -Raw | ConvertFrom-Json } catch { }
-            if ($result -and $result.sync_status -eq 'ok') {
-                Show-Notice 'Skills Sync complete' ("{0} saved skill(s) sent for review. {1} new and {2} updated approved skill(s) downloaded." -f [int]$result.sync_submitted, [int]$result.sync_added, [int]$result.sync_updated)
-            }
-            elseif ($result -and $result.sync_reason) { Show-Notice 'Skills Sync' ([string]$result.sync_reason) 'Warning' }
-            else { Show-Notice 'Skills Sync' 'Skills Sync did not finish. Check the internet connection and try again.' 'Warning' }
+            $result = Get-LastSyncResult
+            if ($result) { $script:agent.LastResultStamp = [string]$result.completed_at }
+            Show-SyncNotice $result
         }
     }
+}
+
+function Get-LastSyncResult {
+    try { Get-Content -LiteralPath (Join-Path $StateRoot 'last-result.json') -Raw | ConvertFrom-Json } catch { $null }
+}
+
+function Show-SyncNotice {
+    param($Result)
+    if ($Result -and $Result.sync_status -eq 'ok') {
+        Show-Notice 'Skills Sync complete' ("{0} saved skill(s) sent for review. {1} new and {2} updated approved skill(s) downloaded." -f [int]$Result.sync_submitted, [int]$Result.sync_added, [int]$Result.sync_updated)
+    }
+    elseif ($Result -and $Result.sync_reason) { Show-Notice 'Skills Sync' ([string]$Result.sync_reason) 'Warning' }
+    else { Show-Notice 'Skills Sync' 'Skills Sync did not finish. Check the internet connection and try again.' 'Warning' }
 }
 
 function Show-UpdatePrompt {
@@ -249,6 +260,12 @@ $tick.Interval = 20000
 $tick.Add_Tick({
     try {
         Complete-Job
+        # A Skills Sync started from Revit (or elsewhere) finished: announce its result.
+        $last = Get-LastSyncResult
+        if ($last -and [string]$last.completed_at -ne $script:agent.LastResultStamp) {
+            $script:agent.LastResultStamp = [string]$last.completed_at
+            if ($last.action -eq 'Sync') { Show-SyncNotice $last }
+        }
         if (-not $script:agent.Job -and ((Get-Date) - $script:agent.LastCheck).TotalHours -ge 6) { Start-UpdateCheck; return }
         $apps = Get-RunningApps
         $started = Get-StartedApps $script:agent.LastApps $apps

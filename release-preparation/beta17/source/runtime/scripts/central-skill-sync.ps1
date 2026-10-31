@@ -145,7 +145,9 @@ foreach($folder in @(Get-ChildItem (Join-Path $review.FullName 'candidates') -Di
  $files=@{}
  foreach($file in Get-ChildItem $folder.FullName -Recurse -File -Force){
   $relative=$file.FullName.Substring($folder.FullName.Length).TrimStart('\','/').Replace('\','/')
-  $files[$relative]=Get-Content $file.FullName -Raw
+  # Plain .NET read: Get-Content attaches PSPath/PSDrive properties that Windows PowerShell 5.1's
+  # ConvertTo-Json serialises recursively, turning a small skill into gigabytes.
+  $files[$relative]=[IO.File]::ReadAllText($file.FullName,[Text.Encoding]::UTF8)
  }
  $skills.Add(@{name=$name;files=$files})
 }

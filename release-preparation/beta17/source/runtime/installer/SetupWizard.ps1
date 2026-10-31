@@ -309,7 +309,11 @@ function Show-SetupWizard {
             if ($answer -ne 'Yes') { $e.Cancel = $true }
         }
     })
-    $form.Add_Shown({ $form.Activate(); $form.TopMost = $true; $form.TopMost = $false })
+    # Windows may refuse focus to a window started from Explorer, leaving setup hidden behind it.
+    # Stay on top until the person first switches to the window, then behave normally.
+    $form.TopMost = $true
+    $form.Add_Shown({ $form.Activate() })
+    $form.Add_Activated({ if (-not $script:wizard.Activated) { $script:wizard.Activated = $true; $form.TopMost = $false } })
 
     & $showPage 0
     [void]$form.ShowDialog()

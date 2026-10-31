@@ -74,6 +74,16 @@ try{
  $third=Install-ApprovedLibrary -Library (& $lib 'two' 'two') -State (Join-Path $t 'state') -Repository (Join-Path $t 'repo') -ClientRoots @($client) 3>$null
  Assert ($third.current -eq 1 -and $third.preserved -eq 1) "Unchanged sync counts wrong: $($third|ConvertTo-Json -Compress)"
 
+ # 4b. Uploads read skill files as plain text. Get-Content strings carry PSPath/PSDrive properties that
+ #     Windows PowerShell 5.1 serialises recursively: one small skill became gigabytes and hung Skills Sync.
+ $syncText=Get-Content (Join-Path $runtime 'scripts/central-skill-sync.ps1') -Raw
+ Assert ($syncText -match '\$files\[\$relative\]=\[IO\.File\]::ReadAllText' -and $syncText -notmatch '\$files\[\$relative\]=Get-Content') 'Skill files are not read as plain text for upload'
+ $probe=Join-Path $t 'probe-skill'; New-Item -ItemType Directory $probe|Out-Null
+ "---`nname: probe`n---`nhello"|Set-Content (Join-Path $probe 'SKILL.md')
+ $files=@{}; foreach($file in Get-ChildItem $probe -File){ $files[$file.Name]=[IO.File]::ReadAllText($file.FullName,[Text.Encoding]::UTF8) }
+ $body=@{skills=@(@{name='probe';files=$files})}|ConvertTo-Json -Depth 20 -Compress
+ Assert ($body.Length -lt 500) "Upload body for a 30-byte skill is $($body.Length) characters"
+
  # 5. The Revit add-in compiles with the Windows compiler (skipped when Revit 2024 is not installed).
  if(Test-Path 'C:\Program Files\Autodesk\Revit 2024\RevitAPI.dll'){
   $out=Join-Path $t 'addin'

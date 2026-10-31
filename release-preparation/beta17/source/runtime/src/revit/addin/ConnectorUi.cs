@@ -115,7 +115,17 @@ namespace BimCadMcp.Revit
         private Process _process;
         private System.Threading.Tasks.Task<string> _output;
         private Action<string, int> _onFinished;
+        private DateTime _started;
+        private int _backgroundAfterSeconds;
+        private string _backgroundTitle, _backgroundBody;
         internal readonly Forms.CheckBox Option = new Forms.CheckBox();
+
+        // After this long the window says the step continues in the background and can be closed;
+        // the step keeps running and the connector agent shows a notice when it finishes.
+        internal void ContinueInBackgroundAfter(int seconds, string title, string body)
+        {
+            _backgroundAfterSeconds = seconds; _backgroundTitle = title; _backgroundBody = body;
+        }
 
         internal TaskWindow(string caption)
         {
@@ -168,12 +178,25 @@ namespace BimCadMcp.Revit
             _process = Process.Start(info);
             _output = _process.StandardOutput.ReadToEndAsync();
             _process.StandardError.ReadToEndAsync();
+            _started = DateTime.UtcNow;
             _timer.Start();
         }
 
         private void Poll()
         {
-            if (_process == null || !_process.HasExited || !_output.IsCompleted) return;
+            if (_process == null) return;
+            if (!_process.HasExited || !_output.IsCompleted)
+            {
+                if (_backgroundAfterSeconds > 0 && (DateTime.UtcNow - _started).TotalSeconds >= _backgroundAfterSeconds)
+                {
+                    // Leave the process running; only this window stops watching it.
+                    _timer.Stop();
+                    _progress.Visible = false;
+                    ShowResult(_backgroundTitle, _backgroundBody, Brand.Blue);
+                    AddButton("Close", true, delegate { Close(); });
+                }
+                return;
+            }
             _timer.Stop();
             _progress.Visible = false;
             int exitCode = _process.ExitCode;
@@ -469,9 +492,13 @@ namespace BimCadMcp.Revit
                 string runner = Connector.Script("weekly-skill-collection.ps1");
                 using (TaskWindow window = new TaskWindow("Skills Sync"))
                 {
-                    window.Run("Syncing skills…", "Sending your saved skills for review and downloading the latest approved team skills. This can take a minute.",
+                    Connector.EnsureAgentRunning();   // the agent announces the result if this window is closed first
+                    window.ContinueInBackgroundAfter(15, "Syncing in the background",
+                        "Skills Sync is still working. You can close this window and keep working; " +
+                        "a Windows notification shows the result when it is done.");
+                    window.Run("Syncing skills…", "Sending your saved skills for review and downloading the latest approved team skills.",
                         runner, "-Action Sync -StateRoot " + Connector.Quote(Connector.StateRoot),
-                        delegate(string output, int code) { ShowOutcome(window); });
+                        delegate(string output, int code) { ShowOutcome(window, output); });
                     window.ShowDialog(Owner.Of(commandData));
                 }
                 return Result.Succeeded;
@@ -483,8 +510,15 @@ namespace BimCadMcp.Revit
             }
         }
 
-        private static void ShowOutcome(TaskWindow window)
+        private static void ShowOutcome(TaskWindow window, string output)
         {
+            if (output.Contains("A collection run is already active."))
+            {
+                window.ShowResult("Skills Sync is already running",
+                    "A sync started earlier is still working in the background. You will get a Windows notification when it is done.", Brand.Blue);
+                window.AddButton("Close", true, delegate { window.Close(); });
+                return;
+            }
             string result = Path.Combine(Connector.StateRoot, "last-result.json");
             string status = Connector.ReadJsonValue(result, "sync_status");
             string reason = Connector.ReadJsonValue(result, "sync_reason");

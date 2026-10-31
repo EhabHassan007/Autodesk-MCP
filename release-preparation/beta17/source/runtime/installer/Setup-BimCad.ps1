@@ -188,7 +188,9 @@ function Invoke-External {
     param(
         [string]$FilePath,
         [string[]]$Arguments,
-        [switch]$AllowFailure
+        [switch]$AllowFailure,
+        # For probes whose "not found" answer is expected; the caller reads the output itself.
+        [switch]$Quiet
     )
 
     $previousErrorPreference = $ErrorActionPreference
@@ -200,7 +202,7 @@ function Invoke-External {
     finally {
         $ErrorActionPreference = $previousErrorPreference
     }
-    if ($output) {
+    if ($output -and -not $Quiet) {
         $output | ForEach-Object { Write-Host $_ }
     }
     if (-not $AllowFailure -and $exitCode -ne 0) {
@@ -829,7 +831,7 @@ function Test-OwnConnectorEntry {
 function Remove-LegacyMcpEntries {
     param([string]$Client, [string]$Command, [string[]]$LegacyNames, [string[]]$RemoveArguments = @())
     foreach ($legacy in $LegacyNames) {
-        $existing = Invoke-External $Command @('mcp', 'get', $legacy) -AllowFailure
+        $existing = Invoke-External $Command @('mcp', 'get', $legacy) -AllowFailure -Quiet
         if ($existing.ExitCode -ne 0 -or -not (Test-OwnConnectorEntry ($existing.Output -join "`n"))) { continue }
         $removed = Invoke-External $Command (@('mcp', 'remove', $legacy) + $RemoveArguments) -AllowFailure
         if ($removed.ExitCode -eq 0) { Write-Step ("Removed the older duplicate {0} MCP entry '{1}'." -f $Client, $legacy) }
