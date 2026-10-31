@@ -77,7 +77,8 @@ try{
  # 4b. Uploads read skill files as plain text. Get-Content strings carry PSPath/PSDrive properties that
  #     Windows PowerShell 5.1 serialises recursively: one small skill became gigabytes and hung Skills Sync.
  $syncText=Get-Content (Join-Path $runtime 'scripts/central-skill-sync.ps1') -Raw
- Assert ($syncText -match '\$files\[\$relative\]=\[IO\.File\]::ReadAllText' -and $syncText -notmatch '\$files\[\$relative\]=Get-Content') 'Skill files are not read as plain text for upload'
+ $libraryText=Get-Content (Join-Path $runtime 'scripts/SkillLibrary.ps1') -Raw
+ Assert ($syncText -match '\$files=Read-SkillText' -and $libraryText -match '\$files\[\$relative\] = Repair-Mojibake \(\[IO\.File\]::ReadAllText' -and $libraryText -notmatch '\$files\[\$relative\] = Get-Content') 'Skill files are not read as plain text for upload'
  $probe=Join-Path $t 'probe-skill'; New-Item -ItemType Directory $probe|Out-Null
  "---`nname: probe`n---`nhello"|Set-Content (Join-Path $probe 'SKILL.md')
  $files=@{}; foreach($file in Get-ChildItem $probe -File){ $files[$file.Name]=[IO.File]::ReadAllText($file.FullName,[Text.Encoding]::UTF8) }
