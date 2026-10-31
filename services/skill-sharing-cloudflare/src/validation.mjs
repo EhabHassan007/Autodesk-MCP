@@ -1,5 +1,8 @@
 export const MAX_BODY = 2 * 1024 * 1024;
 export const EXTENSIONS = new Set(['md','txt','json','yaml','yml','toml','py','ps1','js','ts','sh','csv','xml']);
+export const SKILL_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+// Folders under .agents/skills; "uncategorized" holds submissions the owner still has to place.
+export const CATEGORIES = new Set(['revit','autocad','3ds-max','other-software','linkedin-marketing','branding-ci','general','uncategorized']);
 const sensitive = /github_pat_|gh[pousr]_[A-Za-z0-9_]+|-----BEGIN .*PRIVATE KEY|(?:password|api[_ -]?key|access[_ -]?token)\s*[:=]\s*\S+|[a-z]:\\users\\|[\w.+-]+@[\w.-]+\.[a-z]{2,}/i;
 const encoder = new TextEncoder();
 export const bytes = text => encoder.encode(text);
@@ -28,6 +31,8 @@ export function validateSkills(data, scan = true) {
       if (size > 256 * 1024 || total > MAX_BODY || content.includes('\0') || (scan && sensitive.test(content))) invalid();
     }
     if (!new RegExp(`^name:\\s*${name}\\s*$`, 'm').test(files['SKILL.md'])) invalid();
+    const category = /^category:\s*(\S+)\s*$/m.exec(files['SKILL.md'])?.[1];
+    if (category !== undefined && !CATEGORIES.has(category)) invalid();
     result[name] = Object.fromEntries(Object.entries(files).sort(([a],[b]) => a < b ? -1 : a > b ? 1 : 0));
   }
   return Object.fromEntries(Object.entries(result).sort(([a],[b]) => a < b ? -1 : a > b ? 1 : 0));

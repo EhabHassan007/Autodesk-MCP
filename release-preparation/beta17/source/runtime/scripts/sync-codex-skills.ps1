@@ -24,12 +24,15 @@ if ([string]::IsNullOrWhiteSpace($Destination)) {
     $Destination = Join-Path $codexHome 'skills'
 }
 
+. (Join-Path $PSScriptRoot 'SkillLibrary.ps1')
+
 function Get-RepositorySkills {
     if (-not (Test-Path -LiteralPath $skillsSource -PathType Container)) {
         throw "Skill library was not found: $skillsSource"
     }
 
-    @(Get-ChildItem -LiteralPath $skillsSource -Directory | Sort-Object Name)
+    # Category folders in the library; each skill is still installed flat under its own name.
+    @(Get-SkillFolders $skillsSource | ForEach-Object { [pscustomobject]@{ Name = $_.Name; FullName = $_.Path; Category = $_.Category } } | Sort-Object Name)
 }
 
 function Test-RepositorySkills {
@@ -37,6 +40,8 @@ function Test-RepositorySkills {
     if ($skills.Count -eq 0) {
         throw 'The repository skill library is empty.'
     }
+    $duplicates = @($skills | Group-Object Name | Where-Object Count -gt 1)
+    if ($duplicates) { throw "Skill names must be unique across categories: $($duplicates.Name -join ', ')" }
 
     foreach ($skill in $skills) {
         if ($skill.Name -cnotmatch '^[a-z0-9]+(?:-[a-z0-9]+)*$') {

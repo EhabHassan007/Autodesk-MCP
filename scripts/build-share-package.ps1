@@ -67,6 +67,7 @@ try {
         'scripts\collect-skills-for-review.ps1',
         'scripts\submit-team-knowledge.ps1',
         'scripts\sync-codex-skills.ps1',
+        'scripts\SkillLibrary.ps1',
         'scripts\validate-team-skill-intake.ps1',
         'README.md',
         'REMOTE-CLAUDE.md',

@@ -61,9 +61,25 @@ $payloadHashes = Get-ZipHashes $payload 'Autodesk-MCP-Payload/'
 if ($payloadHashes.ContainsKey('installer/team-join.json')) { $problems.Add('the stored public payload contains installer/team-join.json (a join code)') }
 foreach ($p in Compare-Trees 'Support/Autodesk-MCP-Payload.zip' (Get-TreeHashes $runtime) $payloadHashes) { $problems.Add($p) }
 
-# 3. Claude skills bundle references == runtime/.agents/skills (SKILL.md at its root is generated).
+# 3. Claude skills bundle references == runtime/.agents/skills (its index SKILL.md and the catalog README are generated).
 $bundle = Get-ZipHashes (Join-Path $b 'source\Autodesk MCP Skills for Claude.zip') 'autodesk-mcp-bim-workflows/references/'
-foreach ($p in Compare-Trees 'Autodesk MCP Skills for Claude.zip' (Get-TreeHashes (Join-Path $runtime '.agents\skills')) $bundle) { $problems.Add($p) }
+$shippedSkills = Get-TreeHashes (Join-Path $runtime '.agents\skills'); $shippedSkills.Remove('README.md')
+foreach ($p in Compare-Trees 'Autodesk MCP Skills for Claude.zip' $shippedSkills $bundle) { $problems.Add($p) }
+
+# 4. The installer ships exactly the approved library from the repository root, with a current catalog.
+$library = Join-Path $b '..\..\.agents\skills'
+if (Test-Path -LiteralPath $library -PathType Container) {
+    $library = (Resolve-Path -LiteralPath $library).Path
+    foreach ($p in Compare-Trees 'runtime/.agents/skills (copy of the approved library)' (Get-TreeHashes $library) (Get-TreeHashes (Join-Path $runtime '.agents\skills'))) { $problems.Add($p) }
+    . (Join-Path $runtime 'scripts\SkillLibrary.ps1')
+    $readmePath = Join-Path $library 'README.md'
+    $readme = if (Test-Path -LiteralPath $readmePath) { [IO.File]::ReadAllText($readmePath) } else { '' }
+    foreach ($skill in Get-SkillFolders $library) {
+        if (-not $readme.Contains("]($($skill.Category)/$($skill.Name)/SKILL.md)")) { $problems.Add("catalog .agents/skills/README.md does not list $($skill.Category)/$($skill.Name)") }
+        if (-not $skill.Category) { $problems.Add("skill is not in a category folder: .agents/skills/$($skill.Name)") }
+        elseif ((Get-SkillCategory $skill.Path) -ne $skill.Category) { $problems.Add("SKILL.md category does not match its folder: $($skill.Category)/$($skill.Name)") }
+    }
+}
 
 if ($problems.Count) {
     Write-Host "The stored installer does not match the source ($($problems.Count) problem(s)):"
@@ -72,4 +88,4 @@ if ($problems.Count) {
     Write-Host $fix
     exit 1
 }
-"PASS: stored installer matches source/runtime ($($payloadHashes.Count) payload files, $($bundle.Count) skill references); no join code committed"
+"PASS: stored installer matches source/runtime ($($payloadHashes.Count) payload files, $($bundle.Count) skill references); installer ships the approved library with a current catalog; no join code committed"

@@ -20,7 +20,7 @@ try {
     $settingsPath=Join-Path $stateRoot 'settings.json'
     $installedScripts=Join-Path $stateRoot 'scripts'
     New-Item -ItemType Directory -Path $installedScripts -Force|Out-Null
-    foreach($name in @('weekly-skill-collection.ps1','collect-skills-for-review.ps1','submit-team-knowledge.ps1','central-skill-sync.ps1','Initialize-SkillService.ps1','send-usage.ps1','connector-agent.ps1')) {
+    foreach($name in @('weekly-skill-collection.ps1','collect-skills-for-review.ps1','submit-team-knowledge.ps1','central-skill-sync.ps1','Initialize-SkillService.ps1','send-usage.ps1','connector-agent.ps1','SkillLibrary.ps1')) {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $installedScripts $name) -Force
     }
     $saved=if(Test-Path $settingsPath){Get-Content $settingsPath -Raw|ConvertFrom-Json}else{$null}

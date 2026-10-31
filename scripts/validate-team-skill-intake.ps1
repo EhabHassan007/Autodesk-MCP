@@ -27,33 +27,57 @@ if ($HeadRef -like 'skill-intake/*') {
 $deletedSkills = @($changedRows | Where-Object { $_ -match '^D\s+\.agents/skills/' })
 if ($deletedSkills.Count -gt 0) { throw 'Automated intake may not delete approved skill files.' }
 
-$skillNames = @($changedRows | ForEach-Object {
+. (Join-Path $PSScriptRoot 'SkillLibrary.ps1')
+# Changed skill folders, as paths below .agents/skills: "<category>/<name>" or a legacy flat "<name>".
+# Category READMEs and the generated catalog are not skills.
+$skillFolders = @($changedRows | ForEach-Object {
     $parts = $_ -split "`t"
     $path = $parts[-1].Replace('\','/')
-    if ($path -match '^\.agents/skills/([^/]+)/') { $matches[1] }
+    if ($path -match '^\.agents/skills/(.+)$') {
+        $segments = $matches[1] -split '/'
+        if (Test-SkillCategory $segments[0]) { if ($segments.Count -ge 3) { "$($segments[0])/$($segments[1])" } }
+        elseif ($segments.Count -ge 2) { $segments[0] }
+    }
 } | Sort-Object -Unique)
 
 $blockedExtensions = @('.rvt','.rfa','.rte','.rft','.dwg','.dxf','.dgn','.nwc','.nwd','.ifc','.pdf','.doc','.docx','.xls','.xlsx','.ppt','.pptx','.zip','.7z','.rar','.exe','.dll','.msi','.pfx','.key','.pem','.png','.jpg','.jpeg','.gif')
 $sensitivePattern = '(?i)(api[_ -]?key|access[_ -]?token|client[_ -]?secret|password\s*[:=]|github_pat_|gh[pousr]_[a-z0-9_]+|begin (rsa|openssh|ec) private key|[a-z]:\\users\\|\\\\[^\\\s]+\\[^\\\s]+|autodesk docs://|bim 360://|acc://|\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b)'
 
-foreach ($name in $skillNames) {
+# Lines added under .agents/skills, by file. Diffing the whole library lets git match moved files to their old paths.
+$addedLines = New-Object System.Collections.Generic.List[object]
+$currentPath = ''
+foreach ($line in Invoke-Git diff -M --unified=0 "$BaseRef...HEAD" -- .agents/skills) {
+    if ($line -match '^\+\+\+ (?:b/)?(.+)$') { $currentPath = $matches[1]; continue }
+    if ($line.StartsWith('+')) { $addedLines.Add([pscustomobject]@{ Path = $currentPath; Text = $line.Substring(1) }) }
+}
+
+foreach ($folder in $skillFolders) {
+    $name = ($folder -split '/')[-1]
+    $category = if ($folder.Contains('/')) { ($folder -split '/')[0] } else { '' }
     if ($name -cnotmatch '^[a-z0-9]+(?:-[a-z0-9]+)*$') { throw "Invalid skill folder name: $name" }
-    $skillPath = Join-Path $RepositoryRoot ('.agents\skills\' + $name)
+    $skillPath = Join-Path $RepositoryRoot ('.agents\skills\' + $folder.Replace('/','\'))
     $manifestPath = Join-Path $skillPath 'SKILL.md'
-    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw "Missing SKILL.md for $name" }
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw "Missing SKILL.md for $folder" }
     $manifest = Get-Content -LiteralPath $manifestPath -Raw
-    if ($manifest -notmatch "(?m)^name:\s*$([regex]::Escape($name))\s*$") { throw "SKILL.md name does not match folder: $name" }
-    if ($manifest -notmatch '(?m)^description:\s*\S.+$') { throw "Missing skill description: $name" }
+    if ($manifest -notmatch "(?m)^name:\s*$([regex]::Escape($name))\s*$") { throw "SKILL.md name does not match folder: $folder" }
+    if ($manifest -notmatch '(?m)^description:\s*\S.+$') { throw "Missing skill description: $folder" }
+    $declared = Get-SkillCategory $skillPath
+    if ($category -and $declared -and $declared -ne $category) { throw "SKILL.md category '$declared' does not match its folder: $folder" }
+    $sameName = @(Get-SkillFolders (Join-Path $RepositoryRoot '.agents\skills') | Where-Object Name -eq $name)
+    if ($sameName.Count -gt 1) { throw "Skill name is used in more than one category: $name" }
 
     foreach ($item in Get-ChildItem -LiteralPath $skillPath -Recurse -Force) {
         if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "Links are not allowed: $($item.FullName)" }
         if ($item.PSIsContainer) { continue }
         if ($item.Length -gt 256KB) { throw "File exceeds 256 KB: $($item.FullName)" }
         if ($blockedExtensions -contains $item.Extension.ToLowerInvariant()) { throw "Binary or project file is blocked: $($item.FullName)" }
-        if (Select-String -LiteralPath $item.FullName -Pattern $sensitivePattern -Quiet -ErrorAction SilentlyContinue) {
-            throw "Potential secret or private project information found: $($item.FullName)"
-        }
+    }
+
+    # Scan only lines this branch adds, so approved text that was moved into a category folder is not re-flagged.
+    $flagged = @($addedLines | Where-Object { $_.Path.StartsWith(".agents/skills/$folder/") -and $_.Text -match $sensitivePattern } | ForEach-Object Text)
+    if ($flagged.Count -gt 0) {
+        throw "Potential secret or private project information found in $folder`n$($flagged -join [Environment]::NewLine)"
     }
 }
 
-Write-Output "PASS: validated $($skillNames.Count) changed skill candidate(s)."
+Write-Output "PASS: validated $($skillFolders.Count) changed skill candidate(s)."

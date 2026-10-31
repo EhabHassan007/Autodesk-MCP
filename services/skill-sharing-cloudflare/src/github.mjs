@@ -1,12 +1,38 @@
 import { createPrivateKey } from 'node:crypto';
-import { bytes, canonical, EXTENSIONS, MAX_BODY, validateSkills } from './validation.mjs';
+import { bytes, canonical, CATEGORIES, EXTENSIONS, MAX_BODY, SKILL_NAME, validateSkills } from './validation.mjs';
 
 function base64url(value) { return Buffer.from(value).toString('base64url'); }
+
+// Skills live at .agents/skills/<category>/<name>/... ; flat .agents/skills/<name>/... is still read
+// so libraries and intake branches from before categories keep working.
+export function locateSkillFile(relative) {
+  const parts = relative.split('/');
+  if (CATEGORIES.has(parts[0])) {
+    if (parts.length >= 3 && SKILL_NAME.test(parts[1])) return {name:parts[1],category:parts[0],folder:`${parts[0]}/${parts[1]}`,path:parts.slice(2).join('/')};
+    return null;   // a category README or a stray file
+  }
+  if (parts.length >= 2 && SKILL_NAME.test(parts[0])) return {name:parts[0],category:null,folder:parts[0],path:parts.slice(1).join('/')};
+  return null;
+}
+
+// Where a submitted skill goes: its own "category:" line, else where the approved copy already is,
+// else a guess from the name, else uncategorized/ for the owner to place during review.
+export function submissionCategory(name, skillText = '', approvedCategory = null) {
+  const declared = /^category:\s*([a-z0-9-]+)\s*$/m.exec(skillText)?.[1];
+  if (declared && CATEGORIES.has(declared)) return declared;
+  if (approvedCategory && CATEGORIES.has(approvedCategory)) return approvedCategory;
+  if (/^revit-/.test(name)) return 'revit';
+  if (/^(autocad|acad)-/.test(name)) return 'autocad';
+  if (/^(3ds-?max|max)-/.test(name)) return '3ds-max';
+  if (/linkedin/.test(name)) return 'linkedin-marketing';
+  if (/brand|identity/.test(name)) return 'branding-ci';
+  return 'uncategorized';
+}
 
 export class GitHubFailure extends Error {}
 export function safeGitHubDetail(error) {
   if (error instanceof GitHubFailure) return error.message;
-  const known = new Set(['Approved blob lookup failed.','Approved library exceeds limits.','Approved repository tree is too large.','Approved blob is unavailable or binary.','Invalid or flagged skill content.']);
+  const known = new Set(['Approved blob lookup failed.','Approved library exceeds limits.','Approved skill names must be unique across categories.','Approved repository tree is too large.','Approved blob is unavailable or binary.','Invalid or flagged skill content.']);
   return known.has(error?.message) ? error.message : 'GitHub App access could not be verified.';
 }
 
@@ -78,7 +104,7 @@ export class GitHub {
     // Batch blob reads through GraphQL: at most 20 calls, within Workers Free's
     // 50 external subrequests even when a submission also creates a draft PR.
     if (items.length > 800 || items.some(i => !Number.isInteger(i.size) || i.size > 256*1024) || items.reduce((n,i)=>n+i.size,0) > MAX_BODY) throw new Error('Approved library exceeds limits.');
-    const skills = Object.create(null);
+    const skills = Object.create(null), categories = Object.create(null), locations = Object.create(null);
     for (let offset=0; offset<items.length; offset+=40) {
       const group = items.slice(offset,offset+40);
       const queries = group.map((item,i) => `b${i}: object(oid:${JSON.stringify(item.sha)}) { ... on Blob { text isBinary byteSize } }`).join('\n');
@@ -88,16 +114,18 @@ export class GitHub {
       for (let i=0;i<group.length;i++) {
         const blob = response.data.repository[`b${i}`];
         if (!blob || blob.isBinary || typeof blob.text !== 'string' || blob.byteSize !== group[i].size) throw new Error('Approved blob is unavailable or binary.');
-        const relative = group[i].path.slice(prefix.length);
-        const slash = relative.indexOf('/');
-        const name = relative.slice(0,slash), path = relative.slice(slash+1);
+        const located = locateSkillFile(group[i].path.slice(prefix.length));
+        if (!located) continue;   // e.g. a category README
+        const {name, category, folder, path} = located;
+        if (locations[name] && locations[name] !== folder) throw new Error('Approved skill names must be unique across categories.');
+        locations[name] = folder; categories[name] = category;
         skills[name] ??= Object.create(null);
         skills[name][path] = blob.text.replace(/^\uFEFF/, '');
       }
     }
     const listed = Object.entries(skills).filter(([,files])=>Object.hasOwn(files,'SKILL.md')).map(([name,files])=>({name,files}));
     const approved = listed.length ? validateSkills({skills:listed},false) : {};
-    this.cached = {skills:approved,commit:ref.object.sha,treeSha:commit.tree.sha,tree:tree.tree};
+    this.cached = {skills:approved,categories,locations,commit:ref.object.sha,treeSha:commit.tree.sha,tree:tree.tree};
     this.cachedAt = Date.now();
     return this.cached;
   }
@@ -114,10 +142,15 @@ export class GitHub {
     const root = `/repos/${this.repo}`;
     const refPath = `${root}/git/ref/heads/${branch}`;
     if (!await this.request('GET', refPath, undefined, [200,404])) {
-      const paths = new Set(Object.entries(skills).flatMap(([name,files])=>Object.keys(files).map(path=>`.agents/skills/${name}/${path}`)));
-      const edits = library.tree.filter(item=>item.type==='blob' && Object.keys(skills).some(name=>item.path.startsWith(`.agents/skills/${name}/`)) && !paths.has(item.path))
+      // Each skill goes to .agents/skills/<category>/<name>/; files at its previous location are removed,
+      // so a re-categorised or flat legacy skill moves instead of being duplicated.
+      const target = Object.fromEntries(Object.entries(skills).map(([name,files])=>[name,
+        `.agents/skills/${submissionCategory(name,files['SKILL.md'],library.categories?.[name])}/${name}/`]));
+      const previous = name => library.locations?.[name] ? `.agents/skills/${library.locations[name]}/` : `.agents/skills/${name}/`;
+      const paths = new Set(Object.entries(skills).flatMap(([name,files])=>Object.keys(files).map(path=>target[name]+path)));
+      const edits = library.tree.filter(item=>item.type==='blob' && Object.keys(skills).some(name=>item.path.startsWith(previous(name)) || item.path.startsWith(target[name])) && !paths.has(item.path))
         .map(item=>({path:item.path,mode:item.mode,type:'blob',sha:null}));
-      for (const [name,files] of Object.entries(skills)) for (const [path,content] of Object.entries(files)) edits.push({path:`.agents/skills/${name}/${path}`,mode:'100644',type:'blob',content});
+      for (const [name,files] of Object.entries(skills)) for (const [path,content] of Object.entries(files)) edits.push({path:target[name]+path,mode:'100644',type:'blob',content});
       const tree = await this.request('POST', `${root}/git/trees`, {base_tree:library.treeSha,tree:edits});
       const commit = await this.request('POST', `${root}/git/commits`, {message:'Propose saved Autodesk workflows for review',tree:tree.sha,parents:[library.commit]});
       try { await this.request('POST', `${root}/git/refs`, {ref:'refs/heads/'+branch,sha:commit.sha}); }

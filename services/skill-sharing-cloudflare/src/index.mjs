@@ -175,7 +175,8 @@ export async function handle(request, env, backend) {
       await device(request,env.DB);
       try {
         const library = await (backend || github(env)).library();
-        return json({commit:library.commit,skills:Object.entries(library.skills).map(([name,files])=>({name,files}))});
+        // Older connectors ignore "category"; newer ones use it to group skills.
+        return json({commit:library.commit,skills:Object.entries(library.skills).map(([name,files])=>({name,category:library.categories?.[name] ?? null,files}))});
       } catch (error) { throw new HTTPError(502,safeGitHubDetail(error)); }
     }
     if (path === '/v1/submissions' && request.method === 'POST') {

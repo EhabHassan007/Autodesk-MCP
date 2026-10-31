@@ -35,7 +35,7 @@ Import-Module $revitModule -Prefix Revit -Force
 $autoCadTools = @(Get-AutoCadMcpTools)
 $revitTools = @(Get-RevitMcpTools)
 $workflowTools = @(
-    @{name='list_skill_workflows';description='List shared Autodesk workflow guidance available through this connector. Read the relevant workflow before a CAD/BIM task.';inputSchema=@{type='object';properties=@{}};annotations=@{readOnlyHint=$true}},
+    @{name='list_skill_workflows';description='List shared workflow guidance available through this connector, each with its category (revit, autocad, 3ds-max, other-software, linkedin-marketing, branding-ci, general). Read the relevant workflow before a task.';inputSchema=@{type='object';properties=@{}};annotations=@{readOnlyHint=$true}},
     @{name='read_skill_workflow';description='Read a shared Autodesk workflow or its supporting text file. This returns guidance and does not execute code or modify a model.';inputSchema=@{type='object';properties=@{name=@{type='string';description='Skill folder name from list_skill_workflows'};file=@{type='string';description='Relative text file within the skill; defaults to SKILL.md'}};required=@('name')};annotations=@{readOnlyHint=$true}}
 )
 $toolList = @($autoCadTools + $revitTools + $workflowTools)
@@ -52,23 +52,25 @@ $connectorVersion = if (Test-Path -LiteralPath $versionPath -PathType Leaf) {
 }
 else { 'development' }
 
-function Get-WorkflowRoot {
-    param([string]$Name)
-    $cache=Join-Path $env:LOCALAPPDATA 'AutodeskMcpSkillCollection/approved-skills'
-    if($Name -and (Test-Path -LiteralPath (Join-Path (Join-Path $cache $Name) 'SKILL.md'))){return $cache}
-    [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../../.agents/skills'))
+. (Join-Path $PSScriptRoot '..\..\scripts\SkillLibrary.ps1')
+
+# Skills shipped with the connector (in category folders) and the approved cache downloaded by
+# Skills Sync (flat, one folder per skill). The approved cache wins: it follows the latest approval.
+function Get-WorkflowSkills {
+    $skills=@{}
+    foreach($skill in Get-SkillFolders ([IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../../.agents/skills')))){$skills[$skill.Name]=$skill}
+    foreach($skill in Get-SkillFolders (Join-Path $env:LOCALAPPDATA 'AutodeskMcpSkillCollection/approved-skills')){
+        $category=if($skill.Category){$skill.Category}elseif($skills.ContainsKey($skill.Name)){$skills[$skill.Name].Category}else{''}
+        $skills[$skill.Name]=[pscustomobject]@{Name=$skill.Name;Category=$category;Path=$skill.Path}
+    }
+    $skills
 }
 
 function Get-SharedWorkflows {
-    $roots=@((Get-WorkflowRoot),(Join-Path $env:LOCALAPPDATA 'AutodeskMcpSkillCollection/approved-skills'))
-    $names=@{}
-    foreach($root in $roots){
-        if(-not(Test-Path $root)){continue}
-        foreach($item in Get-ChildItem -LiteralPath $root -Directory){
-            if(($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0 -and (Test-Path -LiteralPath (Join-Path $item.FullName 'SKILL.md'))){$names[$item.Name]=$true}
-        }
-    }
-    @($names.Keys|Sort-Object|ForEach-Object {@{name=$_;file='SKILL.md'}})
+    $skills=Get-WorkflowSkills
+    @($skills.Values|Where-Object {((Get-Item -LiteralPath $_.Path -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0}|
+        Sort-Object @{Expression={if($_.Category){$_.Category}else{'zz'}}},Name|
+        ForEach-Object {@{name=$_.Name;category=$(if($_.Category){$_.Category}else{'uncategorized'});file='SKILL.md'}})
 }
 
 function Read-SharedWorkflow {
@@ -77,9 +79,12 @@ function Read-SharedWorkflow {
     if ([string]::IsNullOrWhiteSpace($File)) {$File='SKILL.md'}
     $parts=@($File -split '[\\/]')
     if ([IO.Path]::IsPathRooted($File) -or $File.Contains(':') -or @($parts|Where-Object {$_ -in @('','..','.')}).Count) {throw 'Use a relative file path within the selected skill.'}
-    $root=Get-WorkflowRoot -Name $Name
-    $path=$root
-    foreach($part in @($Name)+$parts){
+    $skills=Get-WorkflowSkills
+    if(-not $skills.ContainsKey($Name)){throw 'Skill file was not found.'}
+    $path=$skills[$Name].Path
+    $folder=Get-Item -LiteralPath $path -Force
+    if(($folder.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){throw 'Linked skill paths cannot be read.'}
+    foreach($part in $parts){
         $path=Join-Path $path $part
         $item=Get-Item -LiteralPath $path -Force -ErrorAction Stop
         if(($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){throw 'Linked skill paths cannot be read.'}

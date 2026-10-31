@@ -20,7 +20,9 @@ $referenceRoot = Join-Path $bundleRoot 'references'
 try {
     New-Item -ItemType Directory -Path $referenceRoot -Force | Out-Null
     $index = New-Object System.Collections.Generic.List[string]
-    foreach ($skill in Get-ChildItem -LiteralPath $sourceRoot -Directory | Sort-Object Name) {
+    . (Join-Path $PSScriptRoot 'SkillLibrary.ps1')
+    # References stay flat by skill name; the library itself is grouped in category folders.
+    foreach ($skill in Get-SkillFolders $sourceRoot | ForEach-Object { [pscustomobject]@{ Name = $_.Name; FullName = $_.Path } } | Sort-Object Name) {
         $manifest = Join-Path $skill.FullName 'SKILL.md'
         if (-not (Test-Path -LiteralPath $manifest -PathType Leaf)) { continue }
 

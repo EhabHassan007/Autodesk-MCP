@@ -9,7 +9,7 @@ param($Action,$RepositoryRoot,$StateRoot,$Day='Friday',$Time='16:30',$Additional
 @{action=$Action;day=$Day;time=$Time;roots=$AdditionalSkillRoots}|ConvertTo-Json|Set-Content (Join-Path $StateRoot 'test-call.json')
 $global:LASTEXITCODE=0
 '@|Set-Content (Join-Path $fixtureScripts 'weekly-skill-collection.ps1')
-foreach($n in @('collect-skills-for-review.ps1','submit-team-knowledge.ps1','central-skill-sync.ps1','Initialize-SkillService.ps1','send-usage.ps1','connector-agent.ps1')){'# test placeholder'|Set-Content (Join-Path $fixtureScripts $n)}
+foreach($n in @('collect-skills-for-review.ps1','submit-team-knowledge.ps1','central-skill-sync.ps1','Initialize-SkillService.ps1','send-usage.ps1','connector-agent.ps1','SkillLibrary.ps1')){'# test placeholder'|Set-Content (Join-Path $fixtureScripts $n)}
 $script:updates=0
 function Invoke-TaskSetup {param($Script,$ScriptArguments) $script:updates++}
 $source=Get-Content (Join-Path $PSScriptRoot '../source/runtime/scripts/configure-connector-tasks.ps1') -Raw
