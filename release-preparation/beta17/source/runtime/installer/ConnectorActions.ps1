@@ -115,7 +115,7 @@ function Get-ConnectionStatusOutcome {
         # Only the installer's own timestamped findings; the raw `codex mcp get` output it echoes is left out.
         if ($line -notmatch '^\[\d{2}:\d{2}:\d{2}\]\s*(.+)$') { continue }
         $text = $Matches[1].Trim()
-        if ($text -like 'Revit*') { continue }
+        if ($text -like 'Revit*' -or $text -like 'Smart Autodesk Connector - *') { continue }   # the installer's own heading
         $good = $text -match 'passed|has the Smart Autodesk Connector registration|installation detected|is running at'
         $lines += $(if ($good) { [char]0x2713 } else { [char]0x2022 }) + '  ' + $text
     }
@@ -140,6 +140,8 @@ function Show-ConnectorAction {
     $null = Add-BrandHeader $form -Title $caption -Subtitle $script:BrandName -Height 76
     $title = New-BrandLabel '' 26 100 -Width 470 -Size 12 -Bold
     $body = New-BrandLabel '' 26 134 -Width 470
+    # Drawing names can contain '&' ("Location & Details.dwg"); show it rather than treat it as a shortcut key.
+    $title.UseMnemonic = $false; $body.UseMnemonic = $false
     $progress = New-Object Windows.Forms.ProgressBar
     $progress.Style = 'Marquee'; $progress.MarqueeAnimationSpeed = 30
     $progress.Bounds = New-Object Drawing.Rectangle(26, ($height - 100), 468, 8)

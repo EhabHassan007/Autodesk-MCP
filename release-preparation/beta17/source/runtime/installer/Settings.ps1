@@ -32,7 +32,7 @@ function Show-ConnectorSettings {
     $auto.AutoSize = $true; $auto.Location = New-Object Drawing.Point(26, 100)
     $auto.Checked = $current.AutoUpdate
     $form.Controls.Add($auto)
-    $form.Controls.Add((New-BrandLabel 'Updates install by themselves when Revit and AutoCAD are closed. You get a notice when one is ready. When this is off, use Check Updates in Revit to look for a new version.' 46 128 -Width 400 -Muted -Size 9))
+    $form.Controls.Add((New-BrandLabel 'Updates install by themselves when Revit and AutoCAD are closed. You get a notice when one is ready. When this is off, use Check Updates in Revit or AutoCAD to look for a new version.' 46 128 -Width 400 -Muted -Size 9))
 
     $when = ''
     if ($current.LastChecked) { try { $when = ([DateTime]::Parse($current.LastChecked).ToLocalTime()).ToString('g') } catch { } }
