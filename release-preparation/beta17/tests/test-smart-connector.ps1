@@ -24,7 +24,7 @@ try{
  Assert ($record.terms_version -eq $terms -and $record.accepted_utc) 'Terms acceptance not recorded'
  # Every marker the installer prints is one the wizard understands.
  $setupText=Get-Content (Join-Path $runtime 'installer/Setup-BimCad.ps1') -Raw
- foreach($step in $script:WizardSteps.Id){ if($step -ne 'team'){Assert ($setupText.Contains("Write-InstallPhase '$step'")) "Installer never starts step $step"} }
+ foreach($step in $script:WizardSteps.Id){ if($step -ne 'team'){Assert ($setupText.Contains("Write-InstallPhase '$step'") -or $setupText.Contains("Invoke-InstallStep '$step'")) "Installer never starts step $step"} }
  Assert ((Get-Content (Join-Path $runtime 'installer/SetupWizard.ps1') -Encoding Byte -TotalCount 3) -join ',' -eq '239,187,191') 'SetupWizard.ps1 needs a UTF-8 BOM for Windows PowerShell 5.1'
 
  # 2. Installer core: auto-update default, user choice, update gate, old add-in builds, legacy entries.
