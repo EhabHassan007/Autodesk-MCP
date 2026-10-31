@@ -48,7 +48,8 @@ try{
  $rels=(Get-Content -LiteralPath (Join-Path $cuixSource '_rels/.rels') -Raw)
  foreach($image in $menu.SelectNodes('//SmallImage|//LargeImage')){
   Assert (Test-Path -LiteralPath (Join-Path $runtime "assets/$($image.Name)")) "Button icon $($image.Name) is missing from assets"
-  Assert ($rels.Contains('Target="/'+$image.Name+'"')) "Button icon $($image.Name) is not in _rels/.rels"
+  # Like AppManager.cuix: icons are listed in Menu_Package_Info.xml (checked on the built .cuix), not in .rels.
+  Assert (-not $rels.Contains($image.Name)) "Button icon $($image.Name) should not be in _rels/.rels"
  }
  'PASS: CUIX parts, macro IDs, panel reference and ID_ADDINSTAB'
 
@@ -79,7 +80,12 @@ try{
  $profilesC="$registry\R26.0\ACAD-9101:409\Profiles"
  New-Item -Path "$profilesC\Office" -Force|Out-Null; Set-Item -LiteralPath $profilesC -Value 'Office'
  $registryTest=$registry
- Install-AutoCadBundle -Root (Resolve-Path $runtime).Path -PluginsRoot $plugins -RegistryRoot $registry
+ # AutoCAD's own copy of the menu in a roaming Support folder; only ours may be removed.
+ $roaming=Join-Path $t 'roaming'
+ $support=Join-Path $roaming 'AutoCAD 2025\R25.0\enu\Support'
+ New-Item -ItemType Directory $support -Force|Out-Null
+ 'stale'|Set-Content (Join-Path $support 'SmartAutodeskConnector.cuix'); 'keep'|Set-Content (Join-Path $support 'acad.CUIX')
+ Install-AutoCadBundle -Root (Resolve-Path $runtime).Path -PluginsRoot $plugins -RegistryRoot $registry -RoamingRoot $roaming
  $installed=Join-Path $plugins 'SmartAutodeskConnector.bundle'
  foreach($file in 'PackageContents.xml','Contents/SmartAutodeskConnector.lsp','Contents/SmartAutodeskConnector.cuix'){ Assert (Test-Path -LiteralPath (Join-Path $installed $file)) "Installed bundle lacks $file" }
  Assert (-not (Test-Path -LiteralPath (Join-Path $installed 'Contents/cuix-source'))) 'CUIX source parts were copied into the installed bundle'
@@ -88,18 +94,28 @@ try{
  try{ $names=@($zip.Entries|ForEach-Object{$_.FullName}) } finally { $zip.Dispose() }
  foreach($name in '[Content_Types].xml','_rels/.rels','Header.cui','MenuGroup.cui','RibbonRoot.cui'){ Assert ($names -contains $name) "Built .cuix lacks $name" }
  foreach($image in $menu.SelectNodes('//SmallImage|//LargeImage')){ Assert ($names -contains $image.Name) "Built .cuix lacks $($image.Name)" }
+ # Packed like AppManager.cuix so AutoCAD finds the icons: every part, icons included, listed in Menu_Package_Info.xml.
+ $zip=[IO.Compression.ZipFile]::OpenRead((Join-Path $installed 'Contents/SmartAutodeskConnector.cuix'))
+ try{
+  $reader=New-Object IO.StreamReader($zip.GetEntry('Menu_Package_Info.xml').Open()); $info=[xml]$reader.ReadToEnd(); $reader.Dispose()
+ } finally { $zip.Dispose() }
+ $listed=@($info.MenuPackageParts.PartData|ForEach-Object{$_.PartData_Name})
+ foreach($name in @('/Header.cui','/MenuGroup.cui','/RibbonRoot.cui','/VirtualMNRRoot','/Menu_Package_Info.xml')+@($menu.SelectNodes('//SmallImage|//LargeImage')|ForEach-Object{'/'+$_.Name})){ Assert ($listed -contains $name) "Menu_Package_Info.xml does not list $name" }
+ foreach($image in $menu.SelectNodes('//SmallImage|//LargeImage')){ Assert (Test-Path -LiteralPath (Join-Path $installed "Contents/$($image.Name)")) "$($image.Name) is not beside the .cuix" }
+ Assert (-not (Test-Path -LiteralPath (Join-Path $support 'SmartAutodeskConnector.cuix'))) 'Stale AutoCAD copy of the panel menu was not removed'
+ Assert (Test-Path -LiteralPath (Join-Path $support 'acad.CUIX')) 'Another menu file in the Support folder was removed'
  $contents=Join-Path $installed 'Contents'
  Assert ((Get-ItemProperty -LiteralPath $profileA).TRUSTEDPATHS -eq "C:\Existing;$contents") 'Existing trusted path not kept, or bundle folder not added'
  Assert ((Get-ItemProperty -LiteralPath $profileB).TRUSTEDPATHS -eq $contents) 'Bundle folder not trusted in a profile without trusted paths'
- Install-AutoCadBundle -Root (Resolve-Path $runtime).Path -PluginsRoot $plugins -RegistryRoot $registry   # a reinstall replaces the files in place
+ Install-AutoCadBundle -Root (Resolve-Path $runtime).Path -PluginsRoot $plugins -RegistryRoot $registry -RoamingRoot $roaming   # a reinstall replaces the files in place
  Assert ((Get-ItemProperty -LiteralPath $profileA).TRUSTEDPATHS -eq "C:\Existing;$contents") 'Reinstall added the bundle folder twice'
  Assert ((Add-AutoCadTrustedPath -Path $contents -RegistryRoot $registry) -eq 0) 'Already-trusted profiles were rewritten'
  Assert ((Get-ItemProperty -LiteralPath "$profilesC\Office\Variables").TRUSTEDPATHS -eq $contents) 'Current profile without a Variables key was not trusted'
- Uninstall-AutoCadBundle -PluginsRoot $plugins -RegistryRoot $registry
+ Uninstall-AutoCadBundle -PluginsRoot $plugins -RegistryRoot $registry -RoamingRoot $roaming
  Assert (-not (Test-Path -LiteralPath $installed)) 'Uninstall left the bundle folder'
  Assert ((Get-ItemProperty -LiteralPath $profileA).TRUSTEDPATHS -eq 'C:\Existing') 'Uninstall did not restore the other trusted paths exactly'
  Assert ((Get-ItemProperty -LiteralPath $profileB).TRUSTEDPATHS -eq '') 'Uninstall left the bundle folder trusted'
- Install-AutoCadBundle -Root (Resolve-Path $runtime).Path -PluginsRoot $plugins -RegistryRoot $registry
+ Install-AutoCadBundle -Root (Resolve-Path $runtime).Path -PluginsRoot $plugins -RegistryRoot $registry -RoamingRoot $roaming
  function Get-AutoCadReleases { @() }
  $out=Install-AutoCadBundleStep (Resolve-Path $runtime).Path 6>&1|Out-String
  Assert ($out -match '\[PHASE\] autocad' -and $out -match '\[RESULT\] autocad=skipped') "No AutoCAD should skip the step: $out"
