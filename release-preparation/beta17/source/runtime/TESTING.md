@@ -1,18 +1,18 @@
-# Autodesk MCP Connector 1.0.0-beta.17 testing
+# Smart Autodesk Connector 1.0.0-beta.18 testing
 
 This package is a Windows test build for the unified AutoCAD and Revit connector.
 
 ## Before testing
 
 - Extract the complete ZIP before running it.
-- Confirm the extracted share folder root contains `INSTALL Autodesk MCP Connector.cmd`, `Autodesk MCP Skills for Claude.zip`, `README-FIRST.txt`, and the `Support` folder.
+- Confirm the extracted share folder root contains `INSTALL Smart Autodesk Connector.cmd`, `Autodesk MCP Skills for Claude.zip`, `README-FIRST.txt`, and the `Support` folder.
 - Install and sign in to Codex. Install / Repair installs Claude Desktop automatically when it is missing; signing in to the user's Claude account remains an account action. Testing more than one client is recommended but not required.
 - Use Revit 2024 and/or a full Windows AutoCAD installation.
 - Use a blank or disposable drawing/model for write tests. Do not use client files.
 
 ## Install
 
-1. Double-click `INSTALL Autodesk MCP Connector.cmd`.
+1. Double-click `INSTALL Smart Autodesk Connector.cmd`.
 2. Wait for the installation-completed message. If setup fails, read `%LOCALAPPDATA%\AutodeskMcpConnector\setup.log`.
 3. Restart every installed local AI client and any running Revit session. Codex and Claude Code use the local connector. Claude Chat requires the separate authenticated remote setup.
 
@@ -20,7 +20,7 @@ For Claude workflow guidance, open **Customize > Skills**, choose **Upload a ski
 
 Initial installation uses the extracted package and does not require repository access.
 
-If setup cannot find its payload, extract `Autodesk-MCP-Connector-<version>.zip` completely, keep the root items together, and start `INSTALL Autodesk MCP Connector.cmd` again.
+If setup cannot find its payload, extract `Autodesk-MCP-Connector-<version>.zip` completely, keep the root items together, and start `INSTALL Smart Autodesk Connector.cmd` again.
 
 ## Verify
 

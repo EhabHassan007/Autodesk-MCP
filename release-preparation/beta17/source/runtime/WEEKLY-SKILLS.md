@@ -1,5 +1,18 @@
 # Automatic skill sharing through the central service
 
+## Smart Autodesk Connector at a glance
+
+- **Revit ribbon tab "Smart Autodesk Connector":**
+  - **Connection Status:** is Codex or Claude connected to this Revit session?
+  - **Check Updates:** look for a newer approved version. **Update now** installs it as soon as Revit and AutoCAD are closed.
+  - **Skills Sync:** send your saved skills for review and download the latest approved team skills now, even if the weekly run is off.
+  - **Settings:** the one switch, "Install updates automatically".
+- **Notification-area icon (the "S" logo next to the clock):** this is the connector agent. It starts at sign-in and checks for updates at start and every 6 hours.
+  - When Revit or AutoCAD opens while an update is ready, it shows a Windows notification. Click it for **Update now** or **Later**.
+  - With automatic updates on (the default), a ready update installs by itself once Revit and AutoCAD are closed, followed by an "Updated to version X" notice.
+  - Its menu offers Check for updates, Skills Sync, Settings, Open log and Quit. The log is `%LOCALAPPDATA%\AutodeskMcpConnector\agent.log`.
+- **Updates never replace files while Revit or AutoCAD is open.** The update waits and reports `[UPDATE_DEFERRED]` instead.
+
 Once IT enrolls this PC/user during the single connector setup, the weekly background task collects saved skills, submits candidates to the central service and downloads approved skills. Default schedule: Friday 16:30 local time while signed in. Existing disabled preferences and custom schedules are preserved.
 
 No team GitHub account, Git installation, Git author commands or manual skill upload is needed for this central workflow. Shared guidance is exposed through MCP tools. It does not create native Claude Skills UI entries.

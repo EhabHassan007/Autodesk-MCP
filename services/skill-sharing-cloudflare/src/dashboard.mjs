@@ -217,7 +217,8 @@ export const DASHBOARD_JS = `'use strict';
     return el('div', {class: 'detail-grid'},
       el('div', {}, el('h2', {}, 'Skills and tools (30 days)'), table(['Type', 'Name', '7 days', '30 days', 'Last used'], used)),
       el('div', {}, el('h2', {}, 'Submissions'), table(['When', 'Skills', 'Result'], sent),
-        el('p', {class: 'muted small'}, 'Device ID: ' + d.id + ' · joined ' + when(d.created_at) + (d.enroll_ip ? ' from ' + d.enroll_ip : ''))));
+        el('p', {class: 'muted small'}, 'Device ID: ' + d.id + ' · joined ' + when(d.created_at) + (d.enroll_ip ? ' from ' + d.enroll_ip : '') +
+          ' · terms accepted: ' + (d.terms_version || (d.source === 'admin' ? 'n/a (added by administrator)' : 'not recorded')))));
   }
 
   async function setActive(d, active) {

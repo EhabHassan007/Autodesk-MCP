@@ -13,7 +13,8 @@ try{
  $code='team-build-test-code-'+[guid]::NewGuid().ToString('N')
  $secure=ConvertTo-SecureString $code -AsPlainText -Force
  $out=@(& (Join-Path $copy 'build.ps1') -TeamJoinCode $secure)
- $public=Join-Path $copy 'Autodesk-MCP-Connector-1.0.0-beta.17.zip';$team=Join-Path $copy 'Autodesk-MCP-Connector-1.0.0-beta.17-TEAM.zip'
+ $v=(Get-Content (Join-Path $copy 'source/runtime/VERSION') -Raw).Trim()
+ $public=Join-Path $copy "Autodesk-MCP-Connector-$v.zip";$team=Join-Path $copy "Autodesk-MCP-Connector-$v-TEAM.zip"
  Assert ((Test-Path $public) -and (Test-Path $team)) 'Both installers were not built'
  Assert (-not (($out -join "`n").Contains($code))) 'Build output printed the join code'
  # Public: neither the payload nor any release file holds the code.
@@ -23,7 +24,7 @@ try{
  }
  # Team: the payload inside carries the code and service address, and nothing else differs in its file list.
  Assert ((Entries $team) -join ',' -eq ((Entries $public) -join ',')) 'Team installer has a different file list'
- $teamPayload=Join-Path $t 'team-payload.zip';Read-Entry $team 'Autodesk-MCP-Connector-1.0.0-beta.17/Support/Autodesk-MCP-Payload.zip' $teamPayload
+ $teamPayload=Join-Path $t 'team-payload.zip';Read-Entry $team "Autodesk-MCP-Connector-$v/Support/Autodesk-MCP-Payload.zip" $teamPayload
  $publicEntries=Entries (Join-Path $copy 'source/Support/Autodesk-MCP-Payload.zip');$teamEntries=Entries $teamPayload
  Assert (@(Compare-Object $publicEntries $teamEntries).Count -eq 1 -and $teamEntries -contains 'Autodesk-MCP-Payload/installer/team-join.json') 'Team payload should differ only by team-join.json'
  $joinFile=Join-Path $t 'team-join.json';Read-Entry $teamPayload 'Autodesk-MCP-Payload/installer/team-join.json' $joinFile

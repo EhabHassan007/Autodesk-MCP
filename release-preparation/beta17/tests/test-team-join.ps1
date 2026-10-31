@@ -87,8 +87,11 @@ try{
  # Wiring: the admin file wins in both installers, and Install only joins when the dialog was answered.
  $setup=Get-Content (Join-Path $runtime 'installer/Setup-BimCad.ps1') -Raw
  Assert ($setup.Contains('if ($JoinName -and $JoinEmail -and [string]::IsNullOrWhiteSpace($EnrollmentPath)) { $null = Register-SkillServiceDevice -Root $root }')) 'Install does not prefer the admin file'
+ # The outer installer asks for details only without an admin file; the setup wizard passes them on.
  $wrapper=Get-Content (Join-Path $PSScriptRoot '../source/Support/Install-Autodesk-MCP-Connector.ps1') -Raw
- Assert ($wrapper.Contains('-not $enrollmentFile -and (Test-Path -LiteralPath $joinDialog') -and $wrapper.Contains("'-JoinName', `$join.Name")) 'Outer installer does not pass the join answers'
+ Assert ($wrapper.Contains('$askDetails = (-not $enrollmentFile) -and (Test-TeamJoinRequired -PayloadInstaller $payloadInstaller)')) 'Outer installer does not prefer the admin file'
+ $wizard=Get-Content (Join-Path $runtime 'installer/SetupWizard.ps1') -Raw
+ Assert ($wizard.Contains("'-JoinName', `$script:wizard.Join.Name, '-JoinEmail', `$script:wizard.Join.Email")) 'Setup wizard does not pass the join answers'
  $gui=Get-Content (Join-Path $runtime 'installer/BIM-CAD-Setup.ps1') -Raw
  Assert ($gui.Contains("Show-TeamJoinDialog -Owner `$form") -and $gui.Contains("'-JoinName', `$join.Name")) 'Setup window does not offer the join dialog'
  'PASS: team join enrolls with DPAPI and secure cleanup, never logs the code or token, removes the installed code, explains failures, and the dialog validates input'

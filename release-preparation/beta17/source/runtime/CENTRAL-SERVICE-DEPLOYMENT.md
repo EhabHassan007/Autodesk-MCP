@@ -47,7 +47,7 @@ python admin.py enroll --service-url https://YOUR-SERVICE-HOST --label Office-PC
 
 Either utility prompts for the service administrator token without displaying it. It writes one **device credential**, which can only submit skill candidates and download approved skills. It has no GitHub API access. Enrollment requires an existing admin token; devices cannot enroll themselves anonymously.
 
-Place that file beside `INSTALL Autodesk MCP Connector.cmd` in the extracted connector folder before deploying the single setup to that PC/user. Use Intune, your endpoint-management tool, or another secure admin deployment process. Do not add the enrollment file to public release assets. Use a distinct enrollment for each participating PC/user.
+Place that file beside `INSTALL Smart Autodesk Connector.cmd` in the extracted connector folder before deploying the single setup to that PC/user. Use Intune, your endpoint-management tool, or another secure admin deployment process. Do not add the enrollment file to public release assets. Use a distinct enrollment for each participating PC/user.
 
 Setup also accepts the file as `enrollment.json`, or from any path through `Setup-BimCad.ps1 -EnrollmentPath`. Setup stores the credential encrypted for the current Windows user using DPAPI, overwrites and deletes the plaintext enrollment file after every import attempt (successful or not), writes an `[ENROLLMENT_OK]` or `[ENROLLMENT_FAILED]` line to `%LOCALAPPDATA%\AutodeskMcpConnector\setup.log`, and starts a first background collection/sync. Weekly jobs then run in that user's session. No team GitHub account, Git installation, author name/email command, or separate skills upload is required for MCP workflow guidance.
 

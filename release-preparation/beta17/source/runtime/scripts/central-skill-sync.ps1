@@ -55,7 +55,10 @@ function Install-ApprovedLibrary {
  if(Test-Path $ledgerPath){$obj=Get-Content $ledgerPath -Raw|ConvertFrom-Json;foreach($p in $obj.PSObject.Properties){$managed[$p.Name]=[string]$p.Value}}
  if((Test-Path $cache) -and ((Get-Item $cache -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)){throw 'Linked cache directory refused.'}
  New-Item -ItemType Directory -Path $cache -Force|Out-Null
+ # Per-skill outcome for the Skills Sync summary: added, updated, preserved (local edits kept) or current.
+ $outcome=@{}
  foreach($skill in @($Library.skills)){
+  $outcome[$skill.name]='current'
   Test-RemoteSkillFiles $skill
   $temp=Join-Path $State ('download-'+[guid]::NewGuid().ToString('N'))
   New-Item -ItemType Directory $temp|Out-Null
@@ -78,7 +81,9 @@ function Install-ApprovedLibrary {
     $destination=Join-Path $clientRoot $skill.name
     $key=$destination
     $replace=$true
-    if(Test-Path $destination){
+    $existed=Test-Path $destination
+    $current=''
+    if($existed){
      # Avoid replacing personal edits or following local links.
      $linked=@(Get-Item $destination -Force;Get-ChildItem $destination -Recurse -Force)|Where-Object {($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0}
      if($linked){$replace=$false}
@@ -92,8 +97,10 @@ function Install-ApprovedLibrary {
     if($replace){
      Set-ApprovedSkillDirectory -Source $temp -Destination $destination
      $managed[$key]=$hash
+     if(-not $existed){if($outcome[$skill.name] -eq 'current'){$outcome[$skill.name]='added'}}
+     elseif($current -ne $hash -and $outcome[$skill.name] -ne 'preserved'){$outcome[$skill.name]='updated'}
     }
-    else{Write-Warning ('Preserved locally edited skill: '+$skill.name)}
+    else{Write-Warning ('Preserved locally edited skill: '+$skill.name);$outcome[$skill.name]='preserved'}
    }
   }
   finally{if(Test-Path $temp){Remove-Item $temp -Recurse -Force}}
@@ -101,6 +108,15 @@ function Install-ApprovedLibrary {
  $tempLedger=$ledgerPath+'.tmp'
  $managed|ConvertTo-Json|Set-Content $tempLedger -Encoding UTF8
  Move-Item $tempLedger $ledgerPath -Force
+ $values=@($outcome.Values)
+ [pscustomobject]@{total=$values.Count;added=@($values|Where-Object {$_ -eq 'added'}).Count;updated=@($values|Where-Object {$_ -eq 'updated'}).Count
+  preserved=@($values|Where-Object {$_ -eq 'preserved'}).Count;current=@($values|Where-Object {$_ -eq 'current'}).Count}
+}
+
+# One machine-readable summary line for Skills Sync in Revit and the connector agent.
+function Write-SyncResult {
+ param([hashtable]$Result)
+ Write-Output ('[SYNC_RESULT] '+($Result|ConvertTo-Json -Compress))
 }
 
 if($LibraryOnly){return}
@@ -129,13 +145,18 @@ foreach($folder in @(Get-ChildItem (Join-Path $review.FullName 'candidates') -Di
  $files=@{}
  foreach($file in Get-ChildItem $folder.FullName -Recurse -File -Force){
   $relative=$file.FullName.Substring($folder.FullName.Length).TrimStart('\','/').Replace('\','/')
-  $files[$relative]=Get-Content $file.FullName -Raw
+  # Plain .NET read: Get-Content attaches PSPath/PSDrive properties that Windows PowerShell 5.1's
+  # ConvertTo-Json serialises recursively, turning a small skill into gigabytes.
+  $files[$relative]=[IO.File]::ReadAllText($file.FullName,[Text.Encoding]::UTF8)
  }
  $skills.Add(@{name=$name;files=$files})
 }
 if($Preview){@{status='preview';skills=@($names.Keys);review=$review.FullName}|ConvertTo-Json -Depth 5;exit 0}
 $configPath=Join-Path $StateRoot 'service.json'
-if(-not(Test-Path $configPath)){throw 'Central sharing is waiting for administrator enrollment. No team GitHub sign-in is required.'}
+if(-not(Test-Path $configPath)){
+ Write-SyncResult @{status='not_enrolled';candidates=$skills.Count;reason='This computer has not joined the team skill service yet. Run the team installer, or ask your administrator.'}
+ throw 'Central sharing is waiting for administrator enrollment. No team GitHub sign-in is required.'
+}
 $config=Get-Content $configPath -Raw|ConvertFrom-Json
 $uri=[Uri]$config.service_url
 if($uri.Scheme -ne 'https' -or $uri.UserInfo -or $uri.Query -or $uri.Fragment){throw 'Invalid skill service URL.'}
@@ -149,6 +170,7 @@ $token=$null
 try{
  $base=$uri.AbsoluteUri.TrimEnd('/')
  $submissionFailure=$null
+ $summary=@{status='ok';candidates=$skills.Count;submitted=0;submission='none';pull_request=''}
  try {
  if($submissionBlocked){throw 'Conflicting saved skills need administrator review.'}
  if($skills.Count){
@@ -156,14 +178,31 @@ try{
   if([Text.Encoding]::UTF8.GetByteCount($body) -gt 2MB){throw 'Skill batch exceeds 2 MB. An administrator must split the review batch.'}
   $result=Invoke-RestMethod -Uri ($base+'/v1/submissions') -Method Post -Headers $headers -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body)) -TimeoutSec 120
   Write-Output ($result|ConvertTo-Json -Depth 5)
+  $summary.submission=[string]$result.status
+  $summary.pull_request=[string]$result.pull_request
+  if($result.status -eq 'submitted_for_approval'){$summary.submitted=$skills.Count}
  }
  else{Write-Output 'No new local skill candidates.'}
  }
- catch {$submissionFailure=$_.Exception.Message;Write-Warning 'Submission was not completed; approved skill downloads will still be attempted.'}
- $approved=Invoke-RestMethod -Uri ($base+'/v1/library') -Headers $headers -TimeoutSec 120
- $codexRoot=if($env:CODEX_HOME){Join-Path $env:CODEX_HOME 'skills'}else{Join-Path $env:USERPROFILE '.codex/skills'}
- Install-ApprovedLibrary -Library $approved -State $StateRoot -Repository $RepositoryRoot -ClientRoots @($codexRoot,(Join-Path $env:USERPROFILE '.claude/skills'))
+ catch {$submissionFailure=$_.Exception.Message;$summary.submission='failed';Write-Warning 'Submission was not completed; approved skill downloads will still be attempted.'}
+ try{
+  $approved=Invoke-RestMethod -Uri ($base+'/v1/library') -Headers $headers -TimeoutSec 120
+  $codexRoot=if($env:CODEX_HOME){Join-Path $env:CODEX_HOME 'skills'}else{Join-Path $env:USERPROFILE '.codex/skills'}
+  $library=Install-ApprovedLibrary -Library $approved -State $StateRoot -Repository $RepositoryRoot -ClientRoots @($codexRoot,(Join-Path $env:USERPROFILE '.claude/skills'))
+ }
+ catch{
+  $summary.status='failed'
+  $summary.reason='Approved skills could not be downloaded. Check the internet connection and try again.'
+  Write-SyncResult $summary
+  throw
+ }
+ $summary.approved_total=$library.total;$summary.added=$library.added;$summary.updated=$library.updated
+ $summary.preserved=$library.preserved;$summary.commit=[string]$approved.commit
  Write-Output ('Approved skill library synchronized. Commit: '+$approved.commit)
+ if($submissionFailure){
+  $summary.status='partial';$summary.reason='Approved skills were downloaded, but your saved skills could not be sent for review: '+$submissionFailure
+ }
+ Write-SyncResult $summary
  if($submissionFailure){throw ('Approved skills downloaded, but submission needs attention: '+$submissionFailure)}
 }
 finally{$headers.Authorization=$null}

@@ -1,4 +1,4 @@
-Autodesk MCP Connector 1.0.0-beta.17 — central-service pilot build
+Smart Autodesk Connector 1.0.0-beta.18 — central-service pilot build
 
 This build is for an administrator pilot. The central service must be hosted and connected to a GitHub App before central sharing works. It has not been deployed or tested against live GitHub from this environment.
 

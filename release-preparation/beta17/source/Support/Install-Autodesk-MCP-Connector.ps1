@@ -27,7 +27,7 @@ function Show-SetupMessage {
         $owner.Show()
         $owner.Activate()
         [System.Windows.Forms.MessageBox]::Show(
-            $owner, $Message, 'Autodesk MCP Connector',
+            $owner, $Message, 'Smart Autodesk Connector',
             [System.Windows.Forms.MessageBoxButtons]::OK, $Icon
         ) | Out-Null
     }
@@ -49,20 +49,19 @@ try {
     if (-not (Test-Path -LiteralPath $setup -PathType Leaf) -or
         -not (Test-Path -LiteralPath $coreSetup -PathType Leaf) -or
         -not (Test-Path -LiteralPath (Join-Path $packageRoot '.agents\skills') -PathType Container)) {
-        throw 'The Autodesk MCP installation payload is invalid.'
+        throw 'The Smart Autodesk Connector installation payload is invalid.'
     }
 
     if ($SmokeTest) {
         & powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File $setup -SmokeTest
-        if ($LASTEXITCODE -ne 0) { throw "Autodesk MCP Connector smoke test stopped with exit code $LASTEXITCODE." }
+        if ($LASTEXITCODE -ne 0) { throw "Smart Autodesk Connector smoke test stopped with exit code $LASTEXITCODE." }
     }
     elseif ($Install) {
         New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
-        "[{0}] Starting Autodesk MCP Connector installation." -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') |
+        "[{0}] Starting Smart Autodesk Connector installation." -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') |
             Set-Content -LiteralPath $logPath -Encoding UTF8
-        $coreArguments = @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $coreSetup,
-            '-Action', 'Install', '-RepositoryPath', (Join-Path $env:LOCALAPPDATA 'BIM-CAD-MCP'), '-InstallClaudeDesktopIfMissing')
-        # Administrators deploy the enrollment file beside INSTALL Autodesk MCP Connector.cmd, outside the extracted payload.
+        $coreArguments = @('-Action', 'Install', '-RepositoryPath', (Join-Path $env:LOCALAPPDATA 'BIM-CAD-MCP'), '-InstallClaudeDesktopIfMissing')
+        # Administrators deploy the enrollment file beside the INSTALL .cmd, outside the extracted payload.
         $enrollmentFile = @('enrollment.json', 'skill-service-device.json') |
             ForEach-Object { Join-Path (Split-Path -Parent $PSScriptRoot) $_ } |
             Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
@@ -70,39 +69,25 @@ try {
         if ($enrollmentFile) { $coreArguments += @('-EnrollmentPath', $enrollmentFile) }
         # The private TEAM build carries a join code; the administrator's enrollment file always wins.
         $payloadInstaller = Join-Path $packageRoot 'installer'
-        $joinDialog = Join-Path $payloadInstaller 'TeamJoinDialog.ps1'
-        if (-not $enrollmentFile -and (Test-Path -LiteralPath $joinDialog -PathType Leaf)) {
-            . $joinDialog
-            if (Test-TeamJoinRequired -PayloadInstaller $payloadInstaller) {
-                $join = Show-TeamJoinDialog
-                if ($join) { $coreArguments += @('-JoinName', $join.Name, '-JoinEmail', $join.Email) }
-                else {
-                    "[{0}] [ENROLLMENT_PENDING] Team join was skipped. Installation continues without central skill sharing." -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') |
-                        Add-Content -LiteralPath $logPath -Encoding UTF8
-                }
-            }
+        . (Join-Path $payloadInstaller 'SetupWizard.ps1')
+        $askDetails = (-not $enrollmentFile) -and (Test-TeamJoinRequired -PayloadInstaller $payloadInstaller)
+        $version = (Get-Content -LiteralPath (Join-Path $packageRoot 'VERSION') -Raw).Trim()
+        $outcome = Show-SetupWizard -CoreSetup $coreSetup -CoreArguments $coreArguments -LogPath $logPath -Version $version `
+            -AskDetails $askDetails -HasEnrollmentFile ([bool]$enrollmentFile)
+        if ($outcome.Result -eq 'cancelled') {
+            "[{0}] Setup was cancelled before anything was installed." -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') | Add-Content -LiteralPath $logPath -Encoding UTF8
+            exit 0
         }
-        $savedPreference = $ErrorActionPreference
-        try {
-            $ErrorActionPreference = 'Continue'
-        $output = & powershell.exe @coreArguments 2>&1
-        $exitCode = $LASTEXITCODE
+        # First skill sync and usage report in the background once the PC is enrolled.
+        $centralRunner = Join-Path $env:LOCALAPPDATA 'BIM-CAD-MCP\scripts\weekly-skill-collection.ps1'
+        if (Test-Path (Join-Path $env:LOCALAPPDATA 'AutodeskMcpSkillCollection\service.json')) {
+            Start-Process powershell.exe -WindowStyle Hidden -ArgumentList ('-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -Action Sync' -f $centralRunner)
         }
-        finally { $ErrorActionPreference = $savedPreference }
-        $outputText = @($output | ForEach-Object { $_.ToString() })
-        $outputText | Add-Content -LiteralPath $logPath -Encoding UTF8
-        $outputText | ForEach-Object { Write-Host $_ }
-        if ($exitCode -ne 0) { throw "Installation stopped with exit code $exitCode. See $logPath" }
-        $centralRunner=Join-Path $env:LOCALAPPDATA 'BIM-CAD-MCP\scripts\weekly-skill-collection.ps1'
-        if(Test-Path (Join-Path $env:LOCALAPPDATA 'AutodeskMcpSkillCollection\service.json')){
-            Start-Process powershell.exe -WindowStyle Hidden -ArgumentList ('-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -Action Run' -f $centralRunner)
-        }
-        Show-SetupMessage -Message 'Installation completed. Codex and Claude Desktop are configured automatically. Claude web or mobile requires the optional remote setup.' `
-            -Icon ([System.Windows.Forms.MessageBoxIcon]::Information)
+        if ($outcome.Result -ne 'ok') { exit 1 }
     }
     else {
         & powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File $setup
-        if ($LASTEXITCODE -ne 0) { throw "Autodesk MCP Connector setup stopped with exit code $LASTEXITCODE." }
+        if ($LASTEXITCODE -ne 0) { throw "Smart Autodesk Connector setup stopped with exit code $LASTEXITCODE." }
     }
 }
 catch {

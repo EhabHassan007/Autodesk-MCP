@@ -1,4 +1,4 @@
-Autodesk MCP Connector 1.0.0-beta.17 — central-service pilot
+Smart Autodesk Connector 1.0.0-beta.18 — central-service pilot
 
 This is an administrator pilot. Automatic team sharing requires the dedicated GitHub App, Render deployment and per-PC enrollment; those are not configured yet.
 
@@ -17,4 +17,4 @@ Still outstanding: live GitHub App and HTTPS hosting, Windows device enrollment/
 
 Keep this release as a pilot until those checks pass. Beta15 remains the public Latest release; no team update notification has been enabled for beta17.
 
-SHA-256: DC7C52121D2C6B23A26F0374FF5E60CF034155025692CEFC692E989C7770A429
+SHA-256: D58CB1B18455840EA3FE642273FF82548DA490CE19E359B94431F997C4CD685C
