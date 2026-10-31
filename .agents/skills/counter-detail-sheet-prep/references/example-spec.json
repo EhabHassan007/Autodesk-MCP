@@ -1,0 +1,41 @@
+{
+  "layout": "SHEET-01",
+  "style": {
+    "leaderBlock": "Multiple Leader Lab", "leaderLayer": "AO_DIMZ", "leaderTag": "LABEL",
+    "levelBlock": "level indicator", "levelLayer": "AO-Z.Lvl", "levelScale": 0.015984,
+    "levelTopTag": "LEVEL", "levelBottomTag": "Area", "levelReferenceHandle": "",
+    "dimLayer": "0_AO_DIMZ", "radialLayer": "A-ANNO-DIMS", "dimStyle": "na1",
+    "calloutBlock": "Section Callout - Metric", "calloutLayer": "AO_SECTION LINE", "calloutScale": 0.9,
+    "sheetNumber": "A-101"
+  },
+  "views": {
+    "PLAN":   { "offset": [0, 0], "paperCentre": [560, 430], "modelCentre": [0, 0],      "scale": 0.0333333333 },
+    "PLANIN": { "offset": [0, 0], "paperCentre": [560, 430], "modelCentre": [0, 0],      "scale": 0.0333333333 },
+    "X1":     { "offset": [0, 0], "paperCentre": [370, 100], "modelCentre": [16900, 570], "scale": 0.1 }
+  },
+  "columns": {
+    "PLAN":   { "x": 680, "width": 30, "minY": 345, "maxY": 535 },
+    "PLANIN": { "x": 515, "width": 45, "minY": 440, "maxY": 520 },
+    "X1":     { "x": 432, "width": 100, "minY": 44, "maxY": 222 }
+  },
+  "levelX": { "X1": 268 },
+  "labels": [
+    { "view": "X1", "x": 17250, "y": 1094, "text": "12MM SOLID-SURFACE TOP, WHITE GLOSS, R50 EDGE" },
+    { "view": "X1", "x": 16534, "y": 736, "text": "18MM MDF DRAWER W/ LOCK, WHITE PU" },
+    { "view": "PLAN", "x": 2078, "y": -1200, "text": "RECEPTION COUNTER" },
+    { "view": "PLAN", "column": "PLANIN", "x": -2078, "y": 1200, "text": "CUBBY WALL, 28 BAYS" }
+  ],
+  "levels": [
+    { "view": "X1", "y": 1100, "elevation": "EL. +1.10", "description": "TOP OF COUNTER" },
+    { "view": "X1", "y": 0, "elevation": "EL. +0.00", "description": "F.F.L." }
+  ],
+  "dims": [
+    { "view": "X1", "p1": [16420, 0], "p2": [16420, 1100], "line": [16350, 0], "angle": 90 }
+  ],
+  "radials": [
+    { "view": "PLAN", "centre": [0, 0], "chord": [1690, 453], "textAt": [2154, 673] }
+  ],
+  "callouts": [
+    { "name": "X1", "at": [684.08, 427.66], "rotation": 0 }
+  ]
+}
