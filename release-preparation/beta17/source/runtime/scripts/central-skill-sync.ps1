@@ -142,6 +142,15 @@ $null=& $collector -RepositoryRoot $RepositoryRoot -OutputRoot $reviewRoot -Addi
 $excluded=@{}
 if(Test-Path -LiteralPath $exclusionList){foreach($line in Get-Content -LiteralPath $exclusionList){$t=$line.Trim();if($t -and -not $t.StartsWith('#')){$excluded[$t.ToLowerInvariant()]=$true}}}
 $review=Get-ChildItem $reviewRoot -Directory|Select-Object -First 1
+# Approved text already on this PC: the shipped library and the downloaded cache. Local copies of approved
+# skills can hold mojibake from an earlier download; once repaired they match and are not sent again.
+$approvedText=@{}
+foreach($root in @((Join-Path $RepositoryRoot '.agents/skills'),(Join-Path $StateRoot 'approved-skills'))){
+ foreach($approvedSkill in Get-SkillFolders $root){
+  if(-not $approvedText.ContainsKey($approvedSkill.Name)){$approvedText[$approvedSkill.Name]=@()}
+  $approvedText[$approvedSkill.Name]+=Get-SkillTextKey (Read-SkillText $approvedSkill.Path)
+ }
+}
 $skills=New-Object System.Collections.Generic.List[object]
 $names=@{}
 $submissionBlocked=$false
@@ -149,19 +158,14 @@ foreach($folder in @(Get-ChildItem (Join-Path $review.FullName 'candidates') -Di
  try{$name=Get-SkillName $folder.FullName;Test-SafeCandidate $folder.FullName}
  catch{Write-Warning ('Skipped flagged skill: '+$folder.Name);continue}
  if($excluded.ContainsKey($name.ToLowerInvariant())){Remove-Item -LiteralPath $folder.FullName -Recurse -Force;continue}
- $hash=Get-DirectoryHash $folder.FullName
+ $files=Read-SkillText $folder.FullName
+ $hash=Get-SkillTextKey $files
+ if($approvedText.ContainsKey($name) -and $approvedText[$name] -ccontains $hash){continue}
  if($names.ContainsKey($name)){
-  if($names[$name] -ne $hash){$submissionBlocked=$true;Write-Warning ('Conflicting saved skill variants; submissions paused: '+$name)}
+  if($names[$name] -cne $hash){$submissionBlocked=$true;Write-Warning ('Conflicting saved skill variants; submissions paused: '+$name)}
   continue
  }
  $names[$name]=$hash
- $files=@{}
- foreach($file in Get-ChildItem $folder.FullName -Recurse -File -Force){
-  $relative=$file.FullName.Substring($folder.FullName.Length).TrimStart('\','/').Replace('\','/')
-  # Plain .NET read: Get-Content attaches PSPath/PSDrive properties that Windows PowerShell 5.1's
-  # ConvertTo-Json serialises recursively, turning a small skill into gigabytes.
-  $files[$relative]=[IO.File]::ReadAllText($file.FullName,[Text.Encoding]::UTF8)
- }
  $skills.Add(@{name=$name;files=$files})
 }
 if($Preview){@{status='preview';skills=@($names.Keys);review=$review.FullName}|ConvertTo-Json -Depth 5;exit 0}
