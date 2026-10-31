@@ -1,4 +1,0 @@
-interface:
-  display_name: "Revit Grouped Dimension DM"
-  short_description: "Safely update grouped Revit dimensions without ungrouping"
-  default_prompt: "Update dimensions in selected Revit views using one reusable - DM detail-group copy per original, and never ungroup."
