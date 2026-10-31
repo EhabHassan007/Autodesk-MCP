@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { readFileSync, readdirSync } from 'node:fs';
 import { generateKeyPairSync, verify } from 'node:crypto';
 import { handle } from '../src/index.mjs';
-import { appJWT, GitHub, GitHubFailure, safeGitHubDetail } from '../src/github.mjs';
+import { appJWT, GitHub, GitHubFailure, locateSkillFile, safeGitHubDetail, submissionCategory } from '../src/github.mjs';
 import { canonical, hash, MAX_BODY, validateSkills } from '../src/validation.mjs';
 import { DASHBOARD_CSS, DASHBOARD_HTML, DASHBOARD_JS } from '../src/dashboard.mjs';
 
@@ -207,6 +207,65 @@ test('approved library uses main, batches blob reads, skips symlinks and rejects
   const normal=gh.request;
   gh.request=(method,path)=>path==='/graphql'?{errors:[{message:'upstream private error'}]}:normal(method,path);
   await assert.rejects(gh.library(),/blob lookup failed/);
+});
+
+test('library reads category folders and legacy flat skills, and keeps names unique',async()=>{
+  const gh=new GitHub({GITHUB_REPOSITORY:'owner/repo'});
+  const text=n=>`---\nname: ${n}\n---\nGuidance.`;
+  const files={'.agents/skills/revit/revit-a/SKILL.md':text('revit-a'),'.agents/skills/revit/revit-a/refs/x.md':'x',
+    '.agents/skills/autocad/acad-b/SKILL.md':text('acad-b'),'.agents/skills/legacy-c/SKILL.md':text('legacy-c'),
+    '.agents/skills/3ds-max/README.md':'# 3ds Max','.agents/skills/README.md':'# catalog'};
+  const serve=list=>{
+    const tree=Object.entries(list).map(([path,body],i)=>({path,sha:'s'+i,mode:'100644',type:'blob',size:Buffer.byteLength(body)}));
+    gh.cached=null;
+    gh.request=async(method,path,body)=>{
+      if(path.includes('/git/ref/heads/main'))return {object:{sha:'head'+Object.keys(list).length}};
+      if(path.includes('/git/commits/'))return {tree:{sha:'tree'}};
+      if(path.includes('/git/trees/'))return {tree};
+      if(path==='/graphql'){const ids=[...body.query.matchAll(/b(\d+): object\(oid:"s(\d+)"\)/g)];return {data:{repository:Object.fromEntries(ids.map(([,b,s])=>[`b${b}`,{text:Object.values(list)[s],isBinary:false,byteSize:Buffer.byteLength(Object.values(list)[s])}]))}};}
+      throw new Error('unexpected '+path);
+    };
+  };
+  serve(files);
+  const lib=await gh.library();
+  assert.deepEqual(Object.keys(lib.skills).sort(),['acad-b','legacy-c','revit-a']);
+  assert.deepEqual({...lib.skills['revit-a']},{'SKILL.md':text('revit-a'),'refs/x.md':'x'});
+  assert.deepEqual({...lib.categories},{'revit-a':'revit','acad-b':'autocad','legacy-c':null});
+  serve({...files,'.agents/skills/general/revit-a/SKILL.md':text('revit-a')});
+  await assert.rejects(gh.library(),/unique across categories/);
+});
+
+test('submissions land in the category folder and move a skill out of its old place',async()=>{
+  assert.equal(submissionCategory('x','---\nname: x\ncategory: branding-ci\n---'),'branding-ci');
+  assert.equal(submissionCategory('revit-new',''),'revit');
+  assert.equal(submissionCategory('acad-thing',''),'autocad');
+  assert.equal(submissionCategory('linkedin-profile-optimizer',''),'linkedin-marketing');
+  assert.equal(submissionCategory('quote-maker','','general'),'general','an approved skill keeps its folder');
+  assert.equal(submissionCategory('quote-maker','---\ncategory: nonsense\n---'),'uncategorized');
+  const gh=new GitHub({GITHUB_REPOSITORY:'owner/repo'});
+  gh.library=async()=>({skills:{},categories:{'old-one':null},locations:{'old-one':'old-one'},commit:'head',treeSha:'tree',
+    tree:[{path:'.agents/skills/old-one/SKILL.md',type:'blob',mode:'100644'},{path:'.agents/skills/old-one/stale.md',type:'blob',mode:'100644'}]});
+  let edits;
+  gh.request=async(method,path,body)=>{
+    if(path.includes('/pulls?'))return [];
+    if(path.includes('/git/ref/'))return null;
+    if(path.endsWith('/git/trees')){edits=body.tree;return {sha:'t'};}
+    if(path.endsWith('/git/commits'))return {sha:'c'};
+    if(path.endsWith('/pulls'))return {html_url:url};
+    return {};
+  };
+  await gh.submit({'old-one':{'SKILL.md':'---\nname: old-one\ncategory: autocad\n---\nx'},'linkedin-profile-optimizer':{'SKILL.md':'---\nname: linkedin-profile-optimizer\n---\nx'}},'d'.repeat(64));
+  const written=edits.filter(e=>e.content!==undefined).map(e=>e.path).sort();
+  assert.deepEqual(written,['.agents/skills/autocad/old-one/SKILL.md','.agents/skills/linkedin-marketing/linkedin-profile-optimizer/SKILL.md']);
+  assert.deepEqual(edits.filter(e=>e.sha===null).map(e=>e.path).sort(),['.agents/skills/old-one/SKILL.md','.agents/skills/old-one/stale.md']);
+});
+
+test('skill category must be a known folder',()=>{
+  assert.ok(validateSkills({skills:[{name:'a-b',files:{'SKILL.md':'---\nname: a-b\ncategory: revit\n---'}}]}));
+  assert.throws(()=>validateSkills({skills:[{name:'a-b',files:{'SKILL.md':'---\nname: a-b\ncategory: games\n---'}}]}));
+  assert.equal(locateSkillFile('revit/revit-a/SKILL.md').category,'revit');
+  assert.equal(locateSkillFile('revit/README.md'),null);
+  assert.equal(locateSkillFile('legacy-c/refs/y.md').path,'refs/y.md');
 });
 
 const office = {'CF-Connecting-IP':'203.0.113.7'};

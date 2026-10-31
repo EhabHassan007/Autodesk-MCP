@@ -14,6 +14,7 @@ $validationModule=New-Module -Name CentralSkillValidation -ArgumentList (Join-Pa
  Export-ModuleMember -Function Get-DirectoryHash,Get-SkillName,Test-SafeCandidate
 }
 Import-Module $validationModule -Force -DisableNameChecking
+. (Join-Path $PSScriptRoot 'SkillLibrary.ps1')
 
 function Test-RemoteSkillFiles {
  param($Skill)
@@ -57,6 +58,9 @@ function Install-ApprovedLibrary {
  New-Item -ItemType Directory -Path $cache -Force|Out-Null
  # Per-skill outcome for the Skills Sync summary: added, updated, preserved (local edits kept) or current.
  $outcome=@{}
+ # Installed copies of the shipped library, which may be in category folders, by skill name.
+ $baselines=@{}
+ foreach($shipped in Get-SkillFolders (Join-Path $Repository '.agents/skills')){$baselines[$shipped.Name]=$shipped.Path}
  foreach($skill in @($Library.skills)){
   $outcome[$skill.name]='current'
   Test-RemoteSkillFiles $skill
@@ -89,8 +93,7 @@ function Install-ApprovedLibrary {
      if($linked){$replace=$false}
      else{
       $current=Get-DirectoryHash $destination
-      $baseline=Join-Path (Join-Path $Repository '.agents/skills') $skill.name
-      $baselineHash=if(Test-Path $baseline){Get-DirectoryHash $baseline}else{''}
+      $baselineHash=if($baselines.ContainsKey($skill.name)){Get-DirectoryHash $baselines[$skill.name]}else{''}
       $replace=($current -eq $hash -or $current -eq $baselineHash -or ($managed.ContainsKey($key) -and $managed[$key] -eq $current))
      }
     }

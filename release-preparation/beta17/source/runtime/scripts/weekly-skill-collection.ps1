@@ -23,7 +23,7 @@ if ($Action -eq 'Enable') {
     New-Item -ItemType Directory -Path $StateRoot -Force | Out-Null
     $installRoot = Join-Path $StateRoot 'scripts'
     New-Item -ItemType Directory -Path $installRoot -Force | Out-Null
-    foreach ($name in @('weekly-skill-collection.ps1','collect-skills-for-review.ps1','submit-team-knowledge.ps1','central-skill-sync.ps1','Initialize-SkillService.ps1','send-usage.ps1')) {
+    foreach ($name in @('weekly-skill-collection.ps1','collect-skills-for-review.ps1','submit-team-knowledge.ps1','central-skill-sync.ps1','Initialize-SkillService.ps1','send-usage.ps1','connector-agent.ps1','SkillLibrary.ps1')) {
         $source = Join-Path $PSScriptRoot $name
         $destination = Join-Path $installRoot $name
         if ([IO.Path]::GetFullPath($source) -ne [IO.Path]::GetFullPath($destination)) { Copy-Item -LiteralPath $source -Destination $destination -Force }

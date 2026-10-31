@@ -100,11 +100,10 @@ $reviewDirectory = Join-Path $OutputRoot "$computer-$stamp"
 $candidateDirectory = Join-Path $reviewDirectory 'candidates'
 New-Item -ItemType Directory -Path $candidateDirectory -Force | Out-Null
 
+. (Join-Path $PSScriptRoot 'SkillLibrary.ps1')
 $repositoryHashes = @{}
-foreach ($skill in Get-ChildItem -LiteralPath $repositorySkills -Directory) {
-    if (Test-Path -LiteralPath (Join-Path $skill.FullName 'SKILL.md') -PathType Leaf) {
-        $repositoryHashes[$skill.Name] = Get-DirectoryHash $skill.FullName
-    }
+foreach ($skill in Get-SkillFolders $repositorySkills) {
+    $repositoryHashes[$skill.Name] = Get-DirectoryHash $skill.Path
 }
 
 $results = New-Object System.Collections.Generic.List[object]

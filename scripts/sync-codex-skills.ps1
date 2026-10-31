@@ -23,12 +23,15 @@ if ([string]::IsNullOrWhiteSpace($Destination)) {
     $Destination = Join-Path $codexHome 'skills'
 }
 
+. (Join-Path $PSScriptRoot 'SkillLibrary.ps1')
+
 function Get-RepositorySkills {
     if (-not (Test-Path -LiteralPath $skillsSource -PathType Container)) {
         throw "Skill library was not found: $skillsSource"
     }
 
-    @(Get-ChildItem -LiteralPath $skillsSource -Directory | Sort-Object Name)
+    # Category folders in the library; each skill is still installed flat under its own name.
+    @(Get-SkillFolders $skillsSource | ForEach-Object { [pscustomobject]@{ Name = $_.Name; FullName = $_.Path } } | Sort-Object Name)
 }
 
 function Test-RepositorySkills {
