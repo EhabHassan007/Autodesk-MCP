@@ -19,13 +19,13 @@ Review the current model in read-only mode unless the user explicitly asks for f
 
 Work from model-wide conditions toward individual elements:
 
-1. **Model identity and setup** â units, phases, design options, worksets, coordinates, project/base/survey points, warnings, imported CAD, and loaded links.
-2. **Levels and storeys** â duplicate or inconsistent names, missing plan views, reference levels exposed as storeys, elements hosted outside the vertical range of their assigned level, and cross-discipline level misalignment.
-3. **Rooms and areas** â unplaced, unenclosed, redundant, zero-area, or duplicate-numbered rooms; uncovered occupied regions; room-bounding failures; upper limits that miss ceilings; and inconsistent department, occupancy, or usage data.
-4. **Architectural elements** â walls spanning unintended storeys, floors or roofs at incorrect elevations, openings without suitable hosts, stairs and ramps with incomplete geometry or annotations, misplaced doors/windows, and inappropriate in-place or generic-model use.
-5. **Envelope, circulation, and access** â discontinuities, blocked routes, unresolved shafts, inconsistent floor openings, and apparent clearance concerns. Treat bounding-box proximity as a candidate issue, not proof of a clash or code failure.
-6. **Documentation health** â view/template consistency, missing tags, duplicate or conflicting annotations, grids and levels not shown where required, and key plans/sections that do not support review.
-7. **Output readiness** â naming, classifications, required parameters, links, coordinates, element ownership, and export configuration. Use the `revit-ifc-export-readiness` skill when IFC is the deliverable.
+1. **Model identity and setup** — units, phases, design options, worksets, coordinates, project/base/survey points, warnings, imported CAD, and loaded links.
+2. **Levels and storeys** — duplicate or inconsistent names, missing plan views, reference levels exposed as storeys, elements hosted outside the vertical range of their assigned level, and cross-discipline level misalignment.
+3. **Rooms and areas** — unplaced, unenclosed, redundant, zero-area, or duplicate-numbered rooms; uncovered occupied regions; room-bounding failures; upper limits that miss ceilings; and inconsistent department, occupancy, or usage data.
+4. **Architectural elements** — walls spanning unintended storeys, floors or roofs at incorrect elevations, openings without suitable hosts, stairs and ramps with incomplete geometry or annotations, misplaced doors/windows, and inappropriate in-place or generic-model use.
+5. **Envelope, circulation, and access** — discontinuities, blocked routes, unresolved shafts, inconsistent floor openings, and apparent clearance concerns. Treat bounding-box proximity as a candidate issue, not proof of a clash or code failure.
+6. **Documentation health** — view/template consistency, missing tags, duplicate or conflicting annotations, grids and levels not shown where required, and key plans/sections that do not support review.
+7. **Output readiness** — naming, classifications, required parameters, links, coordinates, element ownership, and export configuration. Use the `revit-ifc-export-readiness` skill when IFC is the deliverable.
 
 ## Evidence and severity
 

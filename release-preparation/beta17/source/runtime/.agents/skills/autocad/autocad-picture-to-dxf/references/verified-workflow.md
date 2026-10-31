@@ -1,4 +1,4 @@
-# Demonstrated workflow â 2026-10-03
+# Demonstrated workflow — 2026-10-03
 
 A supplied 684 x 676 colorful mascot/lettering image was traced as 92 closed polylines containing 1,969 vertices on INK_OUTLINES and HIGHLIGHTS layers. The user approved the preview. Background and corner decorations were omitted, along with color fills and shading. Scale remained unitless at one pixel per drawing unit.
 
