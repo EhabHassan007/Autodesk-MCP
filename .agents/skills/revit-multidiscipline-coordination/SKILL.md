@@ -16,14 +16,14 @@ Treat coordination as a read-only investigation until the user approves specific
 
 ## Review in this order
 
-1. **Link health** — unloaded, missing, nested, duplicate, mirrored, or unexpectedly scaled/rotated links; obsolete file versions; and multiple instances of the same model.
-2. **Coordinates** — control-point agreement, true/project north, elevations, units, and building placement. Compare geometry only after transforming linked coordinates into the host system.
-3. **Levels and grids** — name, elevation, extent, and alignment differences. Distinguish intentional discipline offsets from mismatches that affect hosting or documentation.
-4. **Spatial ownership** — identify which discipline owns slabs, openings, shafts, ceilings, equipment zones, facade zones, and site interfaces. Flag duplicated elements across models and gaps with no owner.
-5. **Hard clashes** — actual solid intersections, with host/link element ids, categories, types, levels, and approximate intersection location. Do not call a bounding-box intersection a confirmed clash.
-6. **Clearance checks** — access, maintenance, headroom, door swing, equipment replacement routes, ceiling zones, risers, and facade interfaces. Use only agreed clearance values.
-7. **Continuity checks** — floor openings, shafts, stairs, ramps, risers, drainage routes, walls at slabs, facade edges, and site/building connections across levels and disciplines.
-8. **Documentation interfaces** — grids, levels, room/space boundaries, penetrations, sleeves, builder's-work openings, and drawing references that should agree across models.
+1. **Link health** â unloaded, missing, nested, duplicate, mirrored, or unexpectedly scaled/rotated links; obsolete file versions; and multiple instances of the same model.
+2. **Coordinates** â control-point agreement, true/project north, elevations, units, and building placement. Compare geometry only after transforming linked coordinates into the host system.
+3. **Levels and grids** â name, elevation, extent, and alignment differences. Distinguish intentional discipline offsets from mismatches that affect hosting or documentation.
+4. **Spatial ownership** â identify which discipline owns slabs, openings, shafts, ceilings, equipment zones, facade zones, and site interfaces. Flag duplicated elements across models and gaps with no owner.
+5. **Hard clashes** â actual solid intersections, with host/link element ids, categories, types, levels, and approximate intersection location. Do not call a bounding-box intersection a confirmed clash.
+6. **Clearance checks** â access, maintenance, headroom, door swing, equipment replacement routes, ceiling zones, risers, and facade interfaces. Use only agreed clearance values.
+7. **Continuity checks** â floor openings, shafts, stairs, ramps, risers, drainage routes, walls at slabs, facade edges, and site/building connections across levels and disciplines.
+8. **Documentation interfaces** â grids, levels, room/space boundaries, penetrations, sleeves, builder's-work openings, and drawing references that should agree across models.
 
 ## Triage rules
 
