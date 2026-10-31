@@ -144,7 +144,7 @@ try{
  Request-ConnectorUpdate
  Assert (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'AutodeskMcpConnector/update-requested.flag')) 'Update now did not write update-requested.flag'
  # Live AutoCAD 2025 run: the installer also echoes raw `codex mcp get` output, which must not reach the window.
- $o=Get-ConnectionStatusOutcome "Smart Autodesk Connector - Status`n[10:00:00] AutoCAD installation detected: R25.0`n[10:00:01] Live AutoCAD connection passed: version 25.0; a.dwg; 3 layer(s).`nautodesk`n  enabled: true`n  transport: stdio`n[10:00:02] Codex has the Smart Autodesk Connector registration." $true
+ $o=Get-ConnectionStatusOutcome "[09:59:59] Smart Autodesk Connector - Status`n[10:00:00] AutoCAD installation detected: R25.0`n[10:00:01] Live AutoCAD connection passed: version 25.0; a.dwg; 3 layer(s).`nautodesk`n  enabled: true`n  transport: stdio`n[10:00:02] Codex has the Smart Autodesk Connector registration." $true
  Assert ($o.Kind -eq 'Good' -and $o.Body -match 'Codex has' -and $o.Body -match 'agent is running' -and $o.Body -notmatch '\[10:') "Status lines wrong: $($o.Body)"
  Assert ($o.Body -notmatch 'transport|enabled|- Status' -and @($o.Body -split "`n").Count -eq 4) "Raw command output leaked into Status: $($o.Body)"
  Assert ((Get-ConnectionStatusOutcome '[10:00:00] AutoCAD is running, but no drawing is open.' $false).Title -eq 'Open a drawing to connect') 'No-drawing state not recognised'
