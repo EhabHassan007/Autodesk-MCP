@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('Status', 'Install', 'Update', 'Test', 'Collect', 'TeamStatus', 'RemoteStatus', 'CheckUpdate', 'EnableNotifications', 'DisableNotifications', 'ConnectGitHub')]
+    [ValidateSet('Status', 'Install', 'Update', 'Test', 'Collect', 'TeamStatus', 'RemoteStatus', 'CheckUpdate', 'EnableNotifications', 'DisableNotifications', 'ConnectGitHub', 'UninstallAutoCadPanel')]
     [string]$Action = 'Status',
 
     [ValidateSet('All', 'AutoCAD', 'Revit')]
@@ -1340,6 +1340,148 @@ function Test-AutoCadSetup {
     else { Write-Step 'AutoCAD is not currently available for a live test. Start AutoCAD and open a drawing.' }
 }
 
+function Get-AutoCadReleases {
+    $root = 'HKLM:\SOFTWARE\Autodesk\AutoCAD'
+    if (-not (Test-Path -LiteralPath $root)) { return @() }
+    @(Get-ChildItem -LiteralPath $root -ErrorAction SilentlyContinue | Select-Object -ExpandProperty PSChildName)
+}
+
+# A .cuix is an OPC zip: the parts in the bundle's cuix-source folder plus the button icons from assets.
+function New-AutoCadCuix {
+    param([string]$SourceDirectory, [string]$AssetsDirectory, [string]$Destination)
+    Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
+    $parts = @('[Content_Types].xml', '_rels/.rels', 'Header.cui', 'MenuGroup.cui', 'RibbonRoot.cui')
+    $images = @(Get-ChildItem -LiteralPath $AssetsDirectory -Filter 'sac-*.png' -File | Sort-Object Name)
+    if ($images.Count -eq 0) { throw "The AutoCAD button icons are missing from $AssetsDirectory." }
+    if (Test-Path -LiteralPath $Destination) { Remove-Item -LiteralPath $Destination -Force }
+    $zip = [IO.Compression.ZipFile]::Open($Destination, 'Create')
+    try {
+        foreach ($part in $parts) {
+            $source = Join-Path $SourceDirectory ($part -replace '/', '\')
+            if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "CUIX part $part is missing from $SourceDirectory." }
+            $null = [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $source, $part, [IO.Compression.CompressionLevel]::Optimal)
+        }
+        foreach ($image in $images) {
+            $null = [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $image.FullName, $image.Name, [IO.Compression.CompressionLevel]::Optimal)
+        }
+    }
+    finally { $zip.Dispose() }
+}
+
+# AutoCAD keeps SECURELOAD and TRUSTEDPATHS per profile, in
+# HKCU\Software\Autodesk\AutoCAD\<release>\<product>\Profiles\<profile>\Variables; the Profiles key's default
+# value names the current profile (checked on AutoCAD 2025: <<Unnamed Profile>>). Returns the Variables keys of
+# every profile, creating the current profile's key if AutoCAD has not written it yet.
+function Get-AutoCadProfileVariableKeys {
+    param([string]$RegistryRoot = 'HKCU:\Software\Autodesk\AutoCAD')
+    foreach ($release in @(Get-ChildItem -LiteralPath $RegistryRoot -ErrorAction SilentlyContinue)) {
+        foreach ($product in @(Get-ChildItem -LiteralPath $release.PSPath -ErrorAction SilentlyContinue)) {
+            $profiles = Join-Path $product.PSPath 'Profiles'
+            if (-not (Test-Path -LiteralPath $profiles)) { continue }
+            $currentProfile = [string](Get-Item -LiteralPath $profiles).GetValue('')
+            if ($currentProfile) {
+                $currentVariables = Join-Path (Join-Path $profiles $currentProfile) 'Variables'
+                if (-not (Test-Path -LiteralPath $currentVariables)) { New-Item -Path $currentVariables -Force | Out-Null }
+            }
+            foreach ($profile in @(Get-ChildItem -LiteralPath $profiles -ErrorAction SilentlyContinue)) {
+                $variables = Join-Path $profile.PSPath 'Variables'
+                if (Test-Path -LiteralPath $variables) { $variables }
+            }
+        }
+    }
+}
+
+function Get-TrustedPathEntries {
+    param([string]$Key)
+    @(([string](Get-ItemProperty -LiteralPath $Key -ErrorAction SilentlyContinue).TRUSTEDPATHS) -split ';' | Where-Object { $_ })
+}
+
+# With SECURELOAD=1 AutoCAD asks before loading the LISP from %APPDATA% ("not located in a trusted folder",
+# seen live on AutoCAD 2025). Trusting only the bundle's Contents folder removes that prompt (approved by the
+# owner). Existing entries are kept; AutoCAD reads the value when it starts.
+function Add-AutoCadTrustedPath {
+    param([string]$Path, [string]$RegistryRoot = 'HKCU:\Software\Autodesk\AutoCAD')
+    $updated = 0
+    foreach ($variables in @(Get-AutoCadProfileVariableKeys $RegistryRoot)) {
+        $entries = @(Get-TrustedPathEntries $variables)
+        if (@($entries | Where-Object { $_.TrimEnd('\') -ieq $Path.TrimEnd('\') }).Count) { continue }
+        Set-ItemProperty -LiteralPath $variables -Name TRUSTEDPATHS -Value (@($entries + $Path) -join ';')
+        $updated++
+    }
+    $updated
+}
+
+function Remove-AutoCadTrustedPath {
+    param([string]$Path, [string]$RegistryRoot = 'HKCU:\Software\Autodesk\AutoCAD')
+    $updated = 0
+    foreach ($variables in @(Get-AutoCadProfileVariableKeys $RegistryRoot)) {
+        $entries = @(Get-TrustedPathEntries $variables)
+        $kept = @($entries | Where-Object { $_.TrimEnd('\') -ine $Path.TrimEnd('\') })
+        if ($kept.Count -eq $entries.Count) { continue }
+        Set-ItemProperty -LiteralPath $variables -Name TRUSTEDPATHS -Value ($kept -join ';')
+        $updated++
+    }
+    $updated
+}
+
+# Removes the panel and its trusted path. AutoCAD drops the panel at its next start.
+function Uninstall-AutoCadBundle {
+    param([string]$PluginsRoot = (Join-Path $env:APPDATA 'Autodesk\ApplicationPlugins'),
+        [string]$RegistryRoot = 'HKCU:\Software\Autodesk\AutoCAD')
+    $target = Join-Path $PluginsRoot 'SmartAutodeskConnector.bundle'
+    $null = Remove-AutoCadTrustedPath -Path (Join-Path $target 'Contents') -RegistryRoot $RegistryRoot
+    if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Recurse -Force }
+    Write-Step 'Removed the AutoCAD Add-ins panel and its trusted path. Restart AutoCAD to finish.'
+}
+
+# Adds the Smart Autodesk Connector panel to the AutoCAD Add-ins tab for this user (no admin rights needed).
+# AutoCAD loads it at its next start.
+function Install-AutoCadBundle {
+    param([string]$Root, [string]$PluginsRoot = (Join-Path $env:APPDATA 'Autodesk\ApplicationPlugins'),
+        [string]$RegistryRoot = 'HKCU:\Software\Autodesk\AutoCAD')
+    $source = Join-Path $Root 'src\autocad\SmartAutodeskConnector.bundle'
+    $target = Join-Path $PluginsRoot 'SmartAutodeskConnector.bundle'
+    $staging = Join-Path ([IO.Path]::GetTempPath()) ('SmartAutodeskConnector-' + [Guid]::NewGuid().ToString('N'))
+    try {
+        New-Item -ItemType Directory -Path (Join-Path $staging 'Contents') -Force | Out-Null
+        Copy-Item -LiteralPath (Join-Path $source 'PackageContents.xml') -Destination $staging -Force
+        Get-ChildItem -LiteralPath (Join-Path $source 'Contents') -File | Copy-Item -Destination (Join-Path $staging 'Contents') -Force
+        New-AutoCadCuix -SourceDirectory (Join-Path $source 'Contents\cuix-source') -AssetsDirectory (Join-Path $Root 'assets') `
+            -Destination (Join-Path $staging 'Contents\SmartAutodeskConnector.cuix')
+        New-Item -ItemType Directory -Path (Join-Path $target 'Contents') -Force | Out-Null
+        # File by file, so a copy AutoCAD has open is reported instead of leaving a half-removed bundle.
+        Get-ChildItem -LiteralPath $staging -Recurse -File | ForEach-Object {
+            Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $target $_.FullName.Substring($staging.Length).TrimStart('\')) -Force
+        }
+    }
+    finally {
+        if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+    $trusted = Add-AutoCadTrustedPath -Path (Join-Path $target 'Contents') -RegistryRoot $RegistryRoot
+    if ($trusted -gt 0) { Write-Step ("Added the panel's folder to AutoCAD's trusted paths in {0} profile(s)." -f $trusted) }
+    Write-Step ("Installed the AutoCAD Add-ins panel at {0}. Restart AutoCAD to load it." -f $target)
+}
+
+function Install-AutoCadBundleStep {
+    param([string]$Root)
+    Write-InstallPhase 'autocad'
+    $releases = @(Get-AutoCadReleases)
+    if ($releases.Count -eq 0) {
+        Write-Step 'AutoCAD was not detected, so its Add-ins panel was skipped.'
+        Write-InstallResult 'autocad' 'skipped' 'AutoCAD is not installed'
+        return
+    }
+    try {
+        Install-AutoCadBundle $Root
+        Write-InstallResult 'autocad' 'ok' 'restart AutoCAD to load it'
+    }
+    catch {
+        # The connector itself works without the panel; report and carry on.
+        Write-Warning ('The AutoCAD Add-ins panel could not be installed: ' + $_.Exception.Message)
+        Write-InstallResult 'autocad' 'failed' 'close AutoCAD and run setup again'
+    }
+}
+
 function Test-AutodeskRegistration {
     $codex = Get-OptionalCommand 'codex'
     if ($codex) {
@@ -1726,6 +1868,7 @@ try {
     }
 
     switch ($Action) {
+        'UninstallAutoCadPanel' { Uninstall-AutoCadBundle }
         'Status' {
             if ($Product -in @('All','AutoCAD')) { Test-AutoCadSetup }
             if ($Product -in @('All','Revit')) { Test-RevitSetup }
@@ -1758,6 +1901,7 @@ try {
                 Write-Step 'Revit 2024 was not detected, so its add-in was skipped.'
                 Write-InstallResult 'revit' 'skipped' 'Revit 2024 is not installed'
             }
+            if ($Product -in @('All','AutoCAD')) { Install-AutoCadBundleStep $root }
             Write-InstallPhase 'updates'
             $updateState = Read-UpdateState
             if ($updateState.PSObject.Properties['notifications_user_disabled'] -and $updateState.notifications_user_disabled) {
@@ -1794,6 +1938,7 @@ try {
             elseif ($Product -in @('All','Revit')) {
                 Write-Step 'Revit 2024 was not detected, so its add-in was skipped.'
             }
+            if ($Product -in @('All','AutoCAD')) { Install-AutoCadBundleStep $root }
             Register-DetectedAiClients $root
             Set-InstalledRelease -Version ((Get-Content -LiteralPath (Join-Path $root 'VERSION') -Raw).Trim()) `
                 -Sha256 $(if ((Test-Path -LiteralPath (Join-Path $root '.bim-cad-source.json'))) {

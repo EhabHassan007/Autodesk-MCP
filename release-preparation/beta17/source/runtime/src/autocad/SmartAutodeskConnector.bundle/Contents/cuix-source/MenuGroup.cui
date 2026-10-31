@@ -1,0 +1,53 @@
+<?xml version="1.0"?>
+<MenuGroup xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" Name="SMARTAUTODESKCONNECTOR" DisplayName="Smart Autodesk Connector">
+  <MacroGroup Name="SmartAutodeskConnectorMacros" Citizen="A">
+    <MenuMacro UID="MM_SAC_SKILLSSYNC">
+      <Macro type="Any">
+        <Revision MajorVersion="16" MinorVersion="2" UserVersion="0" />
+        <ModifiedRev MajorVersion="19" MinorVersion="1" UserVersion="0" />
+        <Name xlate="true" UID="XLS_SAC_SKILLSSYNC_NAME">Skills Sync</Name>
+        <Command>^C^C_SACSKILLSSYNC</Command>
+        <HelpString xlate="true" UID="XLS_SAC_SKILLSSYNC_HELP">Send your saved skills for review and download the latest approved team skills.</HelpString>
+        <SmallImage Name="sac-skills-sync-16.png" />
+        <LargeImage Name="sac-skills-sync-32.png" />
+        <CLICommand xlate="true" UID="XLS_SAC_SKILLSSYNC_CLI">SACSKILLSSYNC</CLICommand>
+      </Macro>
+    </MenuMacro>
+    <MenuMacro UID="MM_SAC_CHECKUPDATES">
+      <Macro type="Any">
+        <Revision MajorVersion="16" MinorVersion="2" UserVersion="0" />
+        <ModifiedRev MajorVersion="19" MinorVersion="1" UserVersion="0" />
+        <Name xlate="true" UID="XLS_SAC_CHECKUPDATES_NAME">Check Updates</Name>
+        <Command>^C^C_SACCHECKUPDATES</Command>
+        <HelpString xlate="true" UID="XLS_SAC_CHECKUPDATES_HELP">Check for a new version of Smart Autodesk Connector. Updates install by themselves when Revit and AutoCAD are closed.</HelpString>
+        <SmallImage Name="sac-check-updates-16.png" />
+        <LargeImage Name="sac-check-updates-32.png" />
+        <CLICommand xlate="true" UID="XLS_SAC_CHECKUPDATES_CLI">SACCHECKUPDATES</CLICommand>
+      </Macro>
+    </MenuMacro>
+    <MenuMacro UID="MM_SAC_SETTINGS">
+      <Macro type="Any">
+        <Revision MajorVersion="16" MinorVersion="2" UserVersion="0" />
+        <ModifiedRev MajorVersion="19" MinorVersion="1" UserVersion="0" />
+        <Name xlate="true" UID="XLS_SAC_SETTINGS_NAME">Settings</Name>
+        <Command>^C^C_SACSETTINGS</Command>
+        <HelpString xlate="true" UID="XLS_SAC_SETTINGS_HELP">Turn automatic updates on or off.</HelpString>
+        <SmallImage Name="sac-settings-16.png" />
+        <LargeImage Name="sac-settings-32.png" />
+        <CLICommand xlate="true" UID="XLS_SAC_SETTINGS_CLI">SACSETTINGS</CLICommand>
+      </Macro>
+    </MenuMacro>
+    <MenuMacro UID="MM_SAC_STATUS">
+      <Macro type="Any">
+        <Revision MajorVersion="16" MinorVersion="2" UserVersion="0" />
+        <ModifiedRev MajorVersion="19" MinorVersion="1" UserVersion="0" />
+        <Name xlate="true" UID="XLS_SAC_STATUS_NAME">Connection Status</Name>
+        <Command>^C^C_SACSTATUS</Command>
+        <HelpString xlate="true" UID="XLS_SAC_STATUS_HELP">See whether AutoCAD, Codex, Claude and the connector agent are connected.</HelpString>
+        <SmallImage Name="sac-connection-status-16.png" />
+        <LargeImage Name="sac-connection-status-32.png" />
+        <CLICommand xlate="true" UID="XLS_SAC_STATUS_CLI">SACSTATUS</CLICommand>
+      </Macro>
+    </MenuMacro>
+  </MacroGroup>
+</MenuGroup>
