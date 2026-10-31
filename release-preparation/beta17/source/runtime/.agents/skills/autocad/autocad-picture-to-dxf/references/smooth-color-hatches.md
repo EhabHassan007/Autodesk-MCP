@@ -29,7 +29,7 @@ The user subsequently approved this curved colored version with "perfect". It is
 - Open the generated file read-only in live AutoCAD when authorized, evaluate hatches, check positive filled area and true colors, ensure FILLMODE is enabled, and regenerate. Entity count alone missed a prior zero-area boundary problem.
 - If AutoCAD rejects calls as busy, do not cancel the user's command. Retry once, then ask the user to finish the command/dialog before resuming.
 
-## Demonstrated result â 2026-10-03
+## Demonstrated result — 2026-10-03
 
 The demonstrated project used image-specific tracing code that is not part of this portable skill. It is evidence for the method, not a generic plug-and-play converter.
 
