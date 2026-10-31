@@ -272,7 +272,7 @@ export const DASHBOARD_JS = `'use strict';
 
   // ---- Skill review: uploaded skills, grouped by category, decided one at a time. ----
   const LABELS = {revit: 'Revit', autocad: 'AutoCAD', '3ds-max': '3ds Max', 'other-software': 'Other software', 'linkedin-marketing': 'LinkedIn marketing', 'branding-ci': 'Branding and CI', general: 'General', uncategorized: 'Needs a category'};
-  const FLAG_NAMES = {'secret': 'possible secret', 'personal-path': 'personal path', 'client-data': 'email or client project link'};
+  const FLAG_NAMES = {'secret': 'possible secret', 'personal-path': 'personal path', 'client-data': 'email or client project link', 'encoding': 'damaged text encoding (mojibake)'};
   const STATUS_NAMES = {new: 'new skill', changed: 'changed', moved: 'moved to another category'};
   const lineDiff = ${lineDiff.toString()};
 
@@ -327,7 +327,7 @@ export const DASHBOARD_JS = `'use strict';
     const checks = [];
     for (const b of u.checks.blocked) checks.push(el('li', {class: 'bad'}, 'Blocked: ' + b));
     for (const f of u.checks.flags) checks.push(el('li', {class: 'warn'}, f.path + ' line ' + f.line + ' — ' + (FLAG_NAMES[f.kind] || f.kind) + ': ', el('code', {}, f.text)));
-    if (!checks.length) checks.push(el('li', {class: 'ok'}, 'Passed: structure and name, file types and size, secrets, personal paths, client data (lines this upload adds).'));
+    if (!checks.length) checks.push(el('li', {class: 'ok'}, 'Passed: structure and name, file types and size, secrets, personal paths, client data, text encoding (lines this upload adds).'));
     const changed = u.files.filter(f => f.status !== 'unchanged');
     const same = u.files.filter(f => f.status === 'unchanged').map(f => f.path);
     return el('div', {class: 'upload'},

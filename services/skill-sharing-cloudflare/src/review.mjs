@@ -2,11 +2,14 @@
 // Uploaded content is untrusted. It is compared and scanned as text here, never executed.
 import { canonical, CATEGORIES, validateSkills } from './validation.mjs';
 
-// The same groups as scripts/validate-team-skill-intake.ps1, split so the owner sees why a line was flagged.
+// The same groups as scripts/validate-team-skill-intake.ps1, split so the owner sees why a line was flagged,
+// plus damaged text encoding, which that script does not check.
 export const FLAG_PATTERNS = {
   'secret':/api[_ -]?key|access[_ -]?token|client[_ -]?secret|password\s*[:=]|github_pat_|gh[pousr]_[a-z0-9_]+|begin (?:rsa|openssh|ec) private key|-----begin .*private key/i,
   'personal-path':/[a-z]:\\users\\|\\\\[^\\\s]+\\[^\\\s]+/i,
-  'client-data':/autodesk docs:\/\/|bim 360:\/\/|acc:\/\/|\b[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}\b/i
+  'client-data':/autodesk docs:\/\/|bim 360:\/\/|acc:\/\/|\b[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}\b/i,
+  // UTF-8 decoded as Windows-1252/Latin-1, e.g. a dash arriving as "Ã¢ÂÂ" or "â€”".
+  'encoding':/[ÂÃ][\u0080-¿]|â€/
 };
 const MAX_FLAGS = 25;
 
