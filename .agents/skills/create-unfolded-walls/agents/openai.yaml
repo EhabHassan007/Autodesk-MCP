@@ -1,0 +1,4 @@
+interface:
+  display_name: "Create unfolded walls"
+  short_description: "Develop measured walls with dynamic blocks and doors"
+  default_prompt: "Use $create-unfolded-walls to develop the marked plan walls with the existing dynamic wall block, measured lengths, and specified wall and door heights."
