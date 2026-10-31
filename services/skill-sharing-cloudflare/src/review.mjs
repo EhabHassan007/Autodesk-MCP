@@ -9,7 +9,8 @@ export const FLAG_PATTERNS = {
   'personal-path':/[a-z]:\\users\\|\\\\[^\\\s]+\\[^\\\s]+/i,
   'client-data':/autodesk docs:\/\/|bim 360:\/\/|acc:\/\/|\b[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}\b/i,
   // UTF-8 decoded as Windows-1252/Latin-1, e.g. a dash arriving as "Ã¢ÂÂ" or "â€”".
-  'encoding':/[ÂÃ][\u0080-¿]|â€/
+  // After a single Latin-1 decode, "—" reads as "â" plus invisible C1 controls (U+0080-U+009F), which real text never holds.
+  'encoding':/[ÂÃ][\u0080-¿]|â€|[Â-ô][\u0080-\u009F]/
 };
 const MAX_FLAGS = 25;
 
