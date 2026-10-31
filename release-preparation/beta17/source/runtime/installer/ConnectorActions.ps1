@@ -70,9 +70,9 @@ function Get-SkillsSyncOutcome {
         foreach ($key in 'sync_submitted', 'sync_added', 'sync_updated', 'sync_preserved', 'sync_approved_total') { $n[$key] = [int](Get-ActionValue $result $key) }
         $plural = { param($count) if ($count -eq 1) { '' } else { 's' } }
         $body = "Sent for review:  $($n.sync_submitted) saved skill$(& $plural $n.sync_submitted)`n" +
-            "Downloaded:  $($n.sync_added) new and $($n.sync_updated) updated approved skill$(& $plural ($n.sync_added + $n.sync_updated))`n" +
+            "Downloaded:  $($n.sync_added) new and $($n.sync_updated) updated approved AutoCAD skill$(& $plural ($n.sync_added + $n.sync_updated))`n" +
             $(if ($n.sync_preserved -gt 0) { "Kept your local edits:  $($n.sync_preserved) skill$(& $plural $n.sync_preserved)`n" } else { '' }) +
-            "Approved team skills available:  $($n.sync_approved_total)" +
+            "Approved AutoCAD skills available:  $($n.sync_approved_total)" +
             $(if ($status -eq 'partial') { "`n`n$reason" } else { "`n`nRestart Codex or Claude to see new skills." })
         return [pscustomobject]@{ Title = $(if ($status -eq 'ok') { 'Skills are in sync' } else { 'Skills downloaded, but not sent' })
             Body = $body; Kind = $(if ($status -eq 'ok') { 'Good' } else { 'Bad' }) }
@@ -253,8 +253,9 @@ function Show-ConnectorAction {
             switch ($Name) {
                 'SkillsSync' {
                     Start-ConnectorAgent $Root   # the agent announces the result if this window is closed first
-                    & $run 'Syncing skills...' 'Sending your saved skills for review and downloading the latest approved team skills.' `
-                        (Get-ConnectorScript 'weekly-skill-collection.ps1' $Root) ('-Action Sync -StateRoot "{0}"' -f $script:ActionPaths.StateRoot)
+                    # From AutoCAD, only approved AutoCAD skills are downloaded; saved skills of any kind are still sent.
+                    & $run 'Syncing skills...' 'Sending your saved skills for review and downloading the latest approved AutoCAD skills.' `
+                        (Get-ConnectorScript 'weekly-skill-collection.ps1' $Root) ('-Action Sync -Product AutoCAD -StateRoot "{0}"' -f $script:ActionPaths.StateRoot)
                 }
                 'CheckUpdates' {
                     & $run 'Checking for updates...' 'Looking for a newer approved version of Smart Autodesk Connector.' `
