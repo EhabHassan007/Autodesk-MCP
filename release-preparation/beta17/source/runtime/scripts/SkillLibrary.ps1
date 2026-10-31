@@ -71,3 +71,72 @@ function Get-SkillFolders {
         }
     }
 }
+
+# UTF-8 text that was once read as Latin-1 or Windows-1252, possibly more than once, so an em dash
+# turns into three or six accented characters. Each character in such a run stands for one byte of the original UTF-8.
+$script:StrictUtf8 = New-Object Text.UTF8Encoding($false, $true)
+$script:MojibakeBytes = @{}
+foreach ($value in 0x80..0x9F) {
+    $character = [Text.Encoding]::GetEncoding(1252).GetString([byte[]]@($value))[0]
+    if ([int]$character -ne $value) { $script:MojibakeBytes[$character] = $value }
+}
+$script:MojibakeRun = '[\u0080-\u00FF' + [regex]::Escape(-join $script:MojibakeBytes.Keys) + ']{2,}'
+
+function Get-MojibakeByte {
+    param([char]$Character)
+    if ([int]$Character -le 0xFF) { return [int]$Character }
+    $script:MojibakeBytes[$Character]
+}
+
+function Repair-MojibakeRun {
+    # Decodes each complete, valid UTF-8 sequence in the run and keeps every other character as it was.
+    param([string]$Run)
+    $text = New-Object Text.StringBuilder
+    $i = 0
+    while ($i -lt $Run.Length) {
+        $lead = Get-MojibakeByte $Run[$i]
+        $length = if ($lead -ge 0xC2 -and $lead -le 0xDF) { 2 } elseif ($lead -ge 0xE0 -and $lead -le 0xEF) { 3 } elseif ($lead -ge 0xF0 -and $lead -le 0xF4) { 4 } else { 0 }
+        if ($length -and $i + $length -le $Run.Length) {
+            $bytes = [byte[]]@(for ($k = 0; $k -lt $length; $k++) { Get-MojibakeByte $Run[$i + $k] })
+            try {
+                [void]$text.Append($script:StrictUtf8.GetString($bytes))
+                $i += $length
+                continue
+            }
+            catch { }
+        }
+        [void]$text.Append($Run[$i])
+        $i++
+    }
+    $text.ToString()
+}
+
+function Repair-Mojibake {
+    # Undoes up to three wrong decodings. Correct text, including Arabic and real dashes or quotes, is unchanged.
+    param([string]$Text)
+    for ($pass = 0; $pass -lt 3; $pass++) {
+        $repaired = [regex]::Replace($Text, $script:MojibakeRun, { param($match) Repair-MojibakeRun $match.Value })
+        if ($repaired -ceq $Text) { break }
+        $Text = $repaired
+    }
+    $Text
+}
+
+function Read-SkillText {
+    # A skill's text files by relative path, read as UTF-8 without a BOM and with mojibake repaired.
+    param([string]$Path)
+    $files = @{}
+    foreach ($file in Get-ChildItem -LiteralPath $Path -Recurse -File -Force) {
+        $relative = $file.FullName.Substring($Path.Length).TrimStart('\','/').Replace('\','/')
+        # Plain .NET read: Get-Content attaches PSPath/PSDrive properties that Windows PowerShell 5.1's
+        # ConvertTo-Json serialises recursively, turning a small skill into gigabytes.
+        $files[$relative] = Repair-Mojibake ([IO.File]::ReadAllText($file.FullName, [Text.Encoding]::UTF8).TrimStart([char]0xFEFF))
+    }
+    $files
+}
+
+function Get-SkillTextKey {
+    # Compares skills by repaired text, so a corrupted copy of an approved skill matches the approved one.
+    param([hashtable]$Files)
+    ($Files.Keys | Sort-Object | ForEach-Object { $_ + "`0" + $Files[$_] }) -join "`0`0"
+}
