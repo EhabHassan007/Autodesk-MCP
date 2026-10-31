@@ -46,7 +46,7 @@ _No approved skills yet._
 
 ### LinkedIn and marketing
 
-_No approved skills yet._
+- [linkedin-profile-optimizer](linkedin-marketing/linkedin-profile-optimizer/SKILL.md): Optimize LinkedIn profile for searchability, recruiter visibility, and engagement
 
 ### Personal branding and corporate identity
 

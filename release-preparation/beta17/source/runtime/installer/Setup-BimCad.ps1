@@ -1346,14 +1346,28 @@ function Get-AutoCadReleases {
     @(Get-ChildItem -LiteralPath $root -ErrorAction SilentlyContinue | Select-Object -ExpandProperty PSChildName)
 }
 
+function Get-AutoCadButtonIcons {
+    param([string]$AssetsDirectory)
+    $images = @(Get-ChildItem -LiteralPath $AssetsDirectory -Filter 'sac-*.png' -File | Sort-Object Name)
+    if ($images.Count -eq 0) { throw "The AutoCAD button icons are missing from $AssetsDirectory." }
+    $images
+}
+
 # A .cuix is an OPC zip: the parts in the bundle's cuix-source folder plus the button icons from assets.
+# Packed like Autodesk's own AppManager.cuix, whose ribbon icons show: PNGs not compressed (deflate level 0; .NET
+# Framework cannot write stored entries) and every part listed in Menu_Package_Info.xml. Without that list AutoCAD
+# 2025 showed our buttons as plain text.
 function New-AutoCadCuix {
     param([string]$SourceDirectory, [string]$AssetsDirectory, [string]$Destination)
     Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
     $parts = @('[Content_Types].xml', '_rels/.rels', 'Header.cui', 'MenuGroup.cui', 'RibbonRoot.cui')
-    $images = @(Get-ChildItem -LiteralPath $AssetsDirectory -Filter 'sac-*.png' -File | Sort-Object Name)
-    if ($images.Count -eq 0) { throw "The AutoCAD button icons are missing from $AssetsDirectory." }
+    $images = @(Get-AutoCadButtonIcons $AssetsDirectory)
     if (Test-Path -LiteralPath $Destination) { Remove-Item -LiteralPath $Destination -Force }
+    $modified = [DateTimeOffset]::Now.ToString('o', [Globalization.CultureInfo]::InvariantCulture)
+    $listed = @('Header.cui', 'MenuGroup.cui', 'RibbonRoot.cui') + @($images | ForEach-Object { $_.Name }) + 'VirtualMNRRoot' + 'Menu_Package_Info.xml'
+    $packageInfo = "<?xml version=`"1.0`" encoding=`"utf-8`"?>`r`n<MenuPackageParts>`r`n" +
+        (($listed | ForEach-Object { '  <PartData PartData_Name="/{0}" PartData_Modified="{1}" />' -f $_, $modified }) -join "`r`n") +
+        "`r`n</MenuPackageParts>"
     $zip = [IO.Compression.ZipFile]::Open($Destination, 'Create')
     try {
         foreach ($part in $parts) {
@@ -1362,10 +1376,22 @@ function New-AutoCadCuix {
             $null = [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $source, $part, [IO.Compression.CompressionLevel]::Optimal)
         }
         foreach ($image in $images) {
-            $null = [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $image.FullName, $image.Name, [IO.Compression.CompressionLevel]::Optimal)
+            $null = [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $image.FullName, $image.Name, [IO.Compression.CompressionLevel]::NoCompression)
         }
+        $writer = New-Object IO.StreamWriter($zip.CreateEntry('Menu_Package_Info.xml', [IO.Compression.CompressionLevel]::Optimal).Open(), (New-Object Text.UTF8Encoding($false)))
+        try { $writer.Write($packageInfo) } finally { $writer.Dispose() }
     }
     finally { $zip.Dispose() }
+}
+
+# AutoCAD keeps its own copy of a loaded partial menu in each release's roaming Support folder (seen on 2025).
+# A stale copy can keep the old panel, so remove ours by its exact name; AutoCAD takes the new one from the bundle.
+function Remove-AutoCadMenuCopies {
+    param([string]$RoamingRoot = (Join-Path $env:APPDATA 'Autodesk'))
+    foreach ($copy in @(Get-ChildItem -Path (Join-Path $RoamingRoot 'AutoCAD *\R*\*\Support\SmartAutodeskConnector.cuix') -File -ErrorAction SilentlyContinue)) {
+        try { Remove-Item -LiteralPath $copy.FullName -Force -ErrorAction Stop }
+        catch { Write-Warning ("Could not replace the old panel menu {0}; close AutoCAD and run setup again." -f $copy.FullName) }
+    }
 }
 
 # AutoCAD keeps SECURELOAD and TRUSTEDPATHS per profile, in
@@ -1427,9 +1453,10 @@ function Remove-AutoCadTrustedPath {
 # Removes the panel and its trusted path. AutoCAD drops the panel at its next start.
 function Uninstall-AutoCadBundle {
     param([string]$PluginsRoot = (Join-Path $env:APPDATA 'Autodesk\ApplicationPlugins'),
-        [string]$RegistryRoot = 'HKCU:\Software\Autodesk\AutoCAD')
+        [string]$RegistryRoot = 'HKCU:\Software\Autodesk\AutoCAD', [string]$RoamingRoot = (Join-Path $env:APPDATA 'Autodesk'))
     $target = Join-Path $PluginsRoot 'SmartAutodeskConnector.bundle'
     $null = Remove-AutoCadTrustedPath -Path (Join-Path $target 'Contents') -RegistryRoot $RegistryRoot
+    Remove-AutoCadMenuCopies $RoamingRoot
     if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Recurse -Force }
     Write-Step 'Removed the AutoCAD Add-ins panel and its trusted path. Restart AutoCAD to finish.'
 }
@@ -1438,7 +1465,7 @@ function Uninstall-AutoCadBundle {
 # AutoCAD loads it at its next start.
 function Install-AutoCadBundle {
     param([string]$Root, [string]$PluginsRoot = (Join-Path $env:APPDATA 'Autodesk\ApplicationPlugins'),
-        [string]$RegistryRoot = 'HKCU:\Software\Autodesk\AutoCAD')
+        [string]$RegistryRoot = 'HKCU:\Software\Autodesk\AutoCAD', [string]$RoamingRoot = (Join-Path $env:APPDATA 'Autodesk'))
     $source = Join-Path $Root 'src\autocad\SmartAutodeskConnector.bundle'
     $target = Join-Path $PluginsRoot 'SmartAutodeskConnector.bundle'
     $staging = Join-Path ([IO.Path]::GetTempPath()) ('SmartAutodeskConnector-' + [Guid]::NewGuid().ToString('N'))
@@ -1448,6 +1475,9 @@ function Install-AutoCadBundle {
         Get-ChildItem -LiteralPath (Join-Path $source 'Contents') -File | Copy-Item -Destination (Join-Path $staging 'Contents') -Force
         New-AutoCadCuix -SourceDirectory (Join-Path $source 'Contents\cuix-source') -AssetsDirectory (Join-Path $Root 'assets') `
             -Destination (Join-Path $staging 'Contents\SmartAutodeskConnector.cuix')
+        # Also beside the .cuix, in case AutoCAD looks the icons up as files on the bundle's paths.
+        Get-AutoCadButtonIcons (Join-Path $Root 'assets') | Copy-Item -Destination (Join-Path $staging 'Contents') -Force
+        Remove-AutoCadMenuCopies $RoamingRoot
         New-Item -ItemType Directory -Path (Join-Path $target 'Contents') -Force | Out-Null
         # File by file, so a copy AutoCAD has open is reported instead of leaving a half-removed bundle.
         Get-ChildItem -LiteralPath $staging -Recurse -File | ForEach-Object {
