@@ -1,4 +1,4 @@
-Smart Autodesk Connector 1.0.0-beta.18 — central-service pilot
+Smart Autodesk Connector 1.0.0-beta.19 — central-service pilot
 
 This is an administrator pilot. Automatic team sharing requires the dedicated GitHub App, Render deployment and per-PC enrollment; those are not configured yet.
 
@@ -19,4 +19,4 @@ Still outstanding: live GitHub App and HTTPS hosting, Windows device enrollment/
 
 Keep this release as a pilot until those checks pass. Beta15 remains the public Latest release; no team update notification has been enabled for beta17.
 
-SHA-256: 74756F4389992B4489797C6581DA8EDDEF8B5BA55B273701CA0AC82BB8BC0EB6
+SHA-256: AAACD81340EC4CD30211B7DF2C367E56D0AE629F286BE621E812DB6454A099B6
