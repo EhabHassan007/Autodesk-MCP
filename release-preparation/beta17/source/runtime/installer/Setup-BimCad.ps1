@@ -767,6 +767,10 @@ function Get-Repository {
             }
             Write-Step 'Installing the downloaded package to a permanent local folder...'
             New-Item -ItemType Directory -Path $destination -Force | Out-Null
+            # The shipped skill library is replaced, not merged: an older install keeps skills flat, and merging
+            # would leave every skill twice next to the new category folders. Approved team skills live elsewhere.
+            $installedSkills = Join-Path $destination '.agents\skills'
+            if (Test-Path -LiteralPath $installedSkills) { Remove-Item -LiteralPath $installedSkills -Recurse -Force }
             foreach ($entry in @('installer','scripts','src','assets','.agents','README.md','REMOTE-CLAUDE.md','SKILL-SUBMISSIONS.md','VERSION','TESTING.md')) {
                 $item = Join-Path $source $entry
                 if (Test-Path -LiteralPath $item) {
