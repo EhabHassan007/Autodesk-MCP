@@ -1,4 +1,4 @@
-Smart Autodesk Connector 1.0.0-beta.18 — central-service pilot
+Smart Autodesk Connector 1.0.0-beta.19 — central-service pilot
 
 This installer is for a pilot after your administrator deploys the central skill service.
 Extract the ZIP completely. Save work and close Revit. Run INSTALL Smart Autodesk Connector.cmd, then restart Revit and AI clients.
