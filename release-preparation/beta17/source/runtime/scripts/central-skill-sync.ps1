@@ -151,24 +151,44 @@ foreach($root in @((Join-Path $RepositoryRoot '.agents/skills'),(Join-Path $Stat
   $approvedText[$approvedSkill.Name]+=Get-SkillTextKey (Read-SkillText $approvedSkill.Path)
  }
 }
-$skills=New-Object System.Collections.Generic.List[object]
-$names=@{}
-$submissionBlocked=$false
+# Exact copies of an approved version this PC installed earlier are not personal edits, so they are not sent.
+$installedApproved=@{}
+$ledgerFile=Join-Path $StateRoot 'managed-skill-hashes.json'
+if(Test-Path $ledgerFile){foreach($p in (Get-Content $ledgerFile -Raw|ConvertFrom-Json).PSObject.Properties){$installedApproved[[string]$p.Value]=$true}}
+$candidateSources=@{}
+$sourcesFile=Join-Path $review.FullName 'sources.json'
+if(Test-Path $sourcesFile){foreach($p in (Get-Content $sourcesFile -Raw|ConvertFrom-Json).PSObject.Properties){$candidateSources[$p.Name]=[string]$p.Value}}
+$variants=[ordered]@{}
 foreach($folder in @(Get-ChildItem (Join-Path $review.FullName 'candidates') -Directory)){
  try{$name=Get-SkillName $folder.FullName;Test-SafeCandidate $folder.FullName}
  catch{Write-Warning ('Skipped flagged skill: '+$folder.Name);continue}
  if($excluded.ContainsKey($name.ToLowerInvariant())){Remove-Item -LiteralPath $folder.FullName -Recurse -Force;continue}
+ if($installedApproved.ContainsKey((Get-DirectoryHash $folder.FullName))){continue}
  $files=Read-SkillText $folder.FullName
  $hash=Get-SkillTextKey $files
  if($approvedText.ContainsKey($name) -and $approvedText[$name] -ccontains $hash){continue}
- if($names.ContainsKey($name)){
-  if($names[$name] -cne $hash){$submissionBlocked=$true;Write-Warning ('Conflicting saved skill variants; submissions paused: '+$name)}
+ if(-not $variants.Contains($name)){$variants[$name]=[ordered]@{}}
+ if(-not $variants[$name].Contains($hash)){$variants[$name][$hash]=@{files=$files;sources=@()}}
+ $source=if($candidateSources.ContainsKey($folder.Name)){$candidateSources[$folder.Name]}else{'another skill folder'}
+ if($variants[$name][$hash].sources -notcontains $source){$variants[$name][$hash].sources+=$source}
+}
+# Two different saved copies of one skill: the service cannot tell which is meant, so only that skill waits.
+$skills=New-Object System.Collections.Generic.List[object]
+$names=@{}
+$conflicts=@()
+foreach($name in $variants.Keys){
+ if($variants[$name].Count -gt 1){
+  $where=@($variants[$name].Values|ForEach-Object {$_.sources}|Select-Object -Unique)
+  $conflicts+=('{0} ({1})' -f $name,($where -join ', '))
+  Write-Warning ('Different saved copies of one skill; not sent: '+$name)
   continue
  }
- $names[$name]=$hash
- $skills.Add(@{name=$name;files=$files})
+ $only=@($variants[$name].Values)[0]
+ $names[$name]=$true
+ $skills.Add(@{name=$name;files=$only.files})
 }
-if($Preview){@{status='preview';skills=@($names.Keys);review=$review.FullName}|ConvertTo-Json -Depth 5;exit 0}
+$conflictNote=if($conflicts.Count){'Not sent, because this PC has two different copies of: '+($conflicts -join '; ')+'. Keep the copy you want, delete the other, then run Skills Sync again.'}else{''}
+if($Preview){@{status='preview';skills=@($names.Keys);conflicts=@($conflicts);review=$review.FullName}|ConvertTo-Json -Depth 5;exit 0}
 $configPath=Join-Path $StateRoot 'service.json'
 if(-not(Test-Path $configPath)){
  Write-SyncResult @{status='not_enrolled';candidates=$skills.Count;reason='This computer has not joined the team skill service yet. Run the team installer, or ask your administrator.'}
@@ -187,9 +207,8 @@ $token=$null
 try{
  $base=$uri.AbsoluteUri.TrimEnd('/')
  $submissionFailure=$null
- $summary=@{status='ok';candidates=$skills.Count;submitted=0;submission='none';pull_request='';categories=@($Categories)}
+ $summary=@{status='ok';candidates=$skills.Count;withheld=$conflicts.Count;submitted=0;submission='none';pull_request='';categories=@($Categories)}
  try {
- if($submissionBlocked){throw 'Conflicting saved skills need administrator review.'}
  if($skills.Count){
   $body=@{skills=@($skills.ToArray())}|ConvertTo-Json -Depth 20 -Compress
   if([Text.Encoding]::UTF8.GetByteCount($body) -gt 2MB){throw 'Skill batch exceeds 2 MB. An administrator must split the review batch.'}
@@ -217,8 +236,9 @@ try{
  $summary.preserved=$library.preserved;$summary.commit=[string]$approved.commit
  Write-Output ('Approved skill library synchronized. Commit: '+$approved.commit)
  if($submissionFailure){
-  $summary.status='partial';$summary.reason='Approved skills were downloaded, but your saved skills could not be sent for review: '+$submissionFailure
+  $summary.status='partial';$summary.reason=('Approved skills were downloaded, but your saved skills could not be sent for review: '+$submissionFailure+' '+$conflictNote).Trim()
  }
+ elseif($conflictNote){$summary.status='partial';$summary.reason=$conflictNote}
  Write-SyncResult $summary
  if($submissionFailure){throw ('Approved skills downloaded, but submission needs attention: '+$submissionFailure)}
 }
