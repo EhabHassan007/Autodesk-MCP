@@ -107,6 +107,8 @@ foreach ($skill in Get-SkillFolders $repositorySkills) {
 }
 
 $results = New-Object System.Collections.Generic.List[object]
+# Candidate folder -> where it came from, so Skills Sync can say where two differing copies of a skill live.
+$candidateSources = @{}
 $seen = @{}
 foreach ($source in $sources) {
     if (-not (Test-Path -LiteralPath $source.Path -PathType Container)) { continue }
@@ -131,6 +133,7 @@ foreach ($source in $sources) {
         if ($status -ne 'IDENTICAL') {
             $targetName = "{0}-{1}" -f $skill.Name, $hash.Substring(0,8).ToLowerInvariant()
             Copy-Item -LiteralPath $skill.FullName -Destination (Join-Path $candidateDirectory $targetName) -Recurse -Force
+            $candidateSources[$targetName] = $source.Label
         }
 
         $results.Add([pscustomobject]@{
@@ -168,6 +171,8 @@ Set-Content -LiteralPath $reportPath -Value $lines -Encoding UTF8
 
 $zipPath = Join-Path $OutputRoot "skill-review-$computer-$stamp.zip"
 Compress-Archive -Path (Join-Path $reviewDirectory '*') -DestinationPath $zipPath -CompressionLevel Optimal
+# Written after the ZIP so it stays local: source labels only, no personal paths.
+$candidateSources | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $reviewDirectory 'sources.json') -Encoding UTF8
 
 Write-Output "Review report: $reportPath"
 Write-Output "Review package: $zipPath"

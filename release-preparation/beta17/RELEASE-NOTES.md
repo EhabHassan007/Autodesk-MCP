@@ -8,6 +8,7 @@ This is an administrator pilot. Automatic team sharing requires the dedicated Gi
 - Fixes a Windows PowerShell 5.1 hang when reading workflow text through MCP. Workflow content is now read as plain UTF-8, preventing file metadata from expanding during JSON serialization.
 - `connection_status` now checks AutoCAD and Revit together and succeeds when either is reachable, so an AutoCAD-only user is no longer told the connector is not connected while Revit is closed.
 - Existing local skill edits and disabled-update preferences are preserved.
+- Skills Sync no longer stops every submission when one skill has two different saved copies (for example in Codex and in Claude). Only that skill is held back, and the result names it and where both copies are. Unedited copies of an earlier approved version are no longer treated as saved skills.
 
 Validation on 2026-10-28: six regression scripts passed on a GitHub-hosted Windows runner using Windows PowerShell 5.1: parser/client registration isolation, approved-library sync, offline central preview, task preference preservation, MCP workflow reading/path validation, and a simulated beta15 upgrade with checksum rejection and downgrade protection. The installer interface smoke test also passed. Six Python service tests previously passed with a fake GitHub backend.
 
@@ -18,4 +19,4 @@ Still outstanding: live GitHub App and HTTPS hosting, Windows device enrollment/
 
 Keep this release as a pilot until those checks pass. Beta15 remains the public Latest release; no team update notification has been enabled for beta17.
 
-SHA-256: 91C9656AD457243A70331D4C9481827C2F5F2B870DD78BE18DFE7D18F03C9351
+SHA-256: 74756F4389992B4489797C6581DA8EDDEF8B5BA55B273701CA0AC82BB8BC0EB6
