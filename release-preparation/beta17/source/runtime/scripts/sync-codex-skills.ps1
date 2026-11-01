@@ -32,7 +32,13 @@ function Get-RepositorySkills {
     }
 
     # Category folders in the library; each skill is still installed flat under its own name.
-    @(Get-SkillFolders $skillsSource | ForEach-Object { [pscustomobject]@{ Name = $_.Name; FullName = $_.Path; Category = $_.Category } } | Sort-Object Name)
+    $found = @(Get-SkillFolders $skillsSource)
+    # A flat copy left beside the category folders by an older version is ignored when the same skill is categorised.
+    $root = [IO.Path]::GetFullPath($skillsSource).TrimEnd('\')
+    $categorised = @($found | Where-Object { [IO.Path]::GetFullPath((Split-Path -Parent $_.Path)).TrimEnd('\') -ne $root } | ForEach-Object Name)
+    $stale = @($found | Where-Object { [IO.Path]::GetFullPath((Split-Path -Parent $_.Path)).TrimEnd('\') -eq $root -and $categorised -contains $_.Name })
+    if ($stale.Count) { Write-Warning ("Ignoring {0} older flat skill copies that are now in category folders." -f $stale.Count) }
+    @($found | Where-Object { $stale -notcontains $_ } | ForEach-Object { [pscustomobject]@{ Name = $_.Name; FullName = $_.Path; Category = $_.Category } } | Sort-Object Name)
 }
 
 function Test-RepositorySkills {

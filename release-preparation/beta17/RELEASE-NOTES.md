@@ -18,4 +18,4 @@ Still outstanding: live GitHub App and HTTPS hosting, Windows device enrollment/
 
 Keep this release as a pilot until those checks pass. Beta15 remains the public Latest release; no team update notification has been enabled for beta17.
 
-SHA-256: 430A0D854B62D811DF0C19D5D34B7688B4AA940A06BDF562A0E47C2726A1786F
+SHA-256: 91C9656AD457243A70331D4C9481827C2F5F2B870DD78BE18DFE7D18F03C9351
