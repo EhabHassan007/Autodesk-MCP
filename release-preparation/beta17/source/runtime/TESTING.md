@@ -1,4 +1,4 @@
-# Smart Autodesk Connector 1.0.0-beta.19 testing
+# Smart Autodesk Connector 1.0.0-beta.20 testing
 
 This package is a Windows test build for the unified AutoCAD and Revit connector.
 

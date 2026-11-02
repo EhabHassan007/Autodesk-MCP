@@ -79,6 +79,20 @@ try {
         $AdditionalSkillRoots = @($config.additional_skill_roots)
     }
     if (-not (Test-Path (Join-Path $RepositoryRoot '.agents\skills'))) { throw 'The installed connector skill library is missing.' }
+    # This copy of the helpers can lose a file (an interrupted update, antivirus). Restore it from the installed
+    # connector instead of failing, so Skills Sync keeps working until the next Install / Repair.
+    $installedScripts = Join-Path $RepositoryRoot 'scripts'
+    if ([IO.Path]::GetFullPath($PSScriptRoot) -ne [IO.Path]::GetFullPath($installedScripts)) {
+        foreach ($name in @('collect-skills-for-review.ps1','submit-team-knowledge.ps1','central-skill-sync.ps1','send-usage.ps1','SkillLibrary.ps1')) {
+            $here = Join-Path $PSScriptRoot $name
+            $source = Join-Path $installedScripts $name
+            if (-not (Test-Path -LiteralPath $here -PathType Leaf)) {
+                if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "A Skills Sync file is missing: $name. Run the installer again and choose Install / Repair." }
+                Copy-Item -LiteralPath $source -Destination $here -Force
+                [IO.File]::AppendAllText($logPath, "[$(Get-Date -Format o)] Restored missing $name from the installed connector.`r`n")
+            }
+        }
+    }
     # Usage is reported first and independently, so a failed skill submission never holds it back.
     $usageSender = Join-Path $PSScriptRoot 'send-usage.ps1'
     if ($Action -in @('Run','Sync') -and (Test-Path -LiteralPath $usageSender)) {
@@ -101,6 +115,8 @@ try {
         $summary = $summaryLine.Substring(14) | ConvertFrom-Json
         foreach ($property in $summary.PSObject.Properties) { $result['sync_' + $property.Name] = $property.Value }
     }
+    # The Skills Sync window shows sync_reason; without it, it can only guess at the internet connection.
+    if ($failure -and -not $result['sync_reason']) { $result['sync_status'] = 'failed'; $result['sync_reason'] = 'Skills Sync stopped: ' + $failure }
     [IO.File]::WriteAllText($resultPath, ($result | ConvertTo-Json -Depth 5))
     Write-Output $text
     if ($failure) { exit 1 }
@@ -108,7 +124,7 @@ try {
 catch {
     $message = $_.Exception.Message
     [IO.File]::AppendAllText($logPath, "[$(Get-Date -Format o)] FAILED: $message`r`n")
-    [IO.File]::WriteAllText($resultPath, (@{completed_at=(Get-Date -Format o);action=$Action;status='failed';details=$message}|ConvertTo-Json))
+    [IO.File]::WriteAllText($resultPath, (@{completed_at=(Get-Date -Format o);action=$Action;status='failed';details=$message;sync_status='failed';sync_reason=('Skills Sync stopped: ' + $message)}|ConvertTo-Json))
     Write-Error $message -ErrorAction Continue
     exit 1
 }
