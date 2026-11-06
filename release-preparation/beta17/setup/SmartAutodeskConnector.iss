@@ -1,9 +1,9 @@
 ; Smart Connector setup .exe (Inno Setup 6). Compiled by build.ps1; do not compile by hand.
-; The .exe only carries the connector payload and its install script. It unpacks them into
-; %LOCALAPPDATA%\SmartConnectorSetup, shows the connector's own setup window, waits for it and removes the folder. Updates still arrive
-; automatically through latest.json and the release ZIP.
+; The .exe carries the connector files and its install script. Setup itself installs the files into
+; %LOCALAPPDATA%\SmartConnectorSetup (no archive is unpacked by a script), starts the connector's own setup window,
+; waits for it and removes the folder. Updates arrive through latest.json and the release ZIP.
 #ifndef AppVersion
-  #error Define AppVersion, NumericVersion, PayloadZip, InstallScript and IconFile (build.ps1 does this).
+  #error Define AppVersion, NumericVersion, PayloadDir, InstallScript and IconFile (build.ps1 does this).
 #endif
 
 [Setup]
@@ -29,7 +29,7 @@ SolidCompression=yes
 [Files]
 ; Unpacked into one fixed folder, not %TEMP%, so a single antivirus exclusion covers setup. Removed afterwards.
 Source: "{#InstallScript}"; DestDir: "{localappdata}\SmartConnectorSetup"; Flags: ignoreversion
-Source: "{#PayloadZip}"; DestDir: "{localappdata}\SmartConnectorSetup"; DestName: "Autodesk-MCP-Payload.zip"; Flags: ignoreversion
+Source: "{#PayloadDir}\*"; DestDir: "{localappdata}\SmartConnectorSetup\Autodesk-MCP-Payload"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Code]
 function InitializeSetup(): Boolean;
@@ -49,7 +49,10 @@ begin
   Folder := ExpandConstant('{localappdata}\SmartConnectorSetup');
   { Setup is a 32-bit program; Sysnative reaches the 64-bit PowerShell that Revit and AutoCAD detection need. }
   PowerShell := ExpandConstant('{sysnative}\WindowsPowerShell\v1.0\powershell.exe');
-  Parameters := '-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File "' + Folder + '\Install-Autodesk-MCP-Connector.ps1" -Install';
+  { RemoteSigned, not Bypass: the scripts setup has just written run, and a script downloaded from the internet
+    (marked by Windows as such) would be refused. }
+  Parameters := '-NoProfile -ExecutionPolicy RemoteSigned -STA -WindowStyle Hidden -File "' + Folder +
+    '\Install-Autodesk-MCP-Connector.ps1" -Install -PayloadFolder "' + Folder + '\Autodesk-MCP-Payload"';
   { The connector's own setup window takes over; Inno Setup's window steps aside. }
   WizardForm.Hide;
   if not Exec(PowerShell, Parameters, Folder, SW_HIDE, ewWaitUntilTerminated, ResultCode) then

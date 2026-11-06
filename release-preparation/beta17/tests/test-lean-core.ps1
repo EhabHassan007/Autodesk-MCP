@@ -22,6 +22,22 @@ try {
     Assert ($outer -notmatch '-Action Sync') 'Setup still starts a hidden Skills Sync after installing'
     'PASS: no scheduled tasks, no agent, no web gateway or tunnel, no hidden work after setup'
 
+    # 1b. The setup .exe installs the files itself and starts PowerShell under RemoteSigned, not Bypass.
+    $iss = Get-Content (Join-Path $runtime '../../setup/SmartAutodeskConnector.iss') -Raw
+    Assert ($iss -match 'ExecutionPolicy RemoteSigned' -and $iss -notmatch 'ExecutionPolicy Bypass') 'Setup still starts PowerShell with the policy bypassed'
+    Assert ($iss -match 'recursesubdirs' -and $iss -match '-PayloadFolder' -and $iss -notmatch 'Payload\.zip') 'Setup still ships an archive for a script to unpack'
+    if ([Environment]::OSVersion.Platform -eq 'Win32NT') {
+        $folder = Join-Path $t 'setup-files'
+        Expand-Archive -LiteralPath (Join-Path $runtime '../Support/Autodesk-MCP-Payload.zip') -DestinationPath $folder
+        $env:LOCALAPPDATA = Join-Path $t 'smoke-local'; New-Item -ItemType Directory -Force $env:LOCALAPPDATA | Out-Null
+        $ErrorActionPreference = 'Continue'   # stderr from the child must not end this test before its exit code is read
+        $out = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -STA -File (Join-Path $runtime '../Support/Install-Autodesk-MCP-Connector.ps1') -SmokeTest -PayloadFolder (Join-Path $folder 'Autodesk-MCP-Payload') 2>&1
+        $code = $LASTEXITCODE; $ErrorActionPreference = 'Stop'
+        Assert ($code -eq 0) ("Setup does not start from installed files under RemoteSigned:`n" + ($out -join "`n"))
+        Assert (-not (Test-Path (Join-Path $env:LOCALAPPDATA 'SmartConnectorSetup'))) 'Setup unpacked an archive although it was given the installed files'
+        'PASS: setup starts from the files the .exe installed, under RemoteSigned'
+    }
+
     # 2. Revit, AutoCAD and the app share one set of day stamps and the same reminder rules.
     $cs = Get-Content (Join-Path $runtime 'src/revit/addin/ConnectorUi.cs') -Raw
     $app = Get-Content (Join-Path $runtime 'src/revit/addin/RevitMcpApplication.cs') -Raw

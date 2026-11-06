@@ -60,6 +60,9 @@ function Find-InnoCompiler {
     }
     $null
 }
+# The setup .exe carries the payload as files, which setup installs itself: no archive is unpacked by a script on the
+# PC. The payload ZIP is staged as a folder only for the compiler and removed afterwards (the TEAM payload holds the
+# join code).
 function New-SetupExe([string]$PayloadPath, [string]$Name) {
     $compiler = Find-InnoCompiler
     if (-not $compiler) {
@@ -68,10 +71,17 @@ function New-SetupExe([string]$PayloadPath, [string]$Name) {
     }
     $numeric = $version -replace '-.*$', ''
     if ($numeric -notmatch '^\d+\.\d+\.\d+$') { throw "VERSION must start with major.minor.patch: $version" }
-    & $compiler /Qp "/DAppVersion=$version" "/DNumericVersion=$numeric" "/DPayloadZip=$PayloadPath" `
-        "/DInstallScript=$(Join-Path $s 'Support\Install-Autodesk-MCP-Connector.ps1')" "/DIconFile=$(Join-Path $r 'assets\logo.ico')" `
-        "/O$b" "/F$Name" (Join-Path $b 'setup\SmartAutodeskConnector.iss')
-    if ($LASTEXITCODE -ne 0) { throw "Inno Setup could not build $Name.exe (exit $LASTEXITCODE)." }
+    $staging = Join-Path ([IO.Path]::GetTempPath()) ("setup-payload-{0}" -f [guid]::NewGuid().ToString('N'))
+    try {
+        Expand-Archive -LiteralPath $PayloadPath -DestinationPath $staging
+        $payloadDir = Join-Path $staging 'Autodesk-MCP-Payload'
+        if (-not (Test-Path -LiteralPath (Join-Path $payloadDir 'installer\Setup-BimCad.ps1') -PathType Leaf)) { throw 'The payload has no Autodesk-MCP-Payload folder.' }
+        & $compiler /Qp "/DAppVersion=$version" "/DNumericVersion=$numeric" "/DPayloadDir=$payloadDir" `
+            "/DInstallScript=$(Join-Path $s 'Support\Install-Autodesk-MCP-Connector.ps1')" "/DIconFile=$(Join-Path $r 'assets\logo.ico')" `
+            "/O$b" "/F$Name" (Join-Path $b 'setup\SmartAutodeskConnector.iss')
+        if ($LASTEXITCODE -ne 0) { throw "Inno Setup could not build $Name.exe (exit $LASTEXITCODE)." }
+    }
+    finally { if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Recurse -Force } }
     "$Name.exe"
 }
 
