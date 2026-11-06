@@ -11,6 +11,14 @@ param(
     [switch]$SmokeTest
 )
 $ErrorActionPreference = 'Stop'
+# The setup .exe only installs files, so setup itself never starts PowerShell. On the first open the setup window
+# runs instead (choose apps, team details); it opens this app again when it finishes.
+$setupPending = Join-Path $RepositoryPath 'setup\setup-pending.txt'
+$firstRunSetup = Join-Path $RepositoryPath 'setup\Install-Autodesk-MCP-Connector.ps1'
+if (-not $SmokeTest -and (Test-Path -LiteralPath $setupPending -PathType Leaf) -and (Test-Path -LiteralPath $firstRunSetup -PathType Leaf)) {
+    Start-Process powershell.exe -WindowStyle Hidden -WorkingDirectory $env:LOCALAPPDATA -ArgumentList ('-NoProfile -ExecutionPolicy RemoteSigned -STA -WindowStyle Hidden -File "{0}" -Install -PayloadFolder "{1}"' -f $firstRunSetup, $RepositoryPath)
+    exit 0
+}
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 [Windows.Forms.Application]::EnableVisualStyles()
 

@@ -1,10 +1,11 @@
 ; Smart Connector setup .exe (Inno Setup 6). Compiled by build.ps1; do not compile by hand.
-; The .exe carries the connector files and its install script. Setup itself installs the files into
-; %LOCALAPPDATA%\SmartConnectorSetup (no archive is unpacked by a script), starts the connector's own setup window,
-; waits for it and removes the folder. Updates arrive through latest.json and the release ZIP.
+; The .exe only installs files: the connector into %LOCALAPPDATA%\BIM-CAD-MCP and a Start menu entry. It runs no
+; script. The first time Smart Connector is opened from the Start menu, it shows the setup window (which AI apps and
+; Autodesk programs to connect, team details) and finishes setup. Updates arrive through latest.json and the release ZIP.
 #ifndef AppVersion
   #error Define AppVersion, NumericVersion, PayloadDir, InstallScript and IconFile (build.ps1 does this).
 #endif
+#define InstallRoot "{localappdata}\BIM-CAD-MCP"
 
 [Setup]
 AppId={{6B1E3C1A-5D2F-4F0B-9A47-3C8E2D7A9B10}
@@ -21,15 +22,36 @@ CreateAppDir=no
 Uninstallable=no
 DisableWelcomePage=yes
 DisableReadyPage=yes
-DisableFinishedPage=yes
+DisableFinishedPage=no
 ShowLanguageDialog=no
 Compression=lzma2/max
 SolidCompression=yes
 
+[Messages]
+FinishedHeadingLabel=Smart Connector is installed
+FinishedLabelNoIcons=To finish, open Smart Connector from the Start menu. It asks which AI apps (Claude, Codex) and which Autodesk programs (Revit, AutoCAD) to connect.
+FinishedLabel=To finish, open Smart Connector from the Start menu. It asks which AI apps (Claude, Codex) and which Autodesk programs (Revit, AutoCAD) to connect.
+
+[InstallDelete]
+; The shipped skill library is replaced, not merged: older versions kept skills flat, and merging would leave every
+; skill twice. Approved team skills live elsewhere and are kept.
+Type: filesandordirs; Name: "{#InstallRoot}\.agents\skills"
+; The unpack folder used by setup 1.0.0 and 1.1.0.
+Type: filesandordirs; Name: "{localappdata}\SmartConnectorSetup"
+
 [Files]
-; Unpacked into one fixed folder, not %TEMP%, so a single antivirus exclusion covers setup. Removed afterwards.
-Source: "{#InstallScript}"; DestDir: "{localappdata}\SmartConnectorSetup"; Flags: ignoreversion
-Source: "{#PayloadDir}\*"; DestDir: "{localappdata}\SmartConnectorSetup\Autodesk-MCP-Payload"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#PayloadDir}\*"; DestDir: "{#InstallRoot}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#InstallScript}"; DestDir: "{#InstallRoot}\setup"; Flags: ignoreversion
+; An administrator's enrollment file beside this setup .exe; setup imports it, encrypts it and deletes the copy.
+Source: "{src}\enrollment.json"; DestDir: "{#InstallRoot}"; Flags: external skipifsourcedoesntexist ignoreversion
+Source: "{src}\skill-service-device.json"; DestDir: "{#InstallRoot}"; Flags: external skipifsourcedoesntexist ignoreversion
+
+[Icons]
+; RemoteSigned: the scripts this setup installed run; a script Windows marks as downloaded would be refused.
+Name: "{userprograms}\Smart Connector"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; \
+  Parameters: "-NoProfile -ExecutionPolicy RemoteSigned -STA -WindowStyle Hidden -File ""{#InstallRoot}\installer\SmartConnectorApp.ps1"""; \
+  WorkingDir: "{localappdata}"; IconFilename: "{#InstallRoot}\assets\logo.ico"; \
+  Comment: "Smart Connector for Autodesk Revit and AutoCAD"; Flags: runminimized
 
 [Code]
 function InitializeSetup(): Boolean;
@@ -40,22 +62,10 @@ begin
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
-var
-  ResultCode: Integer;
-  Folder, PowerShell, Parameters: String;
 begin
   if CurStep <> ssPostInstall then
     exit;
-  Folder := ExpandConstant('{localappdata}\SmartConnectorSetup');
-  { Setup is a 32-bit program; Sysnative reaches the 64-bit PowerShell that Revit and AutoCAD detection need. }
-  PowerShell := ExpandConstant('{sysnative}\WindowsPowerShell\v1.0\powershell.exe');
-  { RemoteSigned, not Bypass: the scripts setup has just written run, and a script downloaded from the internet
-    (marked by Windows as such) would be refused. }
-  Parameters := '-NoProfile -ExecutionPolicy RemoteSigned -STA -WindowStyle Hidden -File "' + Folder +
-    '\Install-Autodesk-MCP-Connector.ps1" -Install -PayloadFolder "' + Folder + '\Autodesk-MCP-Payload"';
-  { The connector's own setup window takes over; Inno Setup's window steps aside. }
-  WizardForm.Hide;
-  if not Exec(PowerShell, Parameters, Folder, SW_HIDE, ewWaitUntilTerminated, ResultCode) then
-    MsgBox('Smart Connector setup could not start Windows PowerShell (' + SysErrorMessage(ResultCode) + ').', mbError, MB_OK);
-  DelTree(Folder, True, True, True);
+  { Smart Connector reads this on its first open and shows the setup window; setup removes it when done. }
+  SaveStringToFile(ExpandConstant('{#InstallRoot}\setup\setup-pending.txt'),
+    'Open Smart Connector from the Start menu to finish setup.', False);
 end;

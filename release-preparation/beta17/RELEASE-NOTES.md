@@ -8,7 +8,7 @@ Lean core: Smart Connector now runs nothing in the background. This removes the 
 - Usage counts for the administrator's dashboard are sent only when you run Skills Sync, never on a schedule. Setup no longer starts a hidden Skills Sync after installing.
 - Removed: the optional Claude remote gateway (a local web server published to the internet through a Cloudflare tunnel). On PCs that used it, the update stops it, removes its start-up entry and deletes its stored credentials. Administrators should also revoke those tunnels in Cloudflare. Claude Desktop, Claude Code and Codex on the same PC work as before.
 - In AutoCAD the daily check starts with the first Smart Connector button you use in a session. Loading anything at AutoCAD startup made AutoCAD ask SECURELOAD for every drawing, so that is avoided.
-- Setup file: the setup program now installs the connector files itself instead of having a PowerShell script unpack an archive, and it starts its setup window under the RemoteSigned script policy instead of bypassing the policy. A script marked by Windows as downloaded from the internet would be refused.
+- Setup file: the setup .exe now only installs files (the connector and a Start menu entry) and runs no program or script. Open Smart Connector from the Start menu to finish: the setup window asks which AI apps and Autodesk programs to connect, as before. The Start menu entry runs Smart Connector under the RemoteSigned script policy instead of bypassing it, so a script marked by Windows as downloaded from the internet would be refused.
 - The Revit add-in is now compiled in the automated tests with the same Windows compiler the PCs use, against the Revit 2024 API reference assemblies.
 
-SHA-256: A95332A0822CC48141D6020DC500D96FF802110F8D0FD8522A951629FCCA713B
+SHA-256: E1EC6E5C20F999E8AF5E6B810BCBA50F8585C1C64E352425A2521A7A3413C071
