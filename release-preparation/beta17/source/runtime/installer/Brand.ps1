@@ -1,5 +1,5 @@
-# Shared look for every Smart Autodesk Connector window. Dot-source after loading WinForms.
-$script:BrandName = 'Smart Autodesk Connector'
+# Shared look for every Smart Connector window. Dot-source after loading WinForms.
+$script:BrandName = 'Smart Connector'
 $script:BrandColors = @{
     Header     = [Drawing.Color]::FromArgb(22, 36, 61)     # deep navy, matches the logo tile
     HeaderText = [Drawing.Color]::White

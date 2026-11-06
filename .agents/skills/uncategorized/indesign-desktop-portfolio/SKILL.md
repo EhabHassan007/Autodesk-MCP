@@ -1,6 +1,7 @@
 ---
 name: indesign-desktop-portfolio
 description: Style or refine an architecture portfolio directly in desktop Adobe InDesign, including editable CV-based cover and introduction pages. Use for native INDD portfolio work and learned InDesign scripting techniques, not Adobe Express designs.
+category: uncategorized
 ---
 
 Read [the knowledge handoff](references/handbook.md) for setup, native scripting lessons, visual treatments, and validation. Use its paste-ready prompt when helping a new user get started.

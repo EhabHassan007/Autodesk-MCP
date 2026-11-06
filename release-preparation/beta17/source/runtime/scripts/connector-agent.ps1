@@ -5,7 +5,7 @@ param(
     [string]$InstallRoot = (Join-Path $env:LOCALAPPDATA 'BIM-CAD-MCP'),
     [switch]$LibraryOnly
 )
-# Smart Autodesk Connector agent: a notification-area icon that starts at sign-in.
+# Smart Connector agent: a notification-area icon that starts at sign-in.
 #  - Checks for approved updates at start, every 6 hours, and whenever Revit or AutoCAD opens
 #    (at most every 30 minutes), so a newly published version is found the next time they are opened.
 #  - When Revit or AutoCAD starts and an update is ready, shows a Windows notification.
@@ -18,6 +18,7 @@ $connectorState = Join-Path $env:LOCALAPPDATA 'AutodeskMcpConnector'
 $updateStatePath = Join-Path $connectorState 'update-state.json'
 $requestPath = Join-Path $connectorState 'update-requested.flag'
 $agentLog = Join-Path $connectorState 'agent.log'
+# Internal name, unchanged since the rename to Smart Connector so existing PCs keep one agent task.
 $taskName = 'Smart Autodesk Connector Agent - ' + [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 
 # ---------- decisions (no UI; covered by tests) ----------
@@ -103,7 +104,7 @@ function Register-AgentTask {
     $principal = New-ScheduledTaskPrincipal -UserId $identity.Name -LogonType Interactive -RunLevel Limited
     $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
     Register-ScheduledTask -TaskName $taskName -Action $taskAction -Trigger $trigger -Principal $principal -Settings $settings `
-        -Description 'Smart Autodesk Connector: update notifications, automatic updates when Revit and AutoCAD are closed, and Skills Sync.' -Force | Out-Null
+        -Description 'Smart Connector: update notifications, automatic updates when Revit and AutoCAD are closed, and Skills Sync.' -Force | Out-Null
     # Start it now as well, so notifications work without signing out first.
     try { Start-ScheduledTask -TaskName $taskName } catch { }
     "Connector agent registered and started: $taskName"
@@ -131,7 +132,7 @@ try { $script:agent.LastResultStamp = [string](Get-Content -LiteralPath (Join-Pa
 
 $icon = New-Object Windows.Forms.NotifyIcon
 $icon.Icon = Get-BrandIcon
-$icon.Text = 'Smart Autodesk Connector'
+$icon.Text = 'Smart Connector'
 $icon.Visible = $true
 
 function Show-Notice {
@@ -167,7 +168,7 @@ function Start-UpdateCheck { $null = Start-AgentJob 'check' $setupScript @('-Act
 function Start-UpdateInstall { $null = Start-AgentJob 'install' $setupScript @('-Action', 'Update', '-RepositoryPath', $InstallRoot) }
 function Start-SkillsSync {
     if (-not (Start-AgentJob 'sync' (Join-Path $StateRoot 'scripts\weekly-skill-collection.ps1') @('-Action', 'Sync', '-StateRoot', $StateRoot))) {
-        Show-Notice 'Smart Autodesk Connector' 'Another task is running. Try Skills Sync again in a minute.'
+        Show-Notice 'Smart Connector' 'Another task is running. Try Skills Sync again in a minute.'
     }
 }
 
@@ -184,15 +185,15 @@ function Complete-Job {
                 $script:agent.CheckFromAppStart = $false
                 # Found on opening Revit or AutoCAD: say it installs when they close (unless updates are switched off).
                 if ((ConvertFrom-UpdateOutput $text) -eq 'available' -and $state -and $state.notifications_enabled -and (Get-RunningApps).Count) {
-                    Show-Notice 'Smart Autodesk Connector update ready' ("Version {0} installs when you close Revit and AutoCAD. Click here to update now." -f $state.available_version) -OffersUpdate
+                    Show-Notice 'Smart Connector update ready' ("Version {0} installs when you close Revit and AutoCAD. Click here to update now." -f $state.available_version) -OffersUpdate
                 }
             }
             if ($script:agent.ManualCheck) {
                 $script:agent.ManualCheck = $false
                 switch (ConvertFrom-UpdateOutput $text) {
                     'available' { Show-Notice 'Update ready' ("Version {0} is ready. It installs when Revit and AutoCAD are closed. Click here to update now." -f $state.available_version) -OffersUpdate }
-                    'current'   { Show-Notice 'Smart Autodesk Connector' ("You have the latest version ({0})." -f $state.installed_version) }
-                    default     { Show-Notice 'Smart Autodesk Connector' 'Could not check for updates. Check the internet connection and try again.' 'Warning' }
+                    'current'   { Show-Notice 'Smart Connector' ("You have the latest version ({0})." -f $state.installed_version) }
+                    default     { Show-Notice 'Smart Connector' 'Could not check for updates. Check the internet connection and try again.' 'Warning' }
                 }
             }
         }
@@ -200,7 +201,7 @@ function Complete-Job {
             switch (ConvertFrom-UpdateOutput $text) {
                 'installed' {
                     if (Test-Path -LiteralPath $requestPath) { Remove-Item -LiteralPath $requestPath -Force }
-                    Show-Notice 'Smart Autodesk Connector updated' ("Version {0} is installed. Restart Codex and Claude to use it." -f (Read-UpdateStateFile).installed_version)
+                    Show-Notice 'Smart Connector updated' ("Version {0} is installed. Restart Codex and Claude to use it." -f (Read-UpdateStateFile).installed_version)
                     # Restart on the new agent code that the update copied into the state folder.
                     # Release the single-instance lock first, or the new copy would exit at once.
                     $mutex.ReleaseMutex(); $script:agent.MutexReleased = $true
@@ -242,7 +243,7 @@ function Show-UpdatePrompt {
     if (-not $state -or -not $state.available_version) { return }
     $apps = Get-RunningApps
     $form = New-BrandForm -Width 460 -Height 230
-    $form.Text = 'Smart Autodesk Connector update'
+    $form.Text = 'Smart Connector update'
     $form.TopMost = $true
     $null = Add-BrandHeader $form -Title 'Update ready' -Subtitle ("Version {0}" -f $state.available_version) -Height 72
     $message = if ($apps.Count) { "Save your work and close {0}. The update then installs by itself; it takes about a minute." -f ($apps -join ' and ') } else { 'Install the update now? It takes about a minute.' }
@@ -258,7 +259,7 @@ function Show-UpdatePrompt {
 }
 
 $menu = New-Object Windows.Forms.ContextMenuStrip
-$title = $menu.Items.Add('Smart Autodesk Connector'); $title.Enabled = $false; $title.Font = New-BrandFont 9 ([Drawing.FontStyle]::Bold)
+$title = $menu.Items.Add('Smart Connector'); $title.Enabled = $false; $title.Font = New-BrandFont 9 ([Drawing.FontStyle]::Bold)
 $null = $menu.Items.Add('-')
 $null = $menu.Items.Add('Check for updates', $null, { $script:agent.ManualCheck = $true; if (-not $script:agent.Job) { Start-UpdateCheck } })
 $null = $menu.Items.Add('Skills Sync', $null, { Start-SkillsSync })
@@ -295,7 +296,7 @@ $tick.Add_Tick({
         if ($decision -eq 'install' -and -not $script:agent.Job) { Start-UpdateInstall }
         elseif ($decision -eq 'wait' -and $started.Count -and ($auto -or $requested)) {
             # One notice each time Revit or AutoCAD starts while an update is waiting.
-            Show-Notice 'Smart Autodesk Connector update ready' ("Version {0} installs when you close Revit and AutoCAD. Click here to update now." -f $state.available_version) -OffersUpdate
+            Show-Notice 'Smart Connector update ready' ("Version {0} installs when you close Revit and AutoCAD. Click here to update now." -f $state.available_version) -OffersUpdate
         }
     }
     catch { Write-AgentLog "Agent error: $($_.Exception.Message)" }

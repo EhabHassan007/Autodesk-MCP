@@ -1,4 +1,4 @@
-# Generates the Smart Autodesk Connector logo files from one vector drawing:
+# Generates the Smart Connector logo files from one vector drawing:
 #   logo-256.png, logo-64.png, logo-32.png, logo-16.png and logo.ico (16-256 px).
 # Run again after changing the drawing; the outputs are committed next to this script.
 param([string]$OutputDirectory = $PSScriptRoot)
@@ -28,24 +28,22 @@ function New-Logo([int]$Size) {
         $g.ScaleTransform($s, $s)
         # Tile
         $tile = New-RoundedRect 8 8 240 240 52
-        $fill = New-Object Drawing.Drawing2D.LinearGradientBrush ([Drawing.PointF]::new(0, 8)), ([Drawing.PointF]::new(0, 248)), $tileTop, $tileBottom
+        $fill = New-Object Drawing.SolidBrush $tileTop
         $g.FillPath($fill, $tile)
-        # "S" connector: two opposite arcs joining a node at top-right (Revit) and bottom-left (AutoCAD).
-        $stroke = [float]$(if ($Size -le 32) { 30 } else { 24 })
+        # Grip S (logo option A): the S drawn as one flat teal line on a 64-unit grid inside the tile,
+        # its two ends marked with blue CAD grip squares. Heavier strokes keep the small sizes sharp.
+        $stroke = [float]$(if ($Size -le 24) { 34 } elseif ($Size -le 32) { 28 } else { 22.5 })
         $path = New-Object Drawing.Drawing2D.GraphicsPath
-        $path.AddArc(76, 52, 104, 76, 330, -240)     # upper bowl, from the top-right node round to the centre
-        $path.AddArc(76, 128, 104, 76, 270, 240)     # lower bowl, from the centre round to the bottom-left node
-        $gradient = New-Object Drawing.Drawing2D.LinearGradientBrush ([Drawing.PointF]::new(70, 60)), ([Drawing.PointF]::new(186, 200)), $accentA, $accentB
+        $path.AddArc(90.5, 49.25, 75, 75, 0, -270)     # upper bowl: from the right end over the top to the centre
+        $path.AddArc(90.5, 124.25, 75, 75, 270, 270)   # lower bowl: from the centre round to the left end
+        $gradient = New-Object Drawing.SolidBrush $accentA
         $pen = New-Object Drawing.Pen $gradient, $stroke
-        $pen.StartCap = 'Round'; $pen.EndCap = 'Round'; $pen.LineJoin = 'Round'
+        $pen.StartCap = 'Flat'; $pen.EndCap = 'Flat'; $pen.LineJoin = 'Round'
         $g.DrawPath($pen, $path)
-        # Nodes: a ring with a white core, so they read as connection points.
-        $ends = @(@(173, 71, $accentA), @(83, 185, $accentB))
-        foreach ($n in $ends) {
-            $r = [float]$(if ($Size -le 32) { 26 } else { 22 })
-            $g.FillEllipse((New-Object Drawing.SolidBrush $n[2]), [float]($n[0] - $r), [float]($n[1] - $r), 2 * $r, 2 * $r)
-            if ($Size -gt 32) { $c = 10; $g.FillEllipse([Drawing.Brushes]::White, [float]($n[0] - $c), [float]($n[1] - $c), 2 * $c, 2 * $c) }
-        }
+        $grip = New-Object Drawing.SolidBrush $accentB
+        $g.FillRectangle($grip, [float]148.5, [float]69.75, [float]34, [float]34)
+        $g.FillRectangle($grip, [float]73.5, [float]144.75, [float]34, [float]34)
+        $grip.Dispose()
         $pen.Dispose(); $gradient.Dispose(); $fill.Dispose(); $tile.Dispose(); $path.Dispose()
     }
     finally { $g.Dispose() }
@@ -121,13 +119,15 @@ function New-ButtonIcon([int]$Size, [scriptblock]$Glyph) {
 $buttonGlyphs = [ordered]@{
     'sac-connection-status' = {
         param($g, $pen)
-        # The logo's "S" connector with its two nodes.
+        # The logo's grip S: two bowls and the blue grip squares at its ends.
         $s = New-Object Drawing.Drawing2D.GraphicsPath
-        Add-ArcPoints $s 21.5 9 16 16 6 4.5 $true $false
-        Add-ArcPoints $s 16 16 10.5 23 6 4.5 $true $true
+        $s.AddArc(11, 5.5, 10, 10, 0, -270)
+        $s.AddArc(11, 15.5, 10, 10, 270, 270)
         $g.DrawPath($pen, $s); $s.Dispose()
-        $g.FillEllipse((New-Object Drawing.SolidBrush $accentA), 19.5, 6, 6, 6)
-        $g.FillEllipse((New-Object Drawing.SolidBrush $accentB), 6.5, 20, 6, 6)
+        $grip = New-Object Drawing.SolidBrush $accentB
+        $g.FillRectangle($grip, [float]18.6, [float]8.1, [float]4.8, [float]4.8)
+        $g.FillRectangle($grip, [float]8.6, [float]18.1, [float]4.8, [float]4.8)
+        $grip.Dispose()
     }
     'sac-check-updates' = {
         param($g, $pen)

@@ -1,4 +1,4 @@
-﻿# Smart Autodesk Connector setup wizard: Welcome, Terms, Your details (team installer only),
+﻿# Smart Connector setup wizard: Welcome, Terms, Your details (team installer only),
 # Installing (live steps) and Finished. Dot-source after WinForms is loaded, then call
 # Show-SetupWizard. The page logic below the UI section is plain functions so it can be tested.
 
@@ -91,7 +91,7 @@ function Show-SetupWizard {
     # --- Page 1: Welcome
     $welcome = New-Object Windows.Forms.Panel; $welcome.Dock = 'Fill'
     $welcome.Controls.Add((New-BrandLabel 'Welcome' 32 22 -Size 16 -Bold))
-    $intro = "Smart Autodesk Connector lets Codex and Claude work with Revit and AutoCAD on this computer, and keeps your team's shared workflow skills up to date.`r`n`r`nSetup will:`r`n   •  install the connector and the Revit 2024 add-in`r`n   •  connect Codex, Claude Desktop and Claude Code`r`n   •  install the shared workflow skills`r`n   •  switch on automatic updates"
+    $intro = "Smart Connector lets Codex and Claude work with Revit and AutoCAD on this computer, and keeps your team's shared workflow skills up to date.`r`n`r`nSetup will:`r`n   •  install the connector and the Revit 2024 add-in`r`n   •  connect Codex, Claude Desktop and Claude Code`r`n   •  install the shared workflow skills`r`n   •  switch on automatic updates"
     if ($showTeam) { $intro += "`r`n   •  join this computer to your team skill service" }
     $welcome.Controls.Add((New-BrandLabel $intro 34 66 -Width 600))
     $revitNote = New-BrandLabel 'Revit is open. Save your work and close Revit before you continue, so its add-in can be updated. AutoCAD can stay open.' 34 300 -Width 600
@@ -256,8 +256,8 @@ function Show-SetupWizard {
             "$mark   $($step.Label)$extra"
         }
         if ($script:wizard.Result -eq 'ok') {
-            $doneTitle.Text = '✓  Smart Autodesk Connector is ready'; $doneTitle.ForeColor = $C.Good
-            $nextSteps = "`r`n`r`nNext: open Revit and look for the Smart Autodesk Connector tab. In Codex or Claude, ask it to work with your open model or drawing."
+            $doneTitle.Text = '✓  Smart Connector is ready'; $doneTitle.ForeColor = $C.Good
+            $nextSteps = "`r`n`r`nNext: open Revit and look for the Smart Connector tab. In Codex or Claude, ask it to work with your open model or drawing."
         }
         else {
             $doneTitle.Text = 'Setup finished with problems'; $doneTitle.ForeColor = $C.Bad

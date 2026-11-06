@@ -1,4 +1,4 @@
-﻿# Smart Autodesk Connector actions behind the AutoCAD Add-ins buttons (SmartAutodeskConnector.lsp).
+﻿# Smart Connector actions behind the AutoCAD Add-ins buttons (SmartAutodeskConnector.lsp).
 # A PowerShell port of the Revit add-in's TaskWindow (src\revit\addin\ConnectorUi.cs): one hidden step runs
 # while a branded window shows progress, then the window shows the result.
 # Run directly (powershell -STA -File ConnectorActions.ps1 -Action X) or dot-source with -LibraryOnly.
@@ -94,7 +94,7 @@ function Get-CheckUpdatesOutcome {
     }
     if (([string]$Output).Contains('[UP_TO_DATE]')) {
         return [pscustomobject]@{ State = 'Current'; Kind = 'Good'; UserOff = $userOff; Title = "You're up to date"
-            Body = "Smart Autodesk Connector $installed is the latest approved version." }
+            Body = "Smart Connector $installed is the latest approved version." }
     }
     [pscustomobject]@{ State = 'Unknown'; Kind = 'Bad'; UserOff = $userOff; Title = "Couldn't check right now"
         Body = 'The update service could not be reached. Check the internet connection and try again later. Your connector keeps working.' }
@@ -115,8 +115,8 @@ function Get-ConnectionStatusOutcome {
         # Only the installer's own timestamped findings; the raw `codex mcp get` output it echoes is left out.
         if ($line -notmatch '^\[\d{2}:\d{2}:\d{2}\]\s*(.+)$') { continue }
         $text = $Matches[1].Trim()
-        if ($text -like 'Revit*' -or $text -like 'Smart Autodesk Connector - *') { continue }   # the installer's own heading
-        $good = $text -match 'passed|has the Smart Autodesk Connector registration|installation detected|is running at'
+        if ($text -like 'Revit*' -or $text -like 'Smart Connector - *') { continue }   # the installer's own heading
+        $good = $text -match 'passed|has the Smart Connector registration|installation detected|is running at'
         $lines += $(if ($good) { [char]0x2713 } else { [char]0x2022 }) + '  ' + $text
     }
     $lines += $(if ($AgentRunning) { [char]0x2713 + '  The connector agent is running (updates and notifications).' }
@@ -258,7 +258,7 @@ function Show-ConnectorAction {
                         (Get-ConnectorScript 'weekly-skill-collection.ps1' $Root) ('-Action Sync -Product AutoCAD -StateRoot "{0}"' -f $script:ActionPaths.StateRoot)
                 }
                 'CheckUpdates' {
-                    & $run 'Checking for updates...' 'Looking for a newer approved version of Smart Autodesk Connector.' `
+                    & $run 'Checking for updates...' 'Looking for a newer approved version of Smart Connector.' `
                         (Join-Path $Root 'installer\Setup-BimCad.ps1') ('-Action CheckUpdate -RepositoryPath "{0}"' -f $Root)
                 }
                 'Status' {

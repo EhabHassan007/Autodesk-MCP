@@ -6,4 +6,5 @@ beta*/Autodesk-MCP-Connector-*-TEAM.zip
 # The team join code only ever lives inside the private -TEAM.zip.
 **/team-join.json
 # Setup .exe files are build output; the -TEAM one carries the join code.
+beta*/Smart-Connector-Setup-*.exe
 beta*/Smart-Autodesk-Connector-Setup-*.exe

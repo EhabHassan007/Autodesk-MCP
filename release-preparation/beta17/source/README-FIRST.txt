@@ -1,6 +1,6 @@
-Smart Autodesk Connector 1.0.0
+Smart Connector for Autodesk Revit and AutoCAD 1.0.0
 
-Easiest: run the Smart-Autodesk-Connector-Setup .exe your administrator shared. With this ZIP instead: extract it completely, save your work, close Revit and AutoCAD, and run INSTALL Smart Autodesk Connector.cmd. Then restart Revit, AutoCAD and your AI clients.
+Easiest: run the Smart-Connector-Setup .exe your administrator shared. With this ZIP instead: extract it completely, save your work, close Revit and AutoCAD, and run INSTALL Smart Connector.cmd. Then restart Revit, AutoCAD and your AI clients.
 
 Updates install automatically: the connector checks when you sign in to Windows, every 6 hours, and when you open Revit or AutoCAD, and installs a new version as soon as Revit and AutoCAD are closed.
 

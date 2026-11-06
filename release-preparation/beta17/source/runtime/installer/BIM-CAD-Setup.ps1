@@ -6,7 +6,7 @@ param(
     [string]$InitialAction = 'Status',
     [switch]$SmokeTest
 )
-# Smart Autodesk Connector maintenance window: repair, update, test, Skills Sync and Settings.
+# Smart Connector maintenance window: repair, update, test, Skills Sync and Settings.
 # First-time installation uses the setup wizard (SetupWizard.ps1) instead.
 
 $ErrorActionPreference = 'Stop'

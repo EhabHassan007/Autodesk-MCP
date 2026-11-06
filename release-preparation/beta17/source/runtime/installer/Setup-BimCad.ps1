@@ -339,7 +339,7 @@ function Write-UpdateState {
 }
 
 function Get-PublicReleaseManifest {
-    Write-Step 'Checking the Smart Autodesk Connector release channel...'
+    Write-Step 'Checking the Smart Connector release channel...'
     try { $manifestUri = [Uri]$ReleaseManifestUrl }
     catch { throw "The release manifest address is invalid: $ReleaseManifestUrl" }
     if ($manifestUri.Scheme -ne 'https') {
@@ -428,7 +428,7 @@ function Test-ApprovedUpdate {
         Write-Output ("[{0}] [UP_TO_DATE] Installed version {1} is newer than public version {2}; no downgrade will be performed." -f (Get-Date -Format 'HH:mm:ss'), $installedVersion, $release.Version)
         return
     }
-    Write-Output ("[{0}] [UP_TO_DATE] Smart Autodesk Connector {1} and approved skills are up to date." -f (Get-Date -Format 'HH:mm:ss'), $installedVersion)
+    Write-Output ("[{0}] [UP_TO_DATE] Smart Connector {1} and approved skills are up to date." -f (Get-Date -Format 'HH:mm:ss'), $installedVersion)
 }
 
 function Remove-LegacyUpdateTask {
@@ -808,7 +808,7 @@ function Get-Repository {
                     Write-Step ("Installed version {0} is newer than public version {1}; the update was skipped to prevent a downgrade." -f $installedVersion, $release.Version)
                 }
                 else {
-                    Write-Step ("Smart Autodesk Connector {0} is already up to date." -f $installedVersion)
+                    Write-Step ("Smart Connector {0} is already up to date." -f $installedVersion)
                 }
                 return (Resolve-Path -LiteralPath $RepositoryPath).Path
             }
@@ -890,7 +890,7 @@ function Register-McpServer {
                 $expectedArgs = @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',$Bridge) + $BridgeArguments
                 if ($entry.enabled -ne $false -and $entry.transport.command -eq 'powershell.exe' -and
                     (($entry.transport.args | ConvertTo-Json -Compress) -ceq ($expectedArgs | ConvertTo-Json -Compress))) {
-                    Write-Step 'The Smart Autodesk Connector registration in Codex is already correct.'
+                    Write-Step 'The Smart Connector registration in Codex is already correct.'
                     Remove-LegacyMcpEntries 'Codex' $codex $LegacyNames
                     return
                 }
@@ -1043,7 +1043,7 @@ function Restart-ClaudeDesktopIfRunning {
         if ($Installation -and $Installation.Executable) { [string]$Installation.Executable }
     ) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) } | Select-Object -First 1
 
-    Write-Step 'Restarting Claude Desktop so it loads the Smart Autodesk Connector registration...'
+    Write-Step 'Restarting Claude Desktop so it loads the Smart Connector registration...'
     foreach ($process in $running) {
         try { $null = $process.CloseMainWindow() } catch { }
     }
@@ -1098,7 +1098,7 @@ function Install-ClaudeDesktop {
     for ($attempt = 0; $attempt -lt 20; $attempt++) {
         $installed = Get-ClaudeDesktopInstallation
         if ($installed) {
-            Write-Step 'Claude Desktop is installed. The Smart Autodesk Connector registration will now be added.'
+            Write-Step 'Claude Desktop is installed. The Smart Connector registration will now be added.'
             return $installed
         }
         Start-Sleep -Seconds 1
@@ -1246,7 +1246,7 @@ function Register-DetectedAiClients {
     $arguments = @('-RevitVersion','2024')
     $legacyNames = @('autocad','revit','AutoCAD MCP','Revit Connector','revit-mcp')
     # Claude Desktop shows the key as the connector's name; the previous product name is retired.
-    $claudeDesktopLegacyNames = @($legacyNames + 'autodesk' + 'Autodesk MCP Connector')
+    $claudeDesktopLegacyNames = @($legacyNames + 'autodesk' + 'Autodesk MCP Connector' + 'Smart Autodesk Connector')
     $detected = 0
     $registrationErrors = @()
 
@@ -1291,7 +1291,7 @@ function Register-DetectedAiClients {
         $desktopFailed = $false
         foreach ($configPath in @(Get-ClaudeDesktopConfigPaths)) {
             try {
-                Register-ClaudeDesktopMcpServer -Name 'Smart Autodesk Connector' -Bridge $bridge -BridgeArguments $arguments -LegacyNames $claudeDesktopLegacyNames -ConfigPath $configPath
+                Register-ClaudeDesktopMcpServer -Name 'Smart Connector' -Bridge $bridge -BridgeArguments $arguments -LegacyNames $claudeDesktopLegacyNames -ConfigPath $configPath
                 $detected++
             }
             catch {
@@ -1481,7 +1481,7 @@ function Uninstall-AutoCadBundle {
     Write-Step 'Removed the AutoCAD Add-ins panel and its trusted path. Restart AutoCAD to finish.'
 }
 
-# Adds the Smart Autodesk Connector panel to the AutoCAD Add-ins tab for this user (no admin rights needed).
+# Adds the Smart Connector panel to the AutoCAD Add-ins tab for this user (no admin rights needed).
 # AutoCAD loads it at its next start.
 function Install-AutoCadBundle {
     param([string]$Root, [string]$PluginsRoot = (Join-Path $env:APPDATA 'Autodesk\ApplicationPlugins'),
@@ -1536,16 +1536,16 @@ function Test-AutodeskRegistration {
     $codex = Get-OptionalCommand 'codex'
     if ($codex) {
         $registration = Invoke-External $codex @('mcp','get','autodesk') -AllowFailure
-        if ($registration.ExitCode -eq 0) { Write-Step 'Codex has the Smart Autodesk Connector registration.' }
-        else { Write-Step 'Smart Autodesk Connector is not registered yet.' }
+        if ($registration.ExitCode -eq 0) { Write-Step 'Codex has the Smart Connector registration.' }
+        else { Write-Step 'Smart Connector is not registered yet.' }
     }
     else { Write-Step 'Codex command was not detected.' }
 
     $claude = Get-OptionalCommand 'claude'
     if ($claude) {
         $registration = Invoke-External $claude @('mcp','get','autodesk') -AllowFailure
-        if ($registration.ExitCode -eq 0) { Write-Step 'Claude Code has the Smart Autodesk Connector registration.' }
-        else { Write-Step 'Smart Autodesk Connector is not registered in Claude Code yet.' }
+        if ($registration.ExitCode -eq 0) { Write-Step 'Claude Code has the Smart Connector registration.' }
+        else { Write-Step 'Smart Connector is not registered in Claude Code yet.' }
     }
     else { Write-Step 'Claude Code command was not detected.' }
 
@@ -1553,10 +1553,10 @@ function Test-AutodeskRegistration {
         $configPath = Get-ClaudeDesktopConfigPath
         try {
             $config = Get-Content -LiteralPath $configPath -Raw -ErrorAction Stop | ConvertFrom-Json
-            if ($config.mcpServers.PSObject.Properties['Smart Autodesk Connector']) {
-                Write-Step ("Claude Desktop has the Smart Autodesk Connector registration at {0}." -f $configPath)
+            if ($config.mcpServers.PSObject.Properties['Smart Connector']) {
+                Write-Step ("Claude Desktop has the Smart Connector registration at {0}." -f $configPath)
             }
-            else { Write-Step 'Smart Autodesk Connector is not registered in Claude Desktop yet.' }
+            else { Write-Step 'Smart Connector is not registered in Claude Desktop yet.' }
         }
         catch { Write-Step 'Claude Desktop was detected, but its local MCP configuration is missing or invalid.' }
     }
@@ -1629,12 +1629,12 @@ function Install-RevitAddin {
 <?xml version="1.0" encoding="utf-8"?>
 <RevitAddIns>
   <AddIn Type="Application">
-    <Name>Smart Autodesk Connector</Name>
+    <Name>Smart Connector</Name>
     <Assembly>$escapedAssembly</Assembly>
     <AddInId>2DCE7E67-4495-4F3B-A740-3D7C9D2DA124</AddInId>
     <FullClassName>BimCadMcp.Revit.Application</FullClassName>
     <VendorId>BIMC</VendorId>
-    <VendorDescription>Smart Autodesk Connector for Codex and Claude</VendorDescription>
+    <VendorDescription>Smart Connector for Codex and Claude</VendorDescription>
   </AddIn>
 </RevitAddIns>
 "@
@@ -1662,9 +1662,9 @@ function Test-RevitSetup {
     else { Write-Step 'Revit 2024 was not detected.' }
 
     $manifest = Join-Path $env:APPDATA 'Autodesk\Revit\Addins\2024\AutodeskMcpConnector.addin'
-    if (Test-Path -LiteralPath $manifest -PathType Leaf) { Write-Step 'Smart Autodesk Connector add-in is installed for Revit 2024.' }
-    else { Write-Step 'Smart Autodesk Connector add-in is not installed for Revit 2024 yet.' }
-    if ($installed) { Write-Step 'In Revit, open the Smart Autodesk Connector ribbon tab and click Connection Status.' }
+    if (Test-Path -LiteralPath $manifest -PathType Leaf) { Write-Step 'Smart Connector add-in is installed for Revit 2024.' }
+    else { Write-Step 'Smart Connector add-in is not installed for Revit 2024 yet.' }
+    if ($installed) { Write-Step 'In Revit, open the Smart Connector ribbon tab and click Connection Status.' }
 
     $pipeName = 'BimCadMcp.Revit.2024'
     $sessionDirectory = Join-Path $env:LOCALAPPDATA 'BIM-CAD-MCP\runtime\revit-sessions'
@@ -1847,7 +1847,7 @@ function Register-SkillServiceDevice {
 if ($LibraryOnly) { return }
 
 try {
-    Write-Step ("Smart Autodesk Connector - {0}" -f $Action)
+    Write-Step ("Smart Connector - {0}" -f $Action)
 
     if ($Action -eq 'Collect') {
         $root = Get-Repository
@@ -2007,7 +2007,7 @@ try {
                 -Sha256 $(if ((Test-Path -LiteralPath (Join-Path $root '.bim-cad-source.json'))) {
                     [string]((Get-Content -LiteralPath (Join-Path $root '.bim-cad-source.json') -Raw | ConvertFrom-Json).sha256)
                 } else { '' })
-            Write-Output ("[{0}] [UPDATE_INSTALLED] Smart Autodesk Connector {1} is installed." -f (Get-Date -Format 'HH:mm:ss'), (Get-InstalledVersion))
+            Write-Output ("[{0}] [UPDATE_INSTALLED] Smart Connector {1} is installed." -f (Get-Date -Format 'HH:mm:ss'), (Get-InstalledVersion))
         }
     }
 }

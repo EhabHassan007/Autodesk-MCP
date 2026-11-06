@@ -12,13 +12,13 @@ using Forms = System.Windows.Forms;
 using Drawing = System.Drawing;
 using Media = System.Windows.Media;
 
-// Smart Autodesk Connector ribbon and dialogs. C# 5 only: the add-in is compiled on each PC with
+// Smart Connector ribbon and dialogs. C# 5 only: the add-in is compiled on each PC with
 // the .NET Framework compiler that ships with Windows.
 namespace BimCadMcp.Revit
 {
     internal static class Brand
     {
-        internal const string Name = "Smart Autodesk Connector";
+        internal const string Name = "Smart Connector";
         internal static readonly Drawing.Color Header = Drawing.Color.FromArgb(22, 36, 61);
         internal static readonly Drawing.Color Teal = Drawing.Color.FromArgb(32, 201, 171);
         internal static readonly Drawing.Color Blue = Drawing.Color.FromArgb(47, 128, 237);
@@ -48,7 +48,7 @@ namespace BimCadMcp.Revit
             }
             string defaultRoot = Path.Combine(LocalAppData, "BIM-CAD-MCP");
             if (File.Exists(Path.Combine(defaultRoot, "installer", "Setup-BimCad.ps1"))) return defaultRoot;
-            throw new DirectoryNotFoundException("The Smart Autodesk Connector installation folder could not be found. Run the installer again.");
+            throw new DirectoryNotFoundException("The Smart Connector installation folder could not be found. Run the installer again.");
         }
 
         // Scripts copied to the state folder keep working while an update replaces the install folder.
@@ -100,7 +100,7 @@ namespace BimCadMcp.Revit
                 if (!File.Exists(agent)) return;
                 StartHidden(agent, "-Action Run -StateRoot " + Quote(StateRoot) + " -InstallRoot " + Quote(FindRoot()));
             }
-            catch (Exception exception) { Debug.WriteLine("Smart Autodesk Connector agent start failed: " + exception.Message); }
+            catch (Exception exception) { Debug.WriteLine("Smart Connector agent start failed: " + exception.Message); }
         }
     }
 
@@ -265,18 +265,19 @@ namespace BimCadMcp.Revit
         {
             return Tile(delegate(Media.DrawingContext c, Media.Pen p)
             {
-                // The logo's "S" connector with its two nodes.
+                // The logo's grip S: two bowls with blue CAD grip squares at its ends.
                 Media.StreamGeometry s = new Media.StreamGeometry();
                 using (Media.StreamGeometryContext g = s.Open())
                 {
-                    g.BeginFigure(new System.Windows.Point(21.5, 9), false, false);
-                    g.ArcTo(new System.Windows.Point(16, 16), new System.Windows.Size(6, 4.5), 0, true, Media.SweepDirection.Counterclockwise, true, false);
-                    g.ArcTo(new System.Windows.Point(10.5, 23), new System.Windows.Size(6, 4.5), 0, true, Media.SweepDirection.Clockwise, true, false);
+                    g.BeginFigure(new System.Windows.Point(21, 10.5), false, false);
+                    g.ArcTo(new System.Windows.Point(16, 15.5), new System.Windows.Size(5, 5), 0, true, Media.SweepDirection.Counterclockwise, true, false);
+                    g.ArcTo(new System.Windows.Point(11, 20.5), new System.Windows.Size(5, 5), 0, true, Media.SweepDirection.Clockwise, true, false);
                 }
                 s.Freeze();
                 c.DrawGeometry(null, p, s);
-                c.DrawEllipse(new Media.SolidColorBrush(Media.Color.FromRgb(32, 201, 171)), null, new System.Windows.Point(22.5, 9), 3, 3);
-                c.DrawEllipse(new Media.SolidColorBrush(Media.Color.FromRgb(47, 128, 237)), null, new System.Windows.Point(9.5, 23), 3, 3);
+                Media.SolidColorBrush grip = new Media.SolidColorBrush(Media.Color.FromRgb(47, 128, 237));
+                c.DrawRectangle(grip, null, new System.Windows.Rect(18.6, 8.1, 4.8, 4.8));
+                c.DrawRectangle(grip, null, new System.Windows.Rect(8.6, 18.1, 4.8, 4.8));
             });
         }
 
@@ -338,19 +339,20 @@ namespace BimCadMcp.Revit
                 float k = size / 256f;
                 g.ScaleTransform(k, k);
                 using (Drawing.Drawing2D.GraphicsPath tile = new Drawing.Drawing2D.GraphicsPath())
-                using (Drawing.SolidBrush navy = new Drawing.SolidBrush(Drawing.Color.FromArgb(28, 45, 76)))
-                using (Drawing.Drawing2D.LinearGradientBrush gradient = new Drawing.Drawing2D.LinearGradientBrush(new Drawing.PointF(70, 60), new Drawing.PointF(186, 200), Brand.Teal, Brand.Blue))
-                using (Drawing.Pen pen = new Drawing.Pen(gradient, 26f))
+                using (Drawing.SolidBrush navy = new Drawing.SolidBrush(Drawing.Color.FromArgb(22, 36, 61)))
+                using (Drawing.SolidBrush teal = new Drawing.SolidBrush(Brand.Teal))
+                using (Drawing.SolidBrush blue = new Drawing.SolidBrush(Brand.Blue))
+                using (Drawing.Pen pen = new Drawing.Pen(teal, size <= 24 ? 34f : size <= 32 ? 28f : 22.5f))
                 using (Drawing.Drawing2D.GraphicsPath s = new Drawing.Drawing2D.GraphicsPath())
                 {
                     tile.AddArc(8, 8, 104, 104, 180, 90); tile.AddArc(144, 8, 104, 104, 270, 90);
                     tile.AddArc(144, 144, 104, 104, 0, 90); tile.AddArc(8, 144, 104, 104, 90, 90); tile.CloseFigure();
                     g.FillPath(navy, tile);
-                    pen.StartCap = Drawing.Drawing2D.LineCap.Round; pen.EndCap = Drawing.Drawing2D.LineCap.Round;
-                    s.AddArc(76, 52, 104, 76, 330, -240); s.AddArc(76, 128, 104, 76, 270, 240);
+                    // Grip S, as in assets\New-BrandAssets.ps1: one teal line, blue grip squares at its ends.
+                    s.AddArc(90.5f, 49.25f, 75, 75, 0, -270); s.AddArc(90.5f, 124.25f, 75, 75, 270, 270);
                     g.DrawPath(pen, s);
-                    using (Drawing.SolidBrush teal = new Drawing.SolidBrush(Brand.Teal)) g.FillEllipse(teal, 151, 49, 44, 44);
-                    using (Drawing.SolidBrush blue = new Drawing.SolidBrush(Brand.Blue)) g.FillEllipse(blue, 61, 163, 44, 44);
+                    g.FillRectangle(blue, 148.5f, 69.75f, 34, 34);
+                    g.FillRectangle(blue, 73.5f, 144.75f, 34, 34);
                 }
             }
             return bitmap;
@@ -375,7 +377,7 @@ namespace BimCadMcp.Revit
                 Add(panel, assemblyPath, "BimCadMcpConnectionStatus", "Connection\nStatus", typeof(ConnectionStatusCommand),
                     "See whether Codex or Claude is connected to this Revit session.", Icons.Connection());
                 Add(panel, assemblyPath, "BimCadMcpCheckUpdates", "Check\nUpdates", typeof(CheckUpdatesCommand),
-                    "Check for a new version of Smart Autodesk Connector. Updates install by themselves when Revit and AutoCAD are closed.", Icons.Update());
+                    "Check for a new version of Smart Connector. Updates install by themselves when Revit and AutoCAD are closed.", Icons.Update());
                 Add(panel, assemblyPath, "BimCadMcpSkillsSync", "Skills\nSync", typeof(SkillsSyncCommand),
                     "Send your saved skills for review and download the latest approved team skills.", Icons.Sync());
                 Add(panel, assemblyPath, "BimCadMcpSettings", "Settings", typeof(SettingsCommand),
@@ -383,7 +385,7 @@ namespace BimCadMcp.Revit
             }
             catch (Exception exception)
             {
-                Debug.WriteLine("Smart Autodesk Connector ribbon error: " + exception);
+                Debug.WriteLine("Smart Connector ribbon error: " + exception);
             }
         }
 
@@ -423,7 +425,7 @@ namespace BimCadMcp.Revit
                 string root = Connector.FindRoot();
                 using (TaskWindow window = new TaskWindow("Check Updates"))
                 {
-                    window.Run("Checking for updates…", "Looking for a newer approved version of Smart Autodesk Connector.",
+                    window.Run("Checking for updates…", "Looking for a newer approved version of Smart Connector.",
                         Path.Combine(root, "installer", "Setup-BimCad.ps1"), "-Action CheckUpdate -RepositoryPath " + Connector.Quote(root),
                         delegate(string output, int code) { ShowOutcome(window, output, root); });
                     window.ShowDialog(Owner.Of(commandData));
@@ -460,7 +462,7 @@ namespace BimCadMcp.Revit
             }
             else if (output.Contains("[UP_TO_DATE]"))
             {
-                window.ShowResult("You're up to date", "Smart Autodesk Connector " + installed + " is the latest approved version.", Brand.Good);
+                window.ShowResult("You're up to date", "Smart Connector " + installed + " is the latest approved version.", Brand.Good);
                 window.Option.Text = "Install updates automatically (recommended)";
                 window.Option.Checked = !userOff;
                 window.Option.Visible = true;

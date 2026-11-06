@@ -1,5 +1,5 @@
 $ErrorActionPreference='Stop'
-# Smart Autodesk Connector: setup wizard parsing, terms record, update defaults and gate, agent decisions,
+# Smart Connector: setup wizard parsing, terms record, update defaults and gate, agent decisions,
 # add-in build cleanup, Skills Sync counts, legacy MCP entries and the Revit add-in build.
 $t=Join-Path ([IO.Path]::GetTempPath()) ('smart-connector-'+[guid]::NewGuid().ToString('N'))
 $savedLocal=$env:LOCALAPPDATA
@@ -97,7 +97,7 @@ try{
  } else { $addin='add-in build skipped (no Revit 2024)' }
  $ui=Get-Content (Join-Path $runtime 'src/revit/addin/ConnectorUi.cs') -Raw
  foreach($c in 'CheckUpdatesCommand','SkillsSyncCommand','SettingsCommand','ConnectionStatusCommand'){Assert ($ui.Contains("typeof($c)")) "Ribbon lacks $c"}
- Assert ($ui.Contains('internal const string TabName = Brand.Name;') -and $ui.Contains('"Smart Autodesk Connector"')) 'Ribbon tab is not named Smart Autodesk Connector'
+ Assert ($ui.Contains('internal const string TabName = Brand.Name;') -and $ui.Contains('"Smart Connector"')) 'Ribbon tab is not named Smart Connector'
  "PASS: wizard markers, quoting and terms record; automatic updates on by default and only the user turns them off; updates wait for Revit/AutoCAD; old add-in builds removed; other tools' MCP servers kept; agent decisions; Skills Sync counts; $addin"
 }
 finally{$env:LOCALAPPDATA=$savedLocal;Remove-Item $t -Recurse -Force -ErrorAction SilentlyContinue}

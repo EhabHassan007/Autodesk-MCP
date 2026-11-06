@@ -1,6 +1,7 @@
 ---
 name: mem-search
 description: Search what earlier Claude Code sessions did (prompts, files changed, commands run), as recorded locally by mem-lite. Use when the user asks what was done before, "last time", "yesterday", or which session touched a file.
+category: uncategorized
 ---
 
 mem-lite keeps a local log of every Claude Code session. Query it with:
