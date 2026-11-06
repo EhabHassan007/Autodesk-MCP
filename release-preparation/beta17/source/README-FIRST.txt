@@ -6,6 +6,14 @@ During setup you choose which AI apps to connect (Claude Desktop, Claude Code, C
 
 After setup, open Smart Connector from the Start menu, from its icon in the notification area, or with Open Connector in Revit and AutoCAD. It shows whether everything is connected and has Skills Sync, updates, settings, diagnostics and help in one place.
 
+Antivirus: Smart Connector is not code-signed, so Kaspersky and other antivirus programs may block or delete it. Before installing, add these folders to the antivirus exclusions (Kaspersky: Settings > Threats and Exclusions > Manage exclusions); replace <you> with your Windows user name:
+  C:\Users\<you>\AppData\Local\SmartConnectorSetup   (setup unpacks here and removes it afterwards)
+  C:\Users\<you>\AppData\Local\BIM-CAD-MCP
+  C:\Users\<you>\AppData\Local\AutodeskMcpSkillCollection
+  C:\Users\<you>\AppData\Local\AutodeskMcpConnector
+  the folder that holds this installer
+Run the installer from a company network folder or a synced OneDrive folder, or right-click it > Properties > Unblock, so Windows does not show "Windows protected your PC".
+
 Updates install automatically: the connector checks when you sign in to Windows, every 6 hours, and when you open Revit or AutoCAD, and installs a new version as soon as Revit and AutoCAD are closed.
 
 With the team installer, setup asks for your name and email and joins this PC to the team skill service automatically. Otherwise your administrator supplies enrollment.json (or skill-service-device.json) beside the installer for this PC/user; setup imports and encrypts it and removes that plaintext file after import. No GitHub account, Git installation or Git author commands are needed on team PCs.

@@ -11,7 +11,9 @@ if ([Environment]::Is64BitProcess -and $env:ProgramW6432) { $env:ProgramFiles = 
 if ([Environment]::Is64BitProcess -and $env:CommonProgramW6432) { $env:CommonProgramFiles = $env:CommonProgramW6432 }
 Add-Type -AssemblyName System.Windows.Forms
 $payload = Join-Path $PSScriptRoot 'Autodesk-MCP-Payload.zip'
-$temporaryRoot = Join-Path ([IO.Path]::GetTempPath()) ("autodesk-mcp-install-{0}" -f [Guid]::NewGuid().ToString('N'))
+# Unpacked into one fixed folder, not %TEMP%, so a single antivirus exclusion covers setup. Removed afterwards.
+$setupRoot = Join-Path $env:LOCALAPPDATA 'SmartConnectorSetup'
+$temporaryRoot = Join-Path $setupRoot ("payload-{0}" -f [Guid]::NewGuid().ToString('N'))
 $logDirectory = Join-Path $env:LOCALAPPDATA 'AutodeskMcpConnector'
 $logPath = Join-Path $logDirectory 'setup.log'
 
@@ -105,8 +107,8 @@ catch {
 finally {
     if (Test-Path -LiteralPath $temporaryRoot) {
         $resolvedTemporary = [IO.Path]::GetFullPath($temporaryRoot)
-        $resolvedSystemTemporary = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
-        if (-not $resolvedTemporary.StartsWith($resolvedSystemTemporary, [StringComparison]::OrdinalIgnoreCase)) {
+        $resolvedSetupRoot = [IO.Path]::GetFullPath($setupRoot).TrimEnd('\') + '\'
+        if (-not $resolvedTemporary.StartsWith($resolvedSetupRoot, [StringComparison]::OrdinalIgnoreCase)) {
             throw "Refusing to clean an unexpected temporary path: $resolvedTemporary"
         }
         Remove-Item -LiteralPath $resolvedTemporary -Recurse -Force -ErrorAction SilentlyContinue
