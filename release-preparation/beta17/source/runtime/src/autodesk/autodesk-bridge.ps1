@@ -18,8 +18,8 @@ $autoCadModule = New-Module -Name AutodeskMcpAutoCad -ArgumentList $autoCadBridg
     param([string]$Bridge)
     . $Bridge -LibraryOnly
     function Get-McpTools { @($toolList) }
-    function Invoke-McpTool($Name, $Arguments) { Invoke-CadTool $Name $Arguments }
-    function Get-McpConnectionStatus($Arguments) { Get-AutoCadConnectionStatus }
+    function Invoke-McpTool($Name, $Arguments) { try { Invoke-CadTool $Name $Arguments } finally { Clear-CadReferences } }
+    function Get-McpConnectionStatus($Arguments) { try { Get-AutoCadConnectionStatus } finally { Clear-CadReferences } }
     Export-ModuleMember -Function Get-McpTools, Invoke-McpTool, Get-McpConnectionStatus
 }
 $revitModule = New-Module -Name AutodeskMcpRevit -ArgumentList $revitBridge, $RevitVersion -ScriptBlock {

@@ -147,6 +147,21 @@ $buttonGlyphs = [ordered]@{
         $g.DrawLine($pen, 22.5, 11, 23, 6.5); $g.DrawLine($pen, 22.5, 11, 18, 10.5)
         $g.DrawLine($pen, 9.5, 21, 9, 25.5); $g.DrawLine($pen, 9.5, 21, 14, 21.5)
     }
+    'sac-ai-markup' = {
+        param($g, $pen)
+        # A freehand stroke ending at a white pen tip: sketch the task on the drawing.
+        $g.DrawBezier($pen, 7, 22, 12, 8, 18, 26, 25, 10)
+        $g.FillEllipse([Drawing.Brushes]::White, 22.4, 7.4, 5.2, 5.2)
+    }
+    'sac-ai-clear' = {
+        param($g, $pen)
+        # A short sketch stroke and a white cross: remove the markup.
+        $g.DrawBezier($pen, 6, 14, 10, 6, 14, 20, 18, 11)
+        $white = New-Object Drawing.Pen ([Drawing.Color]::White), $pen.Width
+        $white.StartCap = 'Round'; $white.EndCap = 'Round'
+        $g.DrawLine($white, 19, 19, 25, 25); $g.DrawLine($white, 25, 19, 19, 25)
+        $white.Dispose()
+    }
     'sac-settings' = {
         param($g, $pen)
         # Slider-style settings mark: three lines with knobs.

@@ -1,7 +1,8 @@
-Smart Autodesk Connector 1.0.0-beta.20 — central-service pilot
+Smart Autodesk Connector 1.0.0
 
-This installer is for a pilot after your administrator deploys the central skill service.
-Extract the ZIP completely. Save work and close Revit. Run INSTALL Smart Autodesk Connector.cmd, then restart Revit and AI clients.
+Easiest: run the Smart-Autodesk-Connector-Setup .exe your administrator shared. With this ZIP instead: extract it completely, save your work, close Revit and AutoCAD, and run INSTALL Smart Autodesk Connector.cmd. Then restart Revit, AutoCAD and your AI clients.
+
+Updates install automatically: the connector checks when you sign in to Windows, every 6 hours, and when you open Revit or AutoCAD, and installs a new version as soon as Revit and AutoCAD are closed.
 
 With the team installer, setup asks for your name and email and joins this PC to the team skill service automatically. Otherwise your administrator supplies enrollment.json (or skill-service-device.json) beside the installer for this PC/user; setup imports and encrypts it and removes that plaintext file after import. No GitHub account, Git installation or Git author commands are needed on team PCs.
 

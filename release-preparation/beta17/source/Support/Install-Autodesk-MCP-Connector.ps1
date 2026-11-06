@@ -5,6 +5,10 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Started from the 32-bit setup .exe, this 64-bit PowerShell can inherit the 32-bit Program Files paths;
+# use the real ones so Revit, AutoCAD and Git are found.
+if ([Environment]::Is64BitProcess -and $env:ProgramW6432) { $env:ProgramFiles = $env:ProgramW6432 }
+if ([Environment]::Is64BitProcess -and $env:CommonProgramW6432) { $env:CommonProgramFiles = $env:CommonProgramW6432 }
 Add-Type -AssemblyName System.Windows.Forms
 $payload = Join-Path $PSScriptRoot 'Autodesk-MCP-Payload.zip'
 $temporaryRoot = Join-Path ([IO.Path]::GetTempPath()) ("autodesk-mcp-install-{0}" -f [Guid]::NewGuid().ToString('N'))

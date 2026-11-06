@@ -7,7 +7,7 @@
     SchemaVersion="1.0"
     AutodeskProduct="AutoCAD"
     Name="Smart Autodesk Connector"
-    Description="Skills Sync, Check Updates, Settings and Connection Status for the Smart Autodesk Connector."
+    Description="AI Markup, Skills Sync, Check Updates, Settings and Connection Status for the Smart Autodesk Connector."
     AppVersion="1.0.0"
     FriendlyVersion="1.0.0"
     ProductType="Application"
@@ -28,6 +28,13 @@
         <Command Local="SACCHECKUPDATES" Global="SACCHECKUPDATES" />
         <Command Local="SACSETTINGS" Global="SACSETTINGS" />
         <Command Local="SACSTATUS" Global="SACSTATUS" />
+      </Commands>
+    </ComponentEntry>
+    <!-- AI Markup: sketch on the drawing and copy the task, with the sketch as coordinates, for Claude. -->
+    <ComponentEntry AppName="SmartAutodeskConnectorAIMarkup" Version="2.0.0" ModuleName="./Contents/AI-Markup.lsp" AppDescription="AI Markup: sketch a task for Claude on the drawing" LoadOnCommandInvocation="True" PerDocument="True">
+      <Commands GroupName="SMARTAUTODESKCONNECTORMARKUP">
+        <Command Local="AI" Global="AI" />
+        <Command Local="AICLEAR" Global="AICLEAR" />
       </Commands>
     </ComponentEntry>
   </Components>

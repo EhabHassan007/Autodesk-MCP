@@ -6,6 +6,14 @@
       <Name xlate="true" UID="XLS_SAC_PANEL_NAME">Smart Autodesk Connector</Name>
       <RibbonRow UID="RBN_SAC_ROW">
         <ModifiedRev MajorVersion="19" MinorVersion="1" UserVersion="0" />
+        <RibbonCommandButton UID="RBN_SAC_BTN_AIMARKUP" Id="AcRibbonCommandButton" Text="AI Markup" ButtonStyle="LargeWithText" MenuMacroID="MM_SAC_AIMARKUP" KeyTip="">
+          <TooltipTitle xlate="true" UID="XLS_SAC_BTN_AIMARKUP_TIP">AI Markup</TooltipTitle>
+          <ModifiedRev MajorVersion="19" MinorVersion="1" UserVersion="0" />
+        </RibbonCommandButton>
+        <RibbonCommandButton UID="RBN_SAC_BTN_AICLEAR" Id="AcRibbonCommandButton" Text="Clear Markup" ButtonStyle="LargeWithText" MenuMacroID="MM_SAC_AICLEAR" KeyTip="">
+          <TooltipTitle xlate="true" UID="XLS_SAC_BTN_AICLEAR_TIP">Clear Markup</TooltipTitle>
+          <ModifiedRev MajorVersion="19" MinorVersion="1" UserVersion="0" />
+        </RibbonCommandButton>
         <RibbonCommandButton UID="RBN_SAC_BTN_STATUS" Id="AcRibbonCommandButton" Text="Connection Status" ButtonStyle="LargeWithText" MenuMacroID="MM_SAC_STATUS" KeyTip="">
           <TooltipTitle xlate="true" UID="XLS_SAC_BTN_STATUS_TIP">Connection Status</TooltipTitle>
           <ModifiedRev MajorVersion="19" MinorVersion="1" UserVersion="0" />

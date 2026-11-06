@@ -6,7 +6,8 @@ param(
     [switch]$LibraryOnly
 )
 # Smart Autodesk Connector agent: a notification-area icon that starts at sign-in.
-#  - Checks for approved updates at start and every 6 hours.
+#  - Checks for approved updates at start, every 6 hours, and whenever Revit or AutoCAD opens
+#    (at most every 30 minutes), so a newly published version is found the next time they are opened.
 #  - When Revit or AutoCAD starts and an update is ready, shows a Windows notification.
 #  - Installs updates by itself once Revit and AutoCAD are closed (unless switched off in Settings),
 #    or straight after they close when the person chose "Update now".
@@ -47,6 +48,12 @@ function Get-AgentDecision {
     if ($AppsRunning.Count) { return 'wait' }          # never replace files under an open Revit/AutoCAD
     if ($AutoUpdate -or $Requested) { return 'install' }
     'none'
+}
+
+# Check again when Revit or AutoCAD opens, unless a check ran in the last 30 minutes.
+function Test-CheckOnAppStart {
+    param([string[]]$Started = @(), [datetime]$LastCheck, [datetime]$Now = (Get-Date))
+    $Started.Count -gt 0 -and ($Now - $LastCheck).TotalMinutes -ge 30
 }
 
 function Get-StartedApps {
@@ -173,6 +180,13 @@ function Complete-Job {
     $state = Read-UpdateStateFile
     switch ($kind) {
         'check' {
+            if ($script:agent.CheckFromAppStart) {
+                $script:agent.CheckFromAppStart = $false
+                # Found on opening Revit or AutoCAD: say it installs when they close (unless updates are switched off).
+                if ((ConvertFrom-UpdateOutput $text) -eq 'available' -and $state -and $state.notifications_enabled -and (Get-RunningApps).Count) {
+                    Show-Notice 'Smart Autodesk Connector update ready' ("Version {0} installs when you close Revit and AutoCAD. Click here to update now." -f $state.available_version) -OffersUpdate
+                }
+            }
             if ($script:agent.ManualCheck) {
                 $script:agent.ManualCheck = $false
                 switch (ConvertFrom-UpdateOutput $text) {
@@ -270,6 +284,9 @@ $tick.Add_Tick({
         $apps = Get-RunningApps
         $started = Get-StartedApps $script:agent.LastApps $apps
         $script:agent.LastApps = $apps
+        if (-not $script:agent.Job -and (Test-CheckOnAppStart -Started $started -LastCheck $script:agent.LastCheck)) {
+            $script:agent.CheckFromAppStart = $true; Start-UpdateCheck; return
+        }
         $state = Read-UpdateStateFile
         if (-not $state) { return }
         $auto = [bool]$state.notifications_enabled

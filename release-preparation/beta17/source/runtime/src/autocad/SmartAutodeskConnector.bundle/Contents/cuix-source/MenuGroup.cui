@@ -49,5 +49,29 @@
         <CLICommand xlate="true" UID="XLS_SAC_STATUS_CLI">SACSTATUS</CLICommand>
       </Macro>
     </MenuMacro>
+    <MenuMacro UID="MM_SAC_AIMARKUP">
+      <Macro type="Any">
+        <Revision MajorVersion="16" MinorVersion="2" UserVersion="0" />
+        <ModifiedRev MajorVersion="19" MinorVersion="1" UserVersion="0" />
+        <Name xlate="true" UID="XLS_SAC_AIMARKUP_NAME">AI Markup</Name>
+        <Command>^C^C_AI</Command>
+        <HelpString xlate="true" UID="XLS_SAC_AIMARKUP_HELP">Sketch on the drawing, type what Claude should do, and paste the copied request into Claude. The sketch goes on layer AI-MARKUP, which does not plot.</HelpString>
+        <SmallImage Name="sac-ai-markup-16.png" />
+        <LargeImage Name="sac-ai-markup-32.png" />
+        <CLICommand xlate="true" UID="XLS_SAC_AIMARKUP_CLI">AI</CLICommand>
+      </Macro>
+    </MenuMacro>
+    <MenuMacro UID="MM_SAC_AICLEAR">
+      <Macro type="Any">
+        <Revision MajorVersion="16" MinorVersion="2" UserVersion="0" />
+        <ModifiedRev MajorVersion="19" MinorVersion="1" UserVersion="0" />
+        <Name xlate="true" UID="XLS_SAC_AICLEAR_NAME">Clear Markup</Name>
+        <Command>^C^C_AICLEAR</Command>
+        <HelpString xlate="true" UID="XLS_SAC_AICLEAR_HELP">Delete all AI markup from this drawing and purge the AI-MARKUP layer.</HelpString>
+        <SmallImage Name="sac-ai-clear-16.png" />
+        <LargeImage Name="sac-ai-clear-32.png" />
+        <CLICommand xlate="true" UID="XLS_SAC_AICLEAR_CLI">AICLEAR</CLICommand>
+      </Macro>
+    </MenuMacro>
   </MacroGroup>
 </MenuGroup>

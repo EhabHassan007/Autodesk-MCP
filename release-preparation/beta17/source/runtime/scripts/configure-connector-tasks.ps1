@@ -20,9 +20,14 @@ try {
     $settingsPath=Join-Path $stateRoot 'settings.json'
     $installedScripts=Join-Path $stateRoot 'scripts'
     New-Item -ItemType Directory -Path $installedScripts -Force|Out-Null
-    foreach($name in @('weekly-skill-collection.ps1','collect-skills-for-review.ps1','submit-team-knowledge.ps1','central-skill-sync.ps1','Initialize-SkillService.ps1','send-usage.ps1','connector-agent.ps1','SkillLibrary.ps1')) {
-        Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $installedScripts $name) -Force
+    # Each file is copied on its own: one file in use (the running connector agent) must not leave the rest
+    # out of date or missing. Skills Sync also restores a missing helper from the installed connector.
+    $notCopied=@()
+    foreach($name in @('SkillLibrary.ps1','weekly-skill-collection.ps1','collect-skills-for-review.ps1','submit-team-knowledge.ps1','central-skill-sync.ps1','Initialize-SkillService.ps1','send-usage.ps1','connector-agent.ps1')) {
+        try {Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $installedScripts $name) -Force -ErrorAction Stop}
+        catch {$notCopied+=$name}
     }
+    if($notCopied.Count){Write-Warning ('Skill helpers not refreshed (in use): '+($notCopied -join ', ')+'. They are refreshed on the next setup or restored by Skills Sync.')}
     $saved=if(Test-Path $settingsPath){Get-Content $settingsPath -Raw|ConvertFrom-Json}else{$null}
     if($saved -and $saved.enabled -eq $false){Write-Host 'Weekly skills remain disabled in Settings.'}
     else {
