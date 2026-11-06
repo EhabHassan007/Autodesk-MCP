@@ -1,10 +1,13 @@
 $ErrorActionPreference='Stop'
 $root=(Join-Path $PSScriptRoot '../source/runtime')
-$env:LOCALAPPDATA='/tmp/reg-test-local';$env:APPDATA='/tmp/reg-test-roaming'
+$tmp=[IO.Path]::GetTempPath();$env:LOCALAPPDATA=Join-Path $tmp 'reg-test-local';$env:APPDATA=Join-Path $tmp 'reg-test-roaming'
 . "$root/installer/Setup-BimCad.ps1" -LibraryOnly
-$r=@(Invoke-External '/bin/sh' @('-c','echo diagnostic; exit 0'))
+# A shell that exists on both Windows (cmd) and Linux (sh), for one command with known output and exit code.
+$windows=[Environment]::OSVersion.Platform -eq 'Win32NT'
+$shell=if($windows){'cmd.exe'}else{'/bin/sh'};$flag=if($windows){'/c'}else{'-c'}
+$r=@(Invoke-External $shell @($flag,'echo diagnostic& exit 0'.Replace('&',$(if($windows){'&'}else{';'}))))
 if($r.Count -ne 1 -or $r[0].ExitCode -ne 0 -or $r[0].Output[0] -ne 'diagnostic'){throw 'Mixed command output with result object'}
-try { Invoke-External '/bin/sh' @('-c','echo actual-error >&2; exit 1');throw 'Expected failure' }
+try { Invoke-External $shell @($flag,$(if($windows){'echo actual-error 1>&2& exit 1'}else{'echo actual-error >&2; exit 1'}));throw 'Expected failure' }
 catch {if($_.Exception.Message -notmatch 'actual-error'){throw}}
 'PASS: external command returns one result; captures stderr and operation on failure'
 function Get-RequiredCommand { 'fake-codex' }
@@ -12,7 +15,8 @@ $script:calls=@();$script:matching=$true
 function Invoke-External {
  param($FilePath,$Arguments,[switch]$AllowFailure)
  $script:calls+=($Arguments -join ' ')
- if($Arguments[1] -eq 'remove'){throw 'Unexpected destructive removal'}
+ # Only an older duplicate of this connector, listed as a legacy name, may be removed; never the live entry or another tool's.
+ if($Arguments[1] -eq 'remove' -and $Arguments[2] -ne 'AutoCAD MCP'){throw "Unexpected removal of $($Arguments[2])"}
  if($Arguments[1] -eq 'get'){
   $cmd=if($script:matching){'powershell.exe'}else{'old.exe'}
   return [pscustomobject]@{ExitCode=0;Output=@((@{enabled=$true;transport=@{command=$cmd;args=@('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',"$root/src/autodesk/autodesk-bridge.ps1",'-RevitVersion','2024')}}|ConvertTo-Json -Depth 5 -Compress))}
@@ -20,11 +24,12 @@ function Invoke-External {
  [pscustomobject]@{ExitCode=0;Output=@('registered')}
 }
 Register-McpServer -Name autodesk -Bridge "$root/src/autodesk/autodesk-bridge.ps1" -BridgeArguments @('-RevitVersion','2024') -LegacyNames @('AutoCAD MCP')
-if($script:calls.Count -ne 1){throw 'Rewrote correct registration'}
+if($script:calls -match '^mcp add'){throw 'Rewrote correct registration'}
+if(@($script:calls -match '^mcp remove').Count -ne 1 -or -not ($script:calls -match '^mcp remove AutoCAD MCP')){throw 'Older duplicate entry was not removed'}
 $script:calls=@();$script:matching=$false
 Register-McpServer -Name autodesk -Bridge "$root/src/autodesk/autodesk-bridge.ps1" -BridgeArguments @('-RevitVersion','2024')
 if(-not ($script:calls -match '^mcp add autodesk')){throw 'Did not repair wrong registration'}
-'PASS: existing correct Codex registration preserved; wrong registration replaced without removing other connectors'
+'PASS: existing correct Codex registration preserved; older duplicate removed; wrong registration replaced without removing other connectors'
 # Execute the real Update action body with dependency stubs.
 $t=$null;$e=$null;$ast=[Management.Automation.Language.Parser]::ParseFile("$root/installer/Setup-BimCad.ps1",[ref]$t,[ref]$e)
 $sw=$ast.FindAll({param($n) $n -is [Management.Automation.Language.SwitchStatementAst]},$true)|Where-Object {$_.Condition.Extent.Text -eq '$Action'}

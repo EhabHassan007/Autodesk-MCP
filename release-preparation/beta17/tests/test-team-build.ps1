@@ -8,7 +8,7 @@ function Entries([string]$Zip){$z=[IO.Compression.ZipFile]::OpenRead($Zip);try{@
 function Read-Entry([string]$Zip,[string]$Name,[string]$Out){$z=[IO.Compression.ZipFile]::OpenRead($Zip);try{[IO.Compression.ZipFileExtensions]::ExtractToFile($z.GetEntry($Name),$Out)}finally{$z.Dispose()}}
 try{
  New-Item -ItemType Directory $copy|Out-Null
- foreach($item in @('source','tests','build.py','build.ps1','RELEASE-NOTES.md')){Copy-Item (Join-Path $PSScriptRoot "../$item") $copy -Recurse}
+ foreach($item in @('source','tests','setup','build.py','build.ps1','RELEASE-NOTES.md')){Copy-Item (Join-Path $PSScriptRoot "../$item") $copy -Recurse}
  Assert ((Entries (Join-Path $PSScriptRoot '../source/Support/Autodesk-MCP-Payload.zip')) -notcontains 'Autodesk-MCP-Payload/installer/team-join.json') 'Committed payload contains a join code'
  $code='team-build-test-code-'+[guid]::NewGuid().ToString('N')
  $secure=ConvertTo-SecureString $code -AsPlainText -Force

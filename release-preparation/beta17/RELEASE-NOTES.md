@@ -12,4 +12,4 @@ First full release. Installed PCs on any beta update to it automatically.
 - Skills grouped by software category; Skills Sync buttons in Revit and on the AutoCAD Add-ins tab; setup continues past a failed step and replaces the old flat skill library on upgrade.
 - Your own skill edits, team registration and update preferences are kept on update.
 
-SHA-256: FB8F525CB46A932C9D3777426C1C7299BB4F240154787E30ABCB4BFD7FDF05E3
+SHA-256: C264CEEFF371AED21DD756FA13F03E34977493623B44A7EA3A3D1C6B45EE5BB8

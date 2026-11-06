@@ -10,6 +10,8 @@ foreach($n in 'weekly-skill-collection.ps1','collect-skills-for-review.ps1','sub
  if($n -ne 'SkillLibrary.ps1'){Copy-Item (Join-Path $source $n) (Join-Path $copy $n)}
 }
 $engine=(Get-Process -Id $PID).Path
+# The runs below are expected to write errors; on Windows PowerShell 5.1 that must not stop the test.
+$ErrorActionPreference='Continue'
 try{
  $null=& $engine -NoProfile -File (Join-Path $copy 'weekly-skill-collection.ps1') -Action Preview -Product Revit -RepositoryRoot $repo -StateRoot $state 2>&1
  if(-not (Test-Path (Join-Path $copy 'SkillLibrary.ps1'))){throw 'Missing SkillLibrary.ps1 was not restored'}
