@@ -1629,6 +1629,13 @@ function Install-StartMenuShortcut {
         New-Item -ItemType Directory -Path $programs -Force | Out-Null
         $shell = New-Object -ComObject WScript.Shell
         $shortcut = $shell.CreateShortcut((Join-Path $programs 'Smart Connector.lnk'))
+        # The setup .exe already created one (RemoteSigned); keep it.
+        $app = Join-Path $Root 'installer\SmartConnectorApp.ps1'
+        if ([string]$shortcut.Arguments -like ('*' + $app + '*')) {
+            [void][Runtime.InteropServices.Marshal]::ReleaseComObject($shell)
+            Write-Step 'Smart Connector is in the Start menu.'
+            return
+        }
         $shortcut.TargetPath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
         $shortcut.Arguments = '-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File "{0}"' -f (Join-Path $Root 'installer\SmartConnectorApp.ps1')
         $shortcut.WorkingDirectory = $env:LOCALAPPDATA
@@ -1994,8 +2001,15 @@ try {
             }
             Invoke-InstallStep 'team' {
                 # An administrator's enrollment file wins; otherwise the setup window's details are used.
-                if ($JoinName -and $JoinEmail -and [string]::IsNullOrWhiteSpace($EnrollmentPath)) { $null = Register-SkillServiceDevice -Root $root }
-                else { $null = Import-SkillServiceEnrollment -Root $root }
+                try {
+                    if ($JoinName -and $JoinEmail -and [string]::IsNullOrWhiteSpace($EnrollmentPath)) { $null = Register-SkillServiceDevice -Root $root }
+                    else { $null = Import-SkillServiceEnrollment -Root $root }
+                }
+                finally {
+                    # The setup .exe installs the TEAM join code with the other files; it never stays after setup.
+                    $installedJoin = Join-Path $root 'installer\team-join.json'
+                    if (Test-Path -LiteralPath $installedJoin -PathType Leaf) { Remove-Item -LiteralPath $installedJoin -Force }
+                }
             }
             Invoke-InstallStep 'revit' {
                 if ($Product -in @('All','Revit') -and (Test-Revit2024Installed)) {
@@ -2028,6 +2042,9 @@ try {
                 }
             }
             Invoke-InstallStep 'codex' { Register-DetectedAiClients $root -Clients $choices.AiClients }
+            # Setup has run to the end: Smart Connector opens normally from now on (Repair is in Components).
+            $pendingMarker = Join-Path $root 'setup\setup-pending.txt'
+            if (Test-Path -LiteralPath $pendingMarker -PathType Leaf) { Remove-Item -LiteralPath $pendingMarker -Force }
             # Final checks only report; they never undo a completed step.
             $script:CurrentInstallStep = ''
             foreach ($check in @(

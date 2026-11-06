@@ -22,10 +22,17 @@ try {
     Assert ($outer -notmatch '-Action Sync') 'Setup still starts a hidden Skills Sync after installing'
     'PASS: no scheduled tasks, no agent, no web gateway or tunnel, no hidden work after setup'
 
-    # 1b. The setup .exe installs the files itself and starts PowerShell under RemoteSigned, not Bypass.
+    # 1b. The setup .exe only installs files and a Start menu entry: it runs no program or script. The first open of
+    #     Smart Connector shows the setup window; the Start menu entry uses RemoteSigned, not Bypass.
     $iss = Get-Content (Join-Path $runtime '../../setup/SmartAutodeskConnector.iss') -Raw
-    Assert ($iss -match 'ExecutionPolicy RemoteSigned' -and $iss -notmatch 'ExecutionPolicy Bypass') 'Setup still starts PowerShell with the policy bypassed'
-    Assert ($iss -match 'recursesubdirs' -and $iss -match '-PayloadFolder' -and $iss -notmatch 'Payload\.zip') 'Setup still ships an archive for a script to unpack'
+    $code = $iss.Substring($iss.IndexOf('[Code]'))
+    Assert ($code -notmatch 'Exec|ShellExec|powershell' -and $iss -notmatch '(?m)^\[Run\]') 'The setup .exe still starts a program'
+    Assert ($iss -match 'ExecutionPolicy RemoteSigned' -and $iss -notmatch 'ExecutionPolicy Bypass') 'The Start menu entry bypasses the script policy'
+    Assert ($iss -match 'recursesubdirs' -and $iss -notmatch 'Payload\.zip' -and $code -match 'setup-pending\.txt') 'Setup does not install the files itself or does not mark setup as pending'
+    $appText = Get-Content (Join-Path $runtime 'installer/SmartConnectorApp.ps1') -Raw
+    $coreText = Get-Content (Join-Path $runtime 'installer/Setup-BimCad.ps1') -Raw
+    Assert ($appText -match 'setup-pending\.txt' -and $appText -match '-Install -PayloadFolder') 'Smart Connector does not finish setup on its first open'
+    Assert ($coreText -match "setup\\setup-pending\.txt" -and $coreText -match 'installedJoin = Join-Path \$root ''installer\\team-join\.json''') 'Setup does not clear the pending mark or the installed team join code'
     if ([Environment]::OSVersion.Platform -eq 'Win32NT') {
         $folder = Join-Path $t 'setup-files'
         Expand-Archive -LiteralPath (Join-Path $runtime '../Support/Autodesk-MCP-Payload.zip') -DestinationPath $folder
@@ -35,7 +42,7 @@ try {
         $code = $LASTEXITCODE; $ErrorActionPreference = 'Stop'
         Assert ($code -eq 0) ("Setup does not start from installed files under RemoteSigned:`n" + ($out -join "`n"))
         Assert (-not (Test-Path (Join-Path $env:LOCALAPPDATA 'SmartConnectorSetup'))) 'Setup unpacked an archive although it was given the installed files'
-        'PASS: setup starts from the files the .exe installed, under RemoteSigned'
+        'PASS: the setup window runs from the installed files under RemoteSigned'
     }
 
     # 2. Revit, AutoCAD and the app share one set of day stamps and the same reminder rules.

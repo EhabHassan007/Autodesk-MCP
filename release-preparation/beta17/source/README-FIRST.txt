@@ -1,13 +1,12 @@
 Smart Connector for Autodesk Revit and AutoCAD 1.1.0
 
-Easiest: run the Smart-Connector-Setup .exe your administrator shared. With this ZIP instead: extract it completely, save your work, close Revit and AutoCAD, and run INSTALL Smart Connector.cmd. Then restart Revit, AutoCAD and your AI clients.
+Easiest: run the Smart-Connector-Setup .exe your administrator shared. It only installs the files and adds Smart Connector to the Start menu; then open Smart Connector from the Start menu to finish setup. With this ZIP instead: extract it completely, save your work, close Revit and AutoCAD, and run INSTALL Smart Connector.cmd. Then restart Revit, AutoCAD and your AI clients.
 
 During setup you choose which AI apps to connect (Claude Desktop, Claude Code, Codex) and which Autodesk software to set up (Revit 2024, AutoCAD). Updates and Repair keep your choices.
 
 After setup, open Smart Connector from the Start menu or with Open Connector in Revit and AutoCAD. It shows whether everything is connected and has Skills Sync, updates, settings, diagnostics and help in one place.
 
 Antivirus: Smart Connector is not code-signed, so Kaspersky and other antivirus programs may block or delete it. Before installing, add these folders to the antivirus exclusions (Kaspersky: Settings > Threats and Exclusions > Manage exclusions); replace <you> with your Windows user name:
-  C:\Users\<you>\AppData\Local\SmartConnectorSetup   (setup unpacks here and removes it afterwards)
   C:\Users\<you>\AppData\Local\BIM-CAD-MCP
   C:\Users\<you>\AppData\Local\AutodeskMcpSkillCollection
   C:\Users\<you>\AppData\Local\AutodeskMcpConnector

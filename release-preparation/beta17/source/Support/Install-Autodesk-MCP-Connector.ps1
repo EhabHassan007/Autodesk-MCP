@@ -2,8 +2,8 @@
 param(
     [switch]$Install,
     [switch]$SmokeTest,
-    # The setup .exe installs the payload as files and passes their folder; the ZIP installer passes nothing and
-    # the payload archive beside this script is unpacked instead.
+    # The setup .exe installs the connector files; on the first open Smart Connector runs this with their folder.
+    # The ZIP installer passes nothing and the payload archive beside this script is unpacked instead.
     [string]$PayloadFolder
 )
 
