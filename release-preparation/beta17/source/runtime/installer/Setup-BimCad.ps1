@@ -1587,6 +1587,27 @@ function Test-RemoteClaudeSetup {
     catch { Write-Step 'Remote Claude gateway is not configured on this workstation.' }
 }
 
+# Start menu entry for the Smart Connector app (this user only). Never fails setup.
+function Install-StartMenuShortcut {
+    param([string]$Root)
+    try {
+        $programs = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
+        New-Item -ItemType Directory -Path $programs -Force | Out-Null
+        $shell = New-Object -ComObject WScript.Shell
+        $shortcut = $shell.CreateShortcut((Join-Path $programs 'Smart Connector.lnk'))
+        $shortcut.TargetPath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        $shortcut.Arguments = '-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File "{0}"' -f (Join-Path $Root 'installer\SmartConnectorApp.ps1')
+        $shortcut.WorkingDirectory = $env:LOCALAPPDATA
+        $shortcut.IconLocation = (Join-Path $Root 'assets\logo.ico') + ',0'
+        $shortcut.Description = 'Smart Connector for Autodesk Revit and AutoCAD'
+        $shortcut.WindowStyle = 7
+        $shortcut.Save()
+        [void][Runtime.InteropServices.Marshal]::ReleaseComObject($shell)
+        Write-Step 'Added Smart Connector to the Start menu.'
+    }
+    catch { Write-Step ('The Start menu shortcut could not be created: {0}' -f $_.Exception.Message) }
+}
+
 function Test-Revit2024Installed {
     Test-Path -LiteralPath (Join-Path $env:ProgramFiles 'Autodesk\Revit 2024\RevitAPI.dll') -PathType Leaf
 }
@@ -1935,6 +1956,7 @@ try {
             Write-InstallPhase 'files'
             $root = Get-Repository
             Write-InstallResult 'files' 'ok'
+            Install-StartMenuShortcut $root
             # The connector files are required by every later step; each later step fails on its own.
             Invoke-InstallStep 'skills' {
                 Install-Skills $root
@@ -1995,6 +2017,7 @@ try {
                 break
             }
             Install-Skills $root
+            Install-StartMenuShortcut $root
             if ($Product -in @('All','Revit') -and (Test-Revit2024Installed)) {
                 Install-RevitAddin $root
             }
