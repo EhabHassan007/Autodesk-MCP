@@ -1,7 +1,10 @@
 [CmdletBinding()]
 param(
     [switch]$Install,
-    [switch]$SmokeTest
+    [switch]$SmokeTest,
+    # The setup .exe installs the payload as files and passes their folder; the ZIP installer passes nothing and
+    # the payload archive beside this script is unpacked instead.
+    [string]$PayloadFolder
 )
 
 $ErrorActionPreference = 'Stop'
@@ -44,12 +47,17 @@ function Show-SetupMessage {
 }
 
 try {
-    if (-not (Test-Path -LiteralPath $payload -PathType Leaf)) {
-        throw "The installation payload is missing: $payload"
+    if ($PayloadFolder) {
+        $packageRoot = $PayloadFolder
     }
-    New-Item -ItemType Directory -Path $temporaryRoot -Force | Out-Null
-    Expand-Archive -LiteralPath $payload -DestinationPath $temporaryRoot -Force
-    $packageRoot = Join-Path $temporaryRoot 'Autodesk-MCP-Payload'
+    else {
+        if (-not (Test-Path -LiteralPath $payload -PathType Leaf)) {
+            throw "The installation payload is missing: $payload"
+        }
+        New-Item -ItemType Directory -Path $temporaryRoot -Force | Out-Null
+        Expand-Archive -LiteralPath $payload -DestinationPath $temporaryRoot -Force
+        $packageRoot = Join-Path $temporaryRoot 'Autodesk-MCP-Payload'
+    }
     $setup = Join-Path $packageRoot 'installer\BIM-CAD-Setup.ps1'
     $coreSetup = Join-Path $packageRoot 'installer\Setup-BimCad.ps1'
     if (-not (Test-Path -LiteralPath $setup -PathType Leaf) -or
