@@ -4,6 +4,8 @@
 
 . (Join-Path $PSScriptRoot 'Brand.ps1')
 . (Join-Path $PSScriptRoot 'TeamJoinDialog.ps1')
+# Detection helpers for the System check (files, registry and process list only).
+. (Join-Path $PSScriptRoot 'ConnectorStatus.ps1') -RepositoryPath (Split-Path -Parent $PSScriptRoot)
 
 $script:WizardSteps = @(
     @{ Id = 'files';          Label = 'Install connector files' },
@@ -90,7 +92,6 @@ function Show-SetupWizard {
         [bool]$HasEnrollmentFile = $false,
         [switch]$SmokeTest
     )
-    . (Join-Path $PSScriptRoot 'ConnectorStatus.ps1') -RepositoryPath (Split-Path -Parent $PSScriptRoot)
     $termsPath = Join-Path $PSScriptRoot 'TERMS.txt'
     $termsVersion = Get-TermsVersion $termsPath
     $C = $script:BrandColors
