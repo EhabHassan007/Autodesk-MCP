@@ -16,9 +16,10 @@
     (princ "\nSmart Connector is not installed for this user. Run its setup again."))
   (princ))
 
+(defun c:SACOPEN () (sac:run "SmartConnectorApp.ps1" "-Section Overview"))
 (defun c:SACSKILLSSYNC () (sac:run "ConnectorActions.ps1" "-Action SkillsSync"))
 (defun c:SACCHECKUPDATES () (sac:run "ConnectorActions.ps1" "-Action CheckUpdates"))
-(defun c:SACSETTINGS () (sac:run "Settings.ps1" ""))
+(defun c:SACSETTINGS () (sac:run "SmartConnectorApp.ps1" "-Section Settings"))
 (defun c:SACSTATUS () (sac:run "ConnectorActions.ps1" "-Action Status"))
 
 (princ)

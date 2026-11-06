@@ -236,6 +236,20 @@ namespace BimCadMcp.Revit
 
     internal static class Icons
     {
+        // The icon family: SVG path data on a 24-unit grid, the same strings as installer\Brand.ps1
+        // ($script:BrandIconPaths). tests\test-design-system.ps1 checks that they stay identical.
+        internal static readonly System.Collections.Generic.Dictionary<string, string> Paths = new System.Collections.Generic.Dictionary<string, string>
+        {
+            { "connector", "M17 7c-1.2-1.6-3-2.5-5-2.5-2.6 0-4.5 1.5-4.5 3.5 0 4.6 9 2.4 9 7.3 0 2-1.9 3.7-4.5 3.7-2 0-3.8-.9-5-2.5" },
+            { "sync", "M4.5 10a7.5 7.5 0 0 1 13.4-3.6L19.5 8M19.5 4v4h-4M19.5 14a7.5 7.5 0 0 1-13.4 3.6L4.5 16M4.5 20v-4h4" },
+            { "skills", "M4.5 6.5l1.5 1.5 2.5-3M4.5 12.5l1.5 1.5 2.5-3M4.5 18.5l1.5 1.5 2.5-3M11 7h9M11 13h9M11 19h9" },
+            { "status", "M9 3v4M15 3v4M7 7h10v3.5a5 5 0 0 1-10 0zM12 15.5V21" },
+            { "updates", "M12 4v11M7.5 10.5L12 15l4.5-4.5M5 20h14" },
+            { "settings", "M4 7h9M17 7h3M4 12h3M11 12h9M4 17h11M19 17h1M15 5v4M9 10v4M17 15v4" },
+            { "diagnostics", "M3 12h4l2-5 4 10 2-5h6" },
+            { "help", "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM9.6 9.4a2.5 2.5 0 1 1 3.4 2.4c-.6.3-1 .8-1 1.5v.6M12 17v.01" }
+        };
+
         private static Media.Brush Gradient()
         {
             Media.LinearGradientBrush brush = new Media.LinearGradientBrush(
@@ -244,16 +258,19 @@ namespace BimCadMcp.Revit
             return brush;
         }
 
-        // Every button: the navy tile from the logo with a teal-to-blue glyph on top.
-        private static Media.ImageSource Tile(Action<Media.DrawingContext, Media.Pen> glyph)
+        // Every ribbon button: the navy tile with the teal-to-blue glyph from the icon family, drawn as vectors
+        // so Revit scales it for 16 px and 32 px buttons and any display scaling.
+        internal static Media.ImageSource Tile(string name, bool small)
         {
             Media.DrawingGroup group = new Media.DrawingGroup();
             using (Media.DrawingContext context = group.Open())
             {
                 context.DrawRoundedRectangle(new Media.SolidColorBrush(Media.Color.FromRgb(22, 36, 61)), null, new System.Windows.Rect(0, 0, 32, 32), 7, 7);
-                Media.Pen pen = new Media.Pen(Gradient(), 2.8);
+                Media.Pen pen = new Media.Pen(Gradient(), small ? 3.0 : 2.3);
                 pen.StartLineCap = Media.PenLineCap.Round; pen.EndLineCap = Media.PenLineCap.Round; pen.LineJoin = Media.PenLineJoin.Round;
-                glyph(context, pen);
+                context.PushTransform(new Media.TranslateTransform(4, 4));
+                context.DrawGeometry(null, pen, Media.Geometry.Parse(Paths[name]));
+                context.Pop();
             }
             group.Freeze();
             Media.DrawingImage image = new Media.DrawingImage(group);
@@ -261,72 +278,23 @@ namespace BimCadMcp.Revit
             return image;
         }
 
-        internal static Media.ImageSource Connection()
+        // The logo itself (grip S on the tile), for Open Smart Connector.
+        internal static Media.ImageSource Logo()
         {
-            return Tile(delegate(Media.DrawingContext c, Media.Pen p)
+            Media.DrawingGroup group = new Media.DrawingGroup();
+            using (Media.DrawingContext context = group.Open())
             {
-                // The logo's grip S: two bowls with blue CAD grip squares at its ends.
-                Media.StreamGeometry s = new Media.StreamGeometry();
-                using (Media.StreamGeometryContext g = s.Open())
-                {
-                    g.BeginFigure(new System.Windows.Point(21, 10.5), false, false);
-                    g.ArcTo(new System.Windows.Point(16, 15.5), new System.Windows.Size(5, 5), 0, true, Media.SweepDirection.Counterclockwise, true, false);
-                    g.ArcTo(new System.Windows.Point(11, 20.5), new System.Windows.Size(5, 5), 0, true, Media.SweepDirection.Clockwise, true, false);
-                }
-                s.Freeze();
-                c.DrawGeometry(null, p, s);
+                context.DrawRoundedRectangle(new Media.SolidColorBrush(Media.Color.FromRgb(22, 36, 61)), null, new System.Windows.Rect(0, 0, 64, 64), 14, 14);
+                Media.Pen pen = new Media.Pen(new Media.SolidColorBrush(Media.Color.FromRgb(32, 201, 171)), 7);
+                context.DrawGeometry(null, pen, Media.Geometry.Parse("M42 21A10 10 0 1 0 32 31A10 10 0 1 1 22 41"));
                 Media.SolidColorBrush grip = new Media.SolidColorBrush(Media.Color.FromRgb(47, 128, 237));
-                c.DrawRectangle(grip, null, new System.Windows.Rect(18.6, 8.1, 4.8, 4.8));
-                c.DrawRectangle(grip, null, new System.Windows.Rect(8.6, 18.1, 4.8, 4.8));
-            });
-        }
-
-        internal static Media.ImageSource Update()
-        {
-            return Tile(delegate(Media.DrawingContext c, Media.Pen p)
-            {
-                c.DrawLine(p, new System.Windows.Point(16, 7.5), new System.Windows.Point(16, 19));
-                c.DrawLine(p, new System.Windows.Point(11, 14.5), new System.Windows.Point(16, 19.5));
-                c.DrawLine(p, new System.Windows.Point(21, 14.5), new System.Windows.Point(16, 19.5));
-                c.DrawLine(p, new System.Windows.Point(9.5, 24.5), new System.Windows.Point(22.5, 24.5));
-            });
-        }
-
-        internal static Media.ImageSource Sync()
-        {
-            return Tile(delegate(Media.DrawingContext c, Media.Pen p)
-            {
-                // Two arcs with arrow heads: upload saved skills, download approved ones.
-                Media.StreamGeometry s = new Media.StreamGeometry();
-                using (Media.StreamGeometryContext g = s.Open())
-                {
-                    g.BeginFigure(new System.Windows.Point(8.5, 14), false, false);
-                    g.ArcTo(new System.Windows.Point(22.5, 11), new System.Windows.Size(7.5, 7.5), 0, false, Media.SweepDirection.Clockwise, true, false);
-                    g.BeginFigure(new System.Windows.Point(23.5, 18), false, false);
-                    g.ArcTo(new System.Windows.Point(9.5, 21), new System.Windows.Size(7.5, 7.5), 0, false, Media.SweepDirection.Clockwise, true, false);
-                }
-                s.Freeze();
-                c.DrawGeometry(null, p, s);
-                c.DrawLine(p, new System.Windows.Point(22.5, 11), new System.Windows.Point(23, 6.5));
-                c.DrawLine(p, new System.Windows.Point(22.5, 11), new System.Windows.Point(18, 10.5));
-                c.DrawLine(p, new System.Windows.Point(9.5, 21), new System.Windows.Point(9, 25.5));
-                c.DrawLine(p, new System.Windows.Point(9.5, 21), new System.Windows.Point(14, 21.5));
-            });
-        }
-
-        internal static Media.ImageSource Settings()
-        {
-            return Tile(delegate(Media.DrawingContext c, Media.Pen p)
-            {
-                // Slider-style settings mark: three lines with knobs.
-                Media.Brush knob = new Media.SolidColorBrush(Media.Color.FromRgb(255, 255, 255));
-                c.DrawLine(p, new System.Windows.Point(8, 10), new System.Windows.Point(24, 10));
-                c.DrawLine(p, new System.Windows.Point(8, 16), new System.Windows.Point(24, 16));
-                c.DrawLine(p, new System.Windows.Point(8, 22), new System.Windows.Point(24, 22));
-                c.DrawEllipse(knob, null, new System.Windows.Point(19, 10), 2.6, 2.6);
-                c.DrawEllipse(knob, null, new System.Windows.Point(12, 16), 2.6, 2.6);
-                c.DrawEllipse(knob, null, new System.Windows.Point(17, 22), 2.6, 2.6);
-            });
+                context.DrawRectangle(grip, null, new System.Windows.Rect(37.5, 16.5, 9, 9));
+                context.DrawRectangle(grip, null, new System.Windows.Rect(17.5, 36.5, 9, 9));
+            }
+            group.Freeze();
+            Media.DrawingImage image = new Media.DrawingImage(group);
+            image.Freeze();
+            return image;
         }
 
         // The logo as a bitmap for WinForms dialogs, drawn with the same shapes as the ribbon icon.
@@ -370,18 +338,34 @@ namespace BimCadMcp.Revit
                 try { application.CreateRibbonTab(TabName); }
                 catch (Autodesk.Revit.Exceptions.ArgumentException) { }
 
-                RibbonPanel panel = application.GetRibbonPanels(TabName).FirstOrDefault(item => item.Name == "Connector");
-                if (panel == null) panel = application.CreateRibbonPanel(TabName, "Connector");
                 string assemblyPath = Assembly.GetExecutingAssembly().Location;
 
-                Add(panel, assemblyPath, "BimCadMcpConnectionStatus", "Connection\nStatus", typeof(ConnectionStatusCommand),
-                    "See whether Codex or Claude is connected to this Revit session.", Icons.Connection());
-                Add(panel, assemblyPath, "BimCadMcpCheckUpdates", "Check\nUpdates", typeof(CheckUpdatesCommand),
-                    "Check for a new version of Smart Connector. Updates install by themselves when Revit and AutoCAD are closed.", Icons.Update());
-                Add(panel, assemblyPath, "BimCadMcpSkillsSync", "Skills\nSync", typeof(SkillsSyncCommand),
-                    "Send your saved skills for review and download the latest approved team skills.", Icons.Sync());
-                Add(panel, assemblyPath, "BimCadMcpSettings", "Settings", typeof(SettingsCommand),
-                    "Turn automatic updates on or off.", Icons.Settings());
+                // Connector: open the app, check the connection. Large buttons for the two daily actions.
+                RibbonPanel connector = Panel(application, "Connector");
+                connector.AddItem(Button(assemblyPath, "BimCadMcpOpenConnector", "Open\nConnector", typeof(OpenConnectorCommand),
+                    "Open the Smart Connector app: status of Revit, AutoCAD, Claude and Codex, skills, updates and settings.", Icons.Logo(), Icons.Logo()));
+                connector.AddItem(Button(assemblyPath, "BimCadMcpConnectionStatus", "Connection\nStatus", typeof(ConnectionStatusCommand),
+                    "See whether Codex or Claude is connected to this Revit session.", Icons.Tile("status", false), Icons.Tile("status", true)));
+
+                // Skills: send and receive team skills, browse what is installed.
+                RibbonPanel skills = Panel(application, "Skills");
+                skills.AddItem(Button(assemblyPath, "BimCadMcpSkillsSync", "Skills\nSync", typeof(SkillsSyncCommand),
+                    "Send your saved skills for review and download the latest approved Revit and General skills.", Icons.Tile("sync", false), Icons.Tile("sync", true)));
+                skills.AddItem(Button(assemblyPath, "BimCadMcpBrowseSkills", "Browse\nSkills", typeof(BrowseSkillsCommand),
+                    "See the workflow skills installed for Claude and Codex, by category.", Icons.Tile("skills", false), Icons.Tile("skills", true)));
+
+                // Support: small stacked buttons.
+                RibbonPanel support = Panel(application, "Support");
+                support.AddStackedItems(
+                    Button(assemblyPath, "BimCadMcpCheckUpdates", "Check updates", typeof(CheckUpdatesCommand),
+                        "Check for a new version of Smart Connector. Updates install by themselves when Revit and AutoCAD are closed.", Icons.Tile("updates", false), Icons.Tile("updates", true)),
+                    Button(assemblyPath, "BimCadMcpSettings", "Settings", typeof(SettingsCommand),
+                        "Automatic updates and other Smart Connector settings.", Icons.Tile("settings", false), Icons.Tile("settings", true)));
+                support.AddStackedItems(
+                    Button(assemblyPath, "BimCadMcpDiagnostics", "Diagnostics", typeof(DiagnosticsCommand),
+                        "Logs and checks to send to your administrator when something does not work.", Icons.Tile("diagnostics", false), Icons.Tile("diagnostics", true)),
+                    Button(assemblyPath, "BimCadMcpHelp", "Help", typeof(HelpCommand),
+                        "How to use Smart Connector with Revit, AutoCAD, Claude and Codex.", Icons.Tile("help", false), Icons.Tile("help", true)));
             }
             catch (Exception exception)
             {
@@ -389,14 +373,68 @@ namespace BimCadMcp.Revit
             }
         }
 
-        private static void Add(RibbonPanel panel, string assemblyPath, string name, string text, Type command, string tip, Media.ImageSource icon)
+        private static RibbonPanel Panel(UIControlledApplication application, string name)
+        {
+            RibbonPanel panel = application.GetRibbonPanels(TabName).FirstOrDefault(item => item.Name == name);
+            return panel ?? application.CreateRibbonPanel(TabName, name);
+        }
+
+        private static PushButtonData Button(string assemblyPath, string name, string text, Type command, string tip, Media.ImageSource large, Media.ImageSource small)
         {
             PushButtonData data = new PushButtonData(name, text, assemblyPath, command.FullName);
             data.ToolTip = tip;
-            data.LargeImage = icon;
-            data.Image = icon;
-            panel.AddItem(data);
+            data.LargeImage = large;
+            data.Image = small;
+            return data;
         }
+    }
+
+    // Ribbon buttons that open the Smart Connector app at one of its sections.
+    internal static class ConnectorApp
+    {
+        internal static Result Open(string section)
+        {
+            try
+            {
+                string root = Connector.FindRoot();
+                Connector.StartHidden(Path.Combine(root, "installer", "SmartConnectorApp.ps1"),
+                    "-Section " + section + " -RepositoryPath " + Connector.Quote(root));
+                return Result.Succeeded;
+            }
+            catch (Exception exception)
+            {
+                TaskDialog.Show(Brand.Name, exception.Message);
+                return Result.Failed;
+            }
+        }
+    }
+
+    [Transaction(TransactionMode.Manual)]
+    [Regeneration(RegenerationOption.Manual)]
+    public sealed class OpenConnectorCommand : IExternalCommand
+    {
+        public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements) { return ConnectorApp.Open("Overview"); }
+    }
+
+    [Transaction(TransactionMode.Manual)]
+    [Regeneration(RegenerationOption.Manual)]
+    public sealed class BrowseSkillsCommand : IExternalCommand
+    {
+        public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements) { return ConnectorApp.Open("Skills"); }
+    }
+
+    [Transaction(TransactionMode.Manual)]
+    [Regeneration(RegenerationOption.Manual)]
+    public sealed class DiagnosticsCommand : IExternalCommand
+    {
+        public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements) { return ConnectorApp.Open("Diagnostics"); }
+    }
+
+    [Transaction(TransactionMode.Manual)]
+    [Regeneration(RegenerationOption.Manual)]
+    public sealed class HelpCommand : IExternalCommand
+    {
+        public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements) { return ConnectorApp.Open("Help"); }
     }
 
     internal static class Owner
@@ -557,9 +595,7 @@ namespace BimCadMcp.Revit
         {
             try
             {
-                string root = Connector.FindRoot();
-                Connector.StartHidden(Path.Combine(root, "installer", "Settings.ps1"), "-RepositoryPath " + Connector.Quote(root));
-                return Result.Succeeded;
+                return ConnectorApp.Open("Settings");
             }
             catch (Exception exception)
             {

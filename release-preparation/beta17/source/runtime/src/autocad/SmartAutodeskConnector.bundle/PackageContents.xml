@@ -24,6 +24,7 @@
     <!-- Demand-loaded: opening AutoCAD or a drawing runs nothing of ours; the LISP loads on the first button click. -->
     <ComponentEntry AppName="SmartAutodeskConnectorCommands" Version="1.0.0" ModuleName="./Contents/SmartAutodeskConnector.lsp" AppDescription="Commands behind the Smart Connector buttons" LoadOnCommandInvocation="True" PerDocument="True">
       <Commands GroupName="SMARTAUTODESKCONNECTOR">
+        <Command Local="SACOPEN" Global="SACOPEN" />
         <Command Local="SACSKILLSSYNC" Global="SACSKILLSSYNC" />
         <Command Local="SACCHECKUPDATES" Global="SACCHECKUPDATES" />
         <Command Local="SACSETTINGS" Global="SACSETTINGS" />

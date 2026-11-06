@@ -28,12 +28,25 @@ param(
     [string]$JoinEmail = '',
 
     # Version of the terms of use the person accepted in the setup window; sent when joining the team.
-    [string]$TermsVersion = ''
+    [string]$TermsVersion = '',
+
+    # Choices from the setup window. Empty means: the choices saved by the last setup, else everything.
+    # AiClients is a comma-separated list of ClaudeDesktop, ClaudeCode and Codex.
+    [string]$AiClients = '',
+
+    [ValidateSet('', 'On', 'Off')]
+    [string]$Skills = '',
+
+    [ValidateSet('', 'On', 'Off')]
+    [string]$AutoUpdates = ''
 )
 
 $ErrorActionPreference = 'Stop'
 $updateStateDirectory = Join-Path $env:LOCALAPPDATA 'AutodeskMcpConnector'
 $updateStatePath = Join-Path $updateStateDirectory 'update-state.json'
+$installChoicesPath = Join-Path $updateStateDirectory 'install-choices.json'
+$script:ProductGiven = $PSBoundParameters.ContainsKey('Product')
+$script:AllAiClients = @('ClaudeDesktop', 'ClaudeCode', 'Codex')
 $updateTaskName = 'Autodesk MCP Connector Update Alerts'
 
 function Write-Step {
@@ -61,6 +74,35 @@ function Invoke-InstallStep {
         Write-InstallResult $failedStep 'failed' 'see the setup log'
         $script:FailedInstallSteps.Add($failedStep)
     }
+}
+
+# Which AI apps to connect, which Autodesk programs to set up and whether to install the team skills.
+# Values given on the command line (the setup window) win and are saved; Update and Repair reuse the saved
+# choices; with nothing saved, everything is set up as before.
+function Get-InstallChoices {
+    param([string]$AiClients = '', [string]$Product = 'All', [bool]$ProductGiven = $false, [string]$Skills = '', [string]$Path = $installChoicesPath)
+    $saved = $null
+    if (Test-Path -LiteralPath $Path -PathType Leaf) { try { $saved = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json } catch { $saved = $null } }
+    $clients = if (-not [string]::IsNullOrWhiteSpace($AiClients)) {
+        @($AiClients -split '[,; ]+' | Where-Object { $_ } | ForEach-Object {
+            $name = $_
+            $match = $script:AllAiClients | Where-Object { $_ -ieq $name } | Select-Object -First 1
+            if (-not $match) { throw "Unknown AI app: $name. Use ClaudeDesktop, ClaudeCode or Codex." }
+            $match
+        } | Select-Object -Unique)
+    }
+    elseif ($saved -and $saved.PSObject.Properties['ai_clients']) { @($saved.ai_clients | Where-Object { $script:AllAiClients -contains $_ }) }
+    else { @($script:AllAiClients) }
+    $chosenProduct = if ($ProductGiven) { $Product } elseif ($saved -and $saved.PSObject.Properties['product'] -and $saved.product -in 'All', 'AutoCAD', 'Revit') { [string]$saved.product } else { 'All' }
+    $withSkills = if ($Skills) { $Skills -eq 'On' } elseif ($saved -and $saved.PSObject.Properties['skills']) { [bool]$saved.skills } else { $true }
+    [pscustomobject]@{ AiClients = @($clients); Product = $chosenProduct; Skills = $withSkills }
+}
+
+function Save-InstallChoices {
+    param($Choices, [string]$Path = $installChoicesPath)
+    New-Item -ItemType Directory -Path (Split-Path -Parent $Path) -Force | Out-Null
+    @{ ai_clients = @($Choices.AiClients); product = $Choices.Product; skills = [bool]$Choices.Skills; saved_utc = [DateTime]::UtcNow.ToString('o') } |
+        ConvertTo-Json | Set-Content -LiteralPath $Path -Encoding UTF8
 }
 
 function Write-InstallResult {
@@ -1240,7 +1282,7 @@ function Register-ClaudeDesktopMcpServer {
 }
 
 function Register-DetectedAiClients {
-    param([string]$Root)
+    param([string]$Root, [string[]]$Clients = $script:AllAiClients)
 
     $bridge = Join-Path $Root 'src\autodesk\autodesk-bridge.ps1'
     $arguments = @('-RevitVersion','2024')
@@ -1254,7 +1296,8 @@ function Register-DetectedAiClients {
     $claudeDesktopInstallation = Get-ClaudeDesktopInstallation
 
     Write-InstallPhase 'codex'
-    if (Get-OptionalCommand 'codex') {
+    if ($Clients -notcontains 'Codex') { Write-Step 'Codex was not selected in setup.'; Write-InstallResult 'codex' 'skipped' 'not selected' }
+    elseif (Get-OptionalCommand 'codex') {
         try {
             Register-McpServer 'autodesk' $bridge $arguments $legacyNames
             $detected++
@@ -1269,7 +1312,8 @@ function Register-DetectedAiClients {
     else { Write-Step 'Codex was not detected, so its MCP registration was skipped.'; Write-InstallResult 'codex' 'skipped' 'Codex is not installed' }
 
     Write-InstallPhase 'claude_code'
-    if (Get-OptionalCommand 'claude') {
+    if ($Clients -notcontains 'ClaudeCode') { Write-Step 'Claude Code was not selected in setup.'; Write-InstallResult 'claude_code' 'skipped' 'not selected' }
+    elseif (Get-OptionalCommand 'claude') {
         try {
             Register-ClaudeCodeMcpServer 'autodesk' $bridge $arguments $legacyNames
             $detected++
@@ -1284,28 +1328,31 @@ function Register-DetectedAiClients {
     else { Write-Step 'Claude Code was not detected, so its MCP registration was skipped.'; Write-InstallResult 'claude_code' 'skipped' 'Claude Code is not installed' }
 
     Write-InstallPhase 'claude_desktop'
-    if ($InstallClaudeDesktopIfMissing -and -not $claudeDesktopInstallation) {
-        $claudeDesktopInstallation = Install-ClaudeDesktop
-    }
-    if ($claudeDesktopInstallation -or $InstallClaudeDesktopIfMissing) {
-        $desktopFailed = $false
-        foreach ($configPath in @(Get-ClaudeDesktopConfigPaths)) {
-            try {
-                Register-ClaudeDesktopMcpServer -Name 'Smart Connector' -Bridge $bridge -BridgeArguments $arguments -LegacyNames $claudeDesktopLegacyNames -ConfigPath $configPath
-                $detected++
-            }
-            catch {
-                $desktopFailed = $true
-                $registrationErrors += ('Claude Desktop at {0}: {1}' -f $configPath, $_.Exception.Message)
-                Write-Warning ('Could not update Claude config at {0}; continuing with other paths.' -f $configPath)
-            }
-        }
-        Write-InstallResult 'claude_desktop' $(if ($desktopFailed) { 'failed' } else { 'ok' }) $(if ($desktopFailed) { 'see the setup log' } else { 'Claude restarts to load it' })
-        Restart-ClaudeDesktopIfRunning -Processes $claudeDesktopProcesses -Installation $claudeDesktopInstallation
-    }
+    if ($Clients -notcontains 'ClaudeDesktop') { Write-Step 'Claude Desktop was not selected in setup.'; Write-InstallResult 'claude_desktop' 'skipped' 'not selected' }
     else {
-        Write-Step 'Claude Desktop was not detected. Its local MCP registration was skipped; Claude web and mobile require the separate remote connector.'
-        Write-InstallResult 'claude_desktop' 'skipped' 'Claude Desktop is not installed'
+        if ($InstallClaudeDesktopIfMissing -and -not $claudeDesktopInstallation) {
+            $claudeDesktopInstallation = Install-ClaudeDesktop
+        }
+        if ($claudeDesktopInstallation -or $InstallClaudeDesktopIfMissing) {
+            $desktopFailed = $false
+            foreach ($configPath in @(Get-ClaudeDesktopConfigPaths)) {
+                try {
+                    Register-ClaudeDesktopMcpServer -Name 'Smart Connector' -Bridge $bridge -BridgeArguments $arguments -LegacyNames $claudeDesktopLegacyNames -ConfigPath $configPath
+                    $detected++
+                }
+                catch {
+                    $desktopFailed = $true
+                    $registrationErrors += ('Claude Desktop at {0}: {1}' -f $configPath, $_.Exception.Message)
+                    Write-Warning ('Could not update Claude config at {0}; continuing with other paths.' -f $configPath)
+                }
+            }
+            Write-InstallResult 'claude_desktop' $(if ($desktopFailed) { 'failed' } else { 'ok' }) $(if ($desktopFailed) { 'see the setup log' } else { 'Claude restarts to load it' })
+            Restart-ClaudeDesktopIfRunning -Processes $claudeDesktopProcesses -Installation $claudeDesktopInstallation
+        }
+        else {
+            Write-Step 'Claude Desktop was not detected. Its local MCP registration was skipped; Claude web and mobile require the separate remote connector.'
+            Write-InstallResult 'claude_desktop' 'skipped' 'Claude Desktop is not installed'
+        }
     }
 
     if ($registrationErrors.Count -gt 0) {
@@ -1585,6 +1632,27 @@ function Test-RemoteClaudeSetup {
         }
     }
     catch { Write-Step 'Remote Claude gateway is not configured on this workstation.' }
+}
+
+# Start menu entry for the Smart Connector app (this user only). Never fails setup.
+function Install-StartMenuShortcut {
+    param([string]$Root)
+    try {
+        $programs = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
+        New-Item -ItemType Directory -Path $programs -Force | Out-Null
+        $shell = New-Object -ComObject WScript.Shell
+        $shortcut = $shell.CreateShortcut((Join-Path $programs 'Smart Connector.lnk'))
+        $shortcut.TargetPath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        $shortcut.Arguments = '-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File "{0}"' -f (Join-Path $Root 'installer\SmartConnectorApp.ps1')
+        $shortcut.WorkingDirectory = $env:LOCALAPPDATA
+        $shortcut.IconLocation = (Join-Path $Root 'assets\logo.ico') + ',0'
+        $shortcut.Description = 'Smart Connector for Autodesk Revit and AutoCAD'
+        $shortcut.WindowStyle = 7
+        $shortcut.Save()
+        [void][Runtime.InteropServices.Marshal]::ReleaseComObject($shell)
+        Write-Step 'Added Smart Connector to the Start menu.'
+    }
+    catch { Write-Step ('The Start menu shortcut could not be created: {0}' -f $_.Exception.Message) }
 }
 
 function Test-Revit2024Installed {
@@ -1932,13 +2000,21 @@ try {
             Test-RemoteClaudeSetup $(if (Test-Path -LiteralPath $RepositoryPath) { $RepositoryPath } else { (Split-Path -Parent $PSScriptRoot) })
         }
         'Install' {
+            $choices = Get-InstallChoices -AiClients $AiClients -Product $Product -ProductGiven $script:ProductGiven -Skills $Skills
+            $Product = $choices.Product
+            Write-Step ('Setting up: {0}; AI apps: {1}; team skills: {2}.' -f $(if ($Product -eq 'All') { 'Revit and AutoCAD' } else { $Product }), $(if ($choices.AiClients.Count) { $choices.AiClients -join ', ' } else { 'none' }), $(if ($choices.Skills) { 'yes' } else { 'no' }))
             Write-InstallPhase 'files'
             $root = Get-Repository
             Write-InstallResult 'files' 'ok'
+            try { Save-InstallChoices $choices } catch { Write-Step ('The setup choices could not be saved: {0}' -f $_.Exception.Message) }
+            Install-StartMenuShortcut $root
             # The connector files are required by every later step; each later step fails on its own.
             Invoke-InstallStep 'skills' {
-                Install-Skills $root
-                Write-InstallResult 'skills' 'ok'
+                if (-not $choices.Skills) { Write-Step 'Team workflow skills were not selected in setup.'; Write-InstallResult 'skills' 'skipped' 'not selected' }
+                else {
+                    Install-Skills $root
+                    Write-InstallResult 'skills' 'ok'
+                }
             }
             Invoke-InstallStep 'team' {
                 # An administrator's enrollment file wins; otherwise the setup window's details are used.
@@ -1958,7 +2034,15 @@ try {
             if ($Product -in @('All','AutoCAD')) { Invoke-InstallStep 'autocad' { Install-AutoCadBundleStep $root } }
             Invoke-InstallStep 'updates' {
                 $updateState = Read-UpdateState
-                if ($updateState.PSObject.Properties['notifications_user_disabled'] -and $updateState.notifications_user_disabled) {
+                if ($AutoUpdates -eq 'Off') {
+                    Disable-UpdateNotifications
+                    Write-InstallResult 'updates' 'skipped' 'switched off in setup'
+                }
+                elseif ($AutoUpdates -eq 'On') {
+                    Enable-UpdateNotifications
+                    Write-InstallResult 'updates' 'ok'
+                }
+                elseif ($updateState.PSObject.Properties['notifications_user_disabled'] -and $updateState.notifications_user_disabled) {
                     Write-InstallResult 'updates' 'skipped' 'switched off in Settings'
                 }
                 else {
@@ -1966,7 +2050,7 @@ try {
                     Write-InstallResult 'updates' 'ok'
                 }
             }
-            Invoke-InstallStep 'codex' { Register-DetectedAiClients $root }
+            Invoke-InstallStep 'codex' { Register-DetectedAiClients $root -Clients $choices.AiClients }
             # Final checks only report; they never undo a completed step.
             $script:CurrentInstallStep = ''
             foreach ($check in @(
@@ -1988,13 +2072,16 @@ try {
                 break
             }
             $script:UpdateDownloaded = $false
+            $choices = Get-InstallChoices -AiClients $AiClients -Product $Product -ProductGiven $script:ProductGiven -Skills $Skills
+            $Product = $choices.Product
             $root = Get-Repository
             $null = Import-SkillServiceEnrollment -Root $root
             if (-not $script:UpdateDownloaded) {
                 Write-Step 'No newer release was installed. Existing client registrations were preserved. Use Install / Repair to repair connections.'
                 break
             }
-            Install-Skills $root
+            if ($choices.Skills) { Install-Skills $root }
+            Install-StartMenuShortcut $root
             if ($Product -in @('All','Revit') -and (Test-Revit2024Installed)) {
                 Install-RevitAddin $root
             }
@@ -2002,7 +2089,7 @@ try {
                 Write-Step 'Revit 2024 was not detected, so its add-in was skipped.'
             }
             if ($Product -in @('All','AutoCAD')) { Install-AutoCadBundleStep $root }
-            Register-DetectedAiClients $root
+            Register-DetectedAiClients $root -Clients $choices.AiClients
             Set-InstalledRelease -Version ((Get-Content -LiteralPath (Join-Path $root 'VERSION') -Raw).Trim()) `
                 -Sha256 $(if ((Test-Path -LiteralPath (Join-Path $root '.bim-cad-source.json'))) {
                     [string]((Get-Content -LiteralPath (Join-Path $root '.bim-cad-source.json') -Raw | ConvertFrom-Json).sha256)

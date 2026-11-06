@@ -1,6 +1,18 @@
 <?xml version="1.0"?>
 <MenuGroup xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" Name="SMARTAUTODESKCONNECTOR" DisplayName="Smart Connector">
   <MacroGroup Name="SmartAutodeskConnectorMacros" Citizen="A">
+    <MenuMacro UID="MM_SAC_OPEN">
+      <Macro type="Any">
+        <Revision MajorVersion="16" MinorVersion="2" UserVersion="0" />
+        <ModifiedRev MajorVersion="19" MinorVersion="1" UserVersion="0" />
+        <Name xlate="true" UID="XLS_SAC_OPEN_NAME">Open Connector</Name>
+        <Command>^C^C_SACOPEN</Command>
+        <HelpString xlate="true" UID="XLS_SAC_OPEN_HELP">Open the Smart Connector app: status of Revit, AutoCAD, Claude and Codex, skills, updates and settings.</HelpString>
+        <SmallImage Name="sac-open-connector-16.png" />
+        <LargeImage Name="sac-open-connector-32.png" />
+        <CLICommand xlate="true" UID="XLS_SAC_OPEN_CLI">SACOPEN</CLICommand>
+      </Macro>
+    </MenuMacro>
     <MenuMacro UID="MM_SAC_SKILLSSYNC">
       <Macro type="Any">
         <Revision MajorVersion="16" MinorVersion="2" UserVersion="0" />
@@ -31,7 +43,7 @@
         <ModifiedRev MajorVersion="19" MinorVersion="1" UserVersion="0" />
         <Name xlate="true" UID="XLS_SAC_SETTINGS_NAME">Settings</Name>
         <Command>^C^C_SACSETTINGS</Command>
-        <HelpString xlate="true" UID="XLS_SAC_SETTINGS_HELP">Turn automatic updates on or off.</HelpString>
+        <HelpString xlate="true" UID="XLS_SAC_SETTINGS_HELP">Automatic updates and other Smart Connector settings.</HelpString>
         <SmallImage Name="sac-settings-16.png" />
         <LargeImage Name="sac-settings-32.png" />
         <CLICommand xlate="true" UID="XLS_SAC_SETTINGS_CLI">SACSETTINGS</CLICommand>

@@ -258,16 +258,24 @@ function Show-UpdatePrompt {
     $form.Dispose()
 }
 
+# The Smart Connector app; a second start just brings the open window to the requested section.
+function Open-ConnectorApp {
+    param([string]$Section)
+    Start-Process powershell.exe -WindowStyle Hidden -WorkingDirectory $env:LOCALAPPDATA -ArgumentList ('-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File "{0}" -Section {1} -RepositoryPath "{2}"' -f (Join-Path $InstallRoot 'installer\SmartConnectorApp.ps1'), $Section, $InstallRoot)
+}
+
 $menu = New-Object Windows.Forms.ContextMenuStrip
 $title = $menu.Items.Add('Smart Connector'); $title.Enabled = $false; $title.Font = New-BrandFont 9 ([Drawing.FontStyle]::Bold)
 $null = $menu.Items.Add('-')
+$open = $menu.Items.Add('Open Smart Connector', $null, { Open-ConnectorApp 'Overview' }); $open.Font = New-BrandFont 9 ([Drawing.FontStyle]::Bold)
 $null = $menu.Items.Add('Check for updates', $null, { $script:agent.ManualCheck = $true; if (-not $script:agent.Job) { Start-UpdateCheck } })
 $null = $menu.Items.Add('Skills Sync', $null, { Start-SkillsSync })
-$null = $menu.Items.Add('Settings', $null, { Start-Process powershell.exe -WindowStyle Hidden -ArgumentList ('-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File "{0}"' -f (Join-Path $InstallRoot 'installer\Settings.ps1')) })
+$null = $menu.Items.Add('Settings', $null, { Open-ConnectorApp 'Settings' })
 $null = $menu.Items.Add('Open log', $null, { Start-Process notepad.exe -ArgumentList ('"{0}"' -f $agentLog) })
 $null = $menu.Items.Add('-')
 $null = $menu.Items.Add('Quit', $null, { $icon.Visible = $false; [Windows.Forms.Application]::Exit() })
 $icon.ContextMenuStrip = $menu
+$icon.Add_MouseDoubleClick({ Open-ConnectorApp 'Overview' })
 $icon.Add_BalloonTipClicked({ if ($script:agent.LastNoticeIsUpdate) { Show-UpdatePrompt } })
 
 $tick = New-Object Windows.Forms.Timer

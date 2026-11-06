@@ -24,7 +24,7 @@ try{
  Assert ($lspEntry -and $lspEntry.LoadOnCommandInvocation -eq 'True') 'LISP is not demand-loaded on command invocation'
  Assert (-not $package.SelectSingleNode('//ComponentEntry[@LoadOnAutoCADStartup="True"]')) 'Something of ours still loads when AutoCAD starts'
  $declared=@($lspEntry.SelectNodes('Commands/Command')|ForEach-Object{$_.Global})
- Assert (($declared -join ',') -eq 'SACSKILLSSYNC,SACCHECKUPDATES,SACSETTINGS,SACSTATUS') "Demand-load command list wrong: $($declared -join ',')"
+ Assert (($declared -join ',') -eq 'SACOPEN,SACSKILLSSYNC,SACCHECKUPDATES,SACSETTINGS,SACSTATUS') "Demand-load command list wrong: $($declared -join ',')"
  $markupEntry=$entries|Where-Object{$_.ModuleName -eq './Contents/AI-Markup.lsp'}
  Assert ($markupEntry -and $markupEntry.LoadOnCommandInvocation -eq 'True') 'AI Markup LISP is not demand-loaded'
  Assert ((@($markupEntry.SelectNodes('Commands/Command')|ForEach-Object{$_.Global}) -join ',') -eq 'AI,AICLEAR') 'AI Markup commands not declared'
@@ -35,9 +35,9 @@ try{
  $menu=Read-Xml (Join-Path $cuixSource 'MenuGroup.cui')
  $ribbon=Read-Xml (Join-Path $cuixSource 'RibbonRoot.cui')
  $macros=@{}; foreach($m in $menu.SelectNodes('//MenuMacro')){ $macros[$m.UID]=$m }
- Assert ($macros.Count -eq 6) "Expected 6 menu macros, found $($macros.Count)"
+ Assert ($macros.Count -eq 7) "Expected 7 menu macros, found $($macros.Count)"
  $buttons=@($ribbon.SelectNodes('//RibbonCommandButton'))
- Assert ($buttons.Count -eq 6) "Expected 6 ribbon buttons, found $($buttons.Count)"
+ Assert ($buttons.Count -eq 7) "Expected 7 ribbon buttons, found $($buttons.Count)"
  foreach($b in $buttons){
   Assert ($macros.ContainsKey($b.MenuMacroID)) "Ribbon button $($b.UID) references missing macro $($b.MenuMacroID)"
   Assert ($b.ButtonStyle -eq 'LargeWithText') "Ribbon button $($b.UID) is not a large button"
@@ -60,11 +60,11 @@ try{
  $lisp=Get-Content -LiteralPath (Join-Path $bundle 'Contents/SmartAutodeskConnector.lsp') -Raw
  $code=($lisp -split "`n"|ForEach-Object{ ($_ -replace '"(?:[^"\\]|\\.)*"','""') -replace ';.*$','' }) -join "`n"
  Assert (($code.ToCharArray()|Where-Object{$_ -eq '('}).Count -eq ($code.ToCharArray()|Where-Object{$_ -eq ')'}).Count) 'LISP parentheses are unbalanced'
- foreach($command in 'SACSKILLSSYNC','SACCHECKUPDATES','SACSETTINGS','SACSTATUS'){
+ foreach($command in 'SACOPEN','SACSKILLSSYNC','SACCHECKUPDATES','SACSETTINGS','SACSTATUS'){
   Assert ($lisp -match "\(defun c:$command\s*\(\)") "LISP does not define $command"
   Assert (@($menu.SelectNodes('//MenuMacro/Macro/Command')|Where-Object{$_.InnerText -eq "^C^C_$command"}).Count -eq 1) "No macro runs $command"
  }
- foreach($script in 'ConnectorActions.ps1','Settings.ps1'){ Assert ($lisp.Contains('"'+$script+'"')) "LISP does not start $script"; Assert (Test-Path -LiteralPath (Join-Path $runtime "installer/$script")) "installer/$script is missing" }
+ foreach($script in 'ConnectorActions.ps1','SmartConnectorApp.ps1'){ Assert ($lisp.Contains('"'+$script+'"')) "LISP does not start $script"; Assert (Test-Path -LiteralPath (Join-Path $runtime "installer/$script")) "installer/$script is missing" }
  Assert ($lisp.Contains('-STA -WindowStyle Hidden')) 'LISP does not start PowerShell hidden in STA mode'
  $markup=Get-Content -LiteralPath (Join-Path $bundle 'Contents/AI-Markup.lsp') -Raw
  $code=($markup -split "`n"|ForEach-Object{ ($_ -replace '"(?:[^"\\]|\\.)*"','""') -replace ';.*$','' }) -join "`n"
