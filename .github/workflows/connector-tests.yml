@@ -1,0 +1,38 @@
+name: Connector tests (Windows)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      # Each test runs in its own Windows PowerShell 5.1 process, because the tests change environment
+      # variables such as LOCALAPPDATA. One failure does not stop the others; the job fails at the end.
+      - name: Run release-preparation/beta17/tests
+        shell: powershell
+        run: |
+          $tests = Get-ChildItem release-preparation\beta17\tests -Filter 'test-*.ps1' | Sort-Object Name
+          $tests += Get-Item release-preparation\beta17\tests\check-beta15.ps1
+          $failed = @()
+          foreach ($test in $tests) {
+            Write-Host "::group::$($test.Name)"
+            $output = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $test.FullName 2>&1
+            $code = $LASTEXITCODE
+            $output | ForEach-Object { Write-Host $_ }
+            Write-Host '::endgroup::'
+            if ($code -ne 0) { $failed += $test.Name; Write-Host "::error title=$($test.Name)::exit $code" }
+            else { Write-Host "OK  $($test.Name)" }
+          }
+          "Ran $($tests.Count) tests; $($failed.Count) failed." | Write-Host
+          if ($failed.Count) { throw ('Failed: ' + ($failed -join ', ')) }
