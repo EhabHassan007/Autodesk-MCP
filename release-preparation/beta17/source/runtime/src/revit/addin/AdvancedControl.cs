@@ -166,13 +166,6 @@ namespace BimCadMcp.Revit
             bool recent = snapshot.LastClientUtc != DateTime.MinValue && now - snapshot.LastClientUtc <= TimeSpan.FromMinutes(2);
             UIDocument uiDocument = commandData.Application.ActiveUIDocument;
             string documentName = uiDocument == null ? "No project open" : uiDocument.Document.Title;
-            string remoteConfig = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "AutodeskMcpConnector", "remote", "remote-config.json");
-            string remoteSetup = File.Exists(remoteConfig)
-                ? "Configured (see Smart Connector setup)"
-                : "Not configured";
-
             TaskDialog dialog = new TaskDialog(Brand.Name);
             dialog.MainInstruction = snapshot.ServerRunning
                 ? (recent ? "An AI client recently connected" : "Local MCP server is ready")
@@ -183,13 +176,12 @@ namespace BimCadMcp.Revit
                 "Session: " + snapshot.SessionId + "\n" +
                 "Document: " + documentName + "\n" +
                 "Pipe: " + snapshot.PipeName + "\n" +
-                "Transport: Local named pipe (not reachable from Claude web)\n" +
-                "Claude web gateway: " + remoteSetup + "\n" +
+                "Transport: Local named pipe on this computer only\n" +
                 "Requests served: " + snapshot.RequestCount.ToString(CultureInfo.InvariantCulture) + "\n" +
                 "Last operation: " + EmptyAsDash(snapshot.LastOperation) + "\n" +
                 "Last client connection: " + FormatUtc(snapshot.LastClientUtc) + "\n" +
                 "Last error: " + EmptyAsDash(snapshot.LastError) + "\n\n" +
-                "For Claude web or mobile, configure and enable the remote connector named Smart Connector.";
+                "Claude Desktop, Claude Code and Codex on this computer connect through Smart Connector.";
             dialog.CommonButtons = TaskDialogCommonButtons.Close;
             dialog.Show();
             return Result.Succeeded;

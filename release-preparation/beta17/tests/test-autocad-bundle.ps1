@@ -66,6 +66,10 @@ try{
  }
  foreach($script in 'ConnectorActions.ps1','SmartConnectorApp.ps1'){ Assert ($lisp.Contains('"'+$script+'"')) "LISP does not start $script"; Assert (Test-Path -LiteralPath (Join-Path $runtime "installer/$script")) "installer/$script is missing" }
  Assert ($lisp.Contains('-STA -WindowStyle Hidden')) 'LISP does not start PowerShell hidden in STA mode'
+ # Daily check from the first button used: same stamp files as Revit and the app; the download is asynchronous.
+ foreach($needle in '(sacs:start)','"open-check.txt"','"last-sync.txt"','"sync-reminder.txt"','"-Action InstallUpdate"','''Open "GET" url :vlax-true',':vlr-commandEnded'){
+  Assert ($lisp.Contains($needle)) "LISP daily check lacks $needle"
+ }
  $markup=Get-Content -LiteralPath (Join-Path $bundle 'Contents/AI-Markup.lsp') -Raw
  $code=($markup -split "`n"|ForEach-Object{ ($_ -replace '"(?:[^"\\]|\\.)*"','""') -replace ';.*$','' }) -join "`n"
  Assert (($code.ToCharArray()|Where-Object{$_ -eq '('}).Count -eq ($code.ToCharArray()|Where-Object{$_ -eq ')'}).Count) 'AI Markup LISP parentheses are unbalanced'
@@ -150,15 +154,19 @@ try{
  Assert ($o.State -eq 'Available' -and $o.Title -match 'beta\.19' -and $o.UserOff) 'Available update not recognised'
  Assert ((Get-CheckUpdatesOutcome '[UP_TO_DATE] ok' $state).State -eq 'Current') 'Up to date not recognised'
  Assert ((Get-CheckUpdatesOutcome 'error' $state).State -eq 'Unknown') 'Failed check not recognised'
- function Start-ConnectorAgent {}
- Request-ConnectorUpdate
- Assert (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'AutodeskMcpConnector/update-requested.flag')) 'Update now did not write update-requested.flag'
+ # Update window: installs once Revit and AutoCAD are closed; a deferred run goes back to waiting.
+ $o=Get-InstallUpdateOutcome '[10:00:00] [UPDATE_INSTALLED] Smart Connector 1.1.0 is installed.'
+ Assert ($o.State -eq 'Installed' -and $o.Body -match '^Smart Connector 1\.1\.0 is installed\.') "Installed update not recognised: $($o.Body)"
+ Assert ((Get-InstallUpdateOutcome '[10:00:00] [UPDATE_DEFERRED] Revit is open.').State -eq 'Deferred') 'Deferred update not recognised'
+ Assert ((Get-InstallUpdateOutcome '[10:00:00] No newer release was installed. Existing client registrations were preserved.').State -eq 'Current') 'No-update run not recognised'
+ $o=Get-InstallUpdateOutcome '' 'Download failed.' 1
+ Assert ($o.State -eq 'Failed' -and $o.Body -match '^Download failed\.') "Failed update reason not shown: $($o.Body)"
  # Live AutoCAD 2025 run: the installer also echoes raw `codex mcp get` output, which must not reach the window.
- $o=Get-ConnectionStatusOutcome "[09:59:59] Smart Connector - Status`n[10:00:00] AutoCAD installation detected: R25.0`n[10:00:01] Live AutoCAD connection passed: version 25.0; a.dwg; 3 layer(s).`nautodesk`n  enabled: true`n  transport: stdio`n[10:00:02] Codex has the Smart Connector registration." $true
- Assert ($o.Kind -eq 'Good' -and $o.Body -match 'Codex has' -and $o.Body -match 'agent is running' -and $o.Body -notmatch '\[10:') "Status lines wrong: $($o.Body)"
- Assert ($o.Body -notmatch 'transport|enabled|- Status' -and @($o.Body -split "`n").Count -eq 4) "Raw command output leaked into Status: $($o.Body)"
- Assert ((Get-ConnectionStatusOutcome '[10:00:00] AutoCAD is running, but no drawing is open.' $false).Title -eq 'Open a drawing to connect') 'No-drawing state not recognised'
- Assert ((Get-ConnectionStatusOutcome '' $false).Kind -eq 'Bad') 'Unreachable AutoCAD not reported'
+ $o=Get-ConnectionStatusOutcome "[09:59:59] Smart Connector - Status`n[10:00:00] AutoCAD installation detected: R25.0`n[10:00:01] Live AutoCAD connection passed: version 25.0; a.dwg; 3 layer(s).`nautodesk`n  enabled: true`n  transport: stdio`n[10:00:02] Codex has the Smart Connector registration."
+ Assert ($o.Kind -eq 'Good' -and $o.Body -match 'Codex has' -and $o.Body -notmatch 'agent' -and $o.Body -notmatch '\[10:') "Status lines wrong: $($o.Body)"
+ Assert ($o.Body -notmatch 'transport|enabled|- Status' -and @($o.Body -split "`n").Count -eq 3) "Raw command output leaked into Status: $($o.Body)"
+ Assert ((Get-ConnectionStatusOutcome '[10:00:00] AutoCAD is running, but no drawing is open.').Title -eq 'Open a drawing to connect') 'No-drawing state not recognised'
+ Assert ((Get-ConnectionStatusOutcome '').Kind -eq 'Bad') 'Unreachable AutoCAD not reported'
  'PASS: ConnectorActions outcomes'
 }
 finally{

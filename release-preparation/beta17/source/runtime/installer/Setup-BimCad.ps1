@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('Status', 'Install', 'Update', 'Test', 'Collect', 'TeamStatus', 'RemoteStatus', 'CheckUpdate', 'EnableNotifications', 'DisableNotifications', 'ConnectGitHub', 'UninstallAutoCadPanel')]
+    [ValidateSet('Status', 'Install', 'Update', 'Test', 'Collect', 'TeamStatus', 'CheckUpdate', 'EnableNotifications', 'DisableNotifications', 'ConnectGitHub', 'UninstallAutoCadPanel')]
     [string]$Action = 'Status',
 
     [ValidateSet('All', 'AutoCAD', 'Revit')]
@@ -452,7 +452,7 @@ function Test-ApprovedUpdate {
     Set-StateProperty $state 'release_manifest' $ReleaseManifestUrl
     Set-StateProperty $state 'installed_version' $installedVersion
     Set-StateProperty $state 'last_checked_utc' ([DateTime]::UtcNow.ToString('o'))
-    # The agent and the Revit add-in read this to say "version X is ready" without going online again.
+    # The Smart Connector app reads this to say "version X is ready" without going online again.
     $newer = -not [string]::IsNullOrWhiteSpace($installedVersion) -and (Compare-ConnectorVersion -Left $release.Version -Right $installedVersion) -gt 0
     Set-StateProperty $state 'available_version' $(if ($newer) { $release.Version } else { '' })
     Write-UpdateState $state
@@ -473,14 +473,25 @@ function Test-ApprovedUpdate {
     Write-Output ("[{0}] [UP_TO_DATE] Smart Connector {1} and approved skills are up to date." -f (Get-Date -Format 'HH:mm:ss'), $installedVersion)
 }
 
+# Smart Connector runs nothing in the background. This removes the scheduled tasks, the notification-area agent
+# and the Claude remote gateway that earlier versions set up (scripts\retire-background-tasks.ps1).
+function Remove-BackgroundTasks {
+    param([string]$Root, [switch]$StopAgent)
+    $retire = Join-Path $Root 'scripts\retire-background-tasks.ps1'
+    if (-not (Test-Path -LiteralPath $retire -PathType Leaf)) { return }
+    try { & $retire -StopAgent:$StopAgent | ForEach-Object { Write-Step $_ } }
+    catch { Write-Step ('Earlier background tasks could not all be removed: {0}' -f $_.Exception.Message) }
+}
+
 function Remove-LegacyUpdateTask {
-    # Before the connector agent, a separate scheduled task installed updates at 9:00; the agent replaces it.
+    # Before the connector agent, a separate scheduled task installed updates at 9:00.
     if (Get-ScheduledTask -TaskName $updateTaskName -ErrorAction SilentlyContinue) {
         Unregister-ScheduledTask -TaskName $updateTaskName -Confirm:$false
     }
 }
 
-# The connector agent (scripts\connector-agent.ps1) reads this switch; it never needs network access here.
+# Update checks run when Revit, AutoCAD or the Smart Connector app opens (at most once a day); they read this
+# switch. Nothing here goes online.
 function Enable-UpdateNotifications {
     $state = Read-UpdateState
     Set-StateProperty $state 'repository' $RepositoryUrl
@@ -490,7 +501,7 @@ function Enable-UpdateNotifications {
     Set-StateProperty $state 'notifications_user_disabled' $false
     Write-UpdateState $state
     Remove-LegacyUpdateTask
-    Write-Step 'Automatic updates are on: updates install by themselves when Revit and AutoCAD are closed.'
+    Write-Step 'Update checks are on: Revit, AutoCAD and Smart Connector look for a new version once a day when they open, and ask before installing.'
 }
 
 function Disable-UpdateNotifications {
@@ -499,7 +510,7 @@ function Disable-UpdateNotifications {
     Set-StateProperty $state 'notifications_enabled' $false
     Set-StateProperty $state 'notifications_user_disabled' $true
     Write-UpdateState $state
-    Write-Step 'Automatic updates are off. Use Check Updates to look for a new version.'
+    Write-Step 'Update checks are off. Use Check Updates to look for a new version.'
 }
 
 function Get-RunningAutodeskApps {
@@ -813,7 +824,7 @@ function Get-Repository {
             # would leave every skill twice next to the new category folders. Approved team skills live elsewhere.
             $installedSkills = Join-Path $destination '.agents\skills'
             if (Test-Path -LiteralPath $installedSkills) { Remove-Item -LiteralPath $installedSkills -Recurse -Force }
-            foreach ($entry in @('installer','scripts','src','assets','.agents','README.md','REMOTE-CLAUDE.md','SKILL-SUBMISSIONS.md','VERSION','TESTING.md')) {
+            foreach ($entry in @('installer','scripts','src','assets','.agents','README.md','SKILL-SUBMISSIONS.md','VERSION','TESTING.md')) {
                 $item = Join-Path $source $entry
                 if (Test-Path -LiteralPath $item) {
                     Copy-Item -LiteralPath $item -Destination $destination -Recurse -Force
@@ -1607,31 +1618,7 @@ function Test-AutodeskRegistration {
         }
         catch { Write-Step 'Claude Desktop was detected, but its local MCP configuration is missing or invalid.' }
     }
-    else { Write-Step 'Claude Desktop was not detected. Its local MCP registration is not installed; Claude web and mobile require the separate remote connector.' }
-}
-
-function Test-RemoteClaudeSetup {
-    param([string]$Root)
-
-    $statusScript = Join-Path $Root 'src\autodesk\Get-AutodeskMcpRemoteConnection.ps1'
-    if (-not (Test-Path -LiteralPath $statusScript -PathType Leaf)) {
-        Write-Step 'Remote Claude gateway component is not installed.'
-        return
-    }
-    try {
-        $remote = & $statusScript 2>$null | Select-Object -Last 1
-        if ($null -eq $remote) {
-            Write-Step 'Remote Claude gateway is not configured on this workstation.'
-            return
-        }
-        if ($remote.GatewayRunning -and $remote.TunnelRunning) {
-            Write-Step ("Remote Claude gateway is running at {0}." -f $remote.PublicUrl)
-        }
-        else {
-            Write-Step ("Remote Claude gateway is configured at {0}, but one or more background processes are stopped." -f $remote.PublicUrl)
-        }
-    }
-    catch { Write-Step 'Remote Claude gateway is not configured on this workstation.' }
+    else { Write-Step 'Claude Desktop was not detected. Its local MCP registration is not installed.' }
 }
 
 # Start menu entry for the Smart Connector app (this user only). Never fails setup.
@@ -1927,6 +1914,7 @@ try {
     }
 
     if ($Action -eq 'CheckUpdate') {
+        Remove-BackgroundTasks (Split-Path -Parent $PSScriptRoot)
         Test-ApprovedUpdate
         exit 0
     }
@@ -1975,29 +1963,17 @@ try {
         exit 0
     }
 
-    if ($Action -eq 'RemoteStatus') {
-        $installedManifest = Join-Path $RepositoryPath 'src\autodesk\Get-AutodeskMcpRemoteConnection.ps1'
-        $root = if (Test-Path -LiteralPath $installedManifest -PathType Leaf) {
-            (Resolve-Path -LiteralPath $RepositoryPath).Path
-        }
-        else { Get-Repository }
-        Test-RemoteClaudeSetup $root
-        exit 0
-    }
-
     switch ($Action) {
         'UninstallAutoCadPanel' { Uninstall-AutoCadBundle }
         'Status' {
             if ($Product -in @('All','AutoCAD')) { Test-AutoCadSetup }
             if ($Product -in @('All','Revit')) { Test-RevitSetup }
             Test-AutodeskRegistration
-            Test-RemoteClaudeSetup $(if (Test-Path -LiteralPath $RepositoryPath) { $RepositoryPath } else { (Split-Path -Parent $PSScriptRoot) })
         }
         'Test' {
             if ($Product -in @('All','AutoCAD')) { Test-AutoCadSetup }
             if ($Product -in @('All','Revit')) { Test-RevitSetup }
             Test-AutodeskRegistration
-            Test-RemoteClaudeSetup $(if (Test-Path -LiteralPath $RepositoryPath) { $RepositoryPath } else { (Split-Path -Parent $PSScriptRoot) })
         }
         'Install' {
             $choices = Get-InstallChoices -AiClients $AiClients -Product $Product -ProductGiven $script:ProductGiven -Skills $Skills
@@ -2033,6 +2009,7 @@ try {
             }
             if ($Product -in @('All','AutoCAD')) { Invoke-InstallStep 'autocad' { Install-AutoCadBundleStep $root } }
             Invoke-InstallStep 'updates' {
+                Remove-BackgroundTasks $root -StopAgent
                 $updateState = Read-UpdateState
                 if ($AutoUpdates -eq 'Off') {
                     Disable-UpdateNotifications
@@ -2068,7 +2045,7 @@ try {
             # Revit and AutoCAD keep connector files open; replacing the install folder under them fails.
             $openApps = Get-RunningAutodeskApps
             if ($openApps.Count) {
-                Write-Output ("[{0}] [UPDATE_DEFERRED] {1} is open. The update installs automatically after you close it." -f (Get-Date -Format 'HH:mm:ss'), ($openApps -join ' and '))
+                Write-Output ("[{0}] [UPDATE_DEFERRED] {1} is open. Close it, and the update window installs the update." -f (Get-Date -Format 'HH:mm:ss'), ($openApps -join ' and '))
                 break
             }
             $script:UpdateDownloaded = $false
@@ -2090,6 +2067,7 @@ try {
             }
             if ($Product -in @('All','AutoCAD')) { Install-AutoCadBundleStep $root }
             Register-DetectedAiClients $root -Clients $choices.AiClients
+            Remove-BackgroundTasks $root -StopAgent
             Set-InstalledRelease -Version ((Get-Content -LiteralPath (Join-Path $root 'VERSION') -Raw).Trim()) `
                 -Sha256 $(if ((Test-Path -LiteralPath (Join-Path $root '.bim-cad-source.json'))) {
                     [string]((Get-Content -LiteralPath (Join-Path $root '.bim-cad-source.json') -Raw | ConvertFrom-Json).sha256)

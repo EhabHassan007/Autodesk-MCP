@@ -1,19 +1,13 @@
-Smart Connector for Autodesk Revit and AutoCAD 1.0.0
+Smart Connector for Autodesk Revit and AutoCAD 1.1.0
 
-First full release. Installed PCs on any beta update to it automatically.
+Lean core: Smart Connector now runs nothing in the background. This removes the behaviour that antivirus programs such as Kaspersky treat as a PowerShell "agent", and it gives IT a much smaller footprint to approve.
 
-- New name: Smart Connector (in full, Smart Connector for Autodesk Revit and AutoCAD). On update, Claude Desktop's old "Smart Autodesk Connector" entry is replaced by "Smart Connector"; Revit shows a Smart Connector tab and AutoCAD a Smart Connector panel. Your settings, skills and team registration are unchanged.
-- New logo: the S drawn as one clean line, with blue CAD grip squares at its ends, in flat brand colours that stay sharp down to 16 px. Used for the app icon, setup, the notification area and the Revit and AutoCAD buttons.
-- Redesigned setup: Welcome, System check, Choose apps, AI connections, Install and Finish, with a step rail. Choose which AI apps to connect (Claude Desktop, Claude Code, Codex) and which Autodesk software to set up (Revit, AutoCAD); updates and Repair keep your choices.
-- The Smart Connector app: one window with Overview, Autodesk apps, AI connections, Workflow skills, Components, Updates, Settings, Diagnostics and Help. Open it from the Start menu, the notification-area icon, or Open Connector in Revit and AutoCAD.
-- Reorganised Revit tab (Connector, Skills, Support) and AutoCAD panel with a consistent icon family.
-- Setup unpacks into %LOCALAPPDATA%\SmartConnectorSetup instead of the Windows temporary folder, so one antivirus exclusion covers it; README-FIRST lists the folders to exclude.
-- Setup file: Smart-Connector-Setup-1.0.0.exe installs for the signed-in Windows user without administrator rights. The team version asks for name and email and joins the PC to the team skill service.
-- Automatic updates: the connector checks when Windows starts, every 6 hours, and whenever Revit or AutoCAD is opened, and installs a new version as soon as Revit and AutoCAD are closed. A notification offers "Update now".
-- AI Markup in AutoCAD: two new buttons on the Add-ins tab. AI Markup lets you sketch on the drawing, type what Claude should do, and copies the request with the sketch as coordinates; paste it into Claude. Clear Markup removes it. Commands AI and AICLEAR; the markup layer does not plot.
-- AutoCAD stays responsive in long sessions: drawing reads are bounded and the connector releases its references to AutoCAD objects after every call.
-- Skills Sync: restores its own missing helper files, shows the real reason when it fails, and holds back only a skill that has two different saved copies on the PC, naming both locations.
-- Skills grouped by software category; Skills Sync buttons in Revit and on the AutoCAD Add-ins tab; setup continues past a failed step and replaces the old flat skill library on upgrade.
-- Your own skill edits, team registration and update preferences are kept on update.
+- No scheduled tasks and no notification-area agent. Updating from 1.0.0 or an earlier beta removes the four tasks earlier versions created (connector agent, usage report, weekly Skills Sync, update alerts) and the agent's restart copy. The running agent exits after the update.
+- Update checks happen when you open Revit, AutoCAD or Smart Connector, at most once a day: one small download of the public latest.json. You are asked "Update now" or "Later". Update now opens a visible update window, which waits for Revit and AutoCAD to close and then installs. Nothing installs without your choice.
+- Weekly Skills Sync reminder: on team computers, when the last successful sync is more than a week old, Revit, AutoCAD and the Smart Connector app remind you once a day. Switch it off in Settings.
+- Usage counts for the administrator's dashboard are sent only when you run Skills Sync, never on a schedule. Setup no longer starts a hidden Skills Sync after installing.
+- Removed: the optional Claude remote gateway (a local web server published to the internet through a Cloudflare tunnel). On PCs that used it, the update stops it, removes its start-up entry and deletes its stored credentials. Administrators should also revoke those tunnels in Cloudflare. Claude Desktop, Claude Code and Codex on the same PC work as before.
+- In AutoCAD the daily check starts with the first Smart Connector button you use in a session. Loading anything at AutoCAD startup made AutoCAD ask SECURELOAD for every drawing, so that is avoided.
+- The Revit add-in is now compiled in the automated tests with the same Windows compiler the PCs use, against the Revit 2024 API reference assemblies.
 
-SHA-256: 33C4F52592F28B79B98F416FD911BA4C3DD412346FF5EBB6926F60C92DEC8D01
+SHA-256: 8048D18CE5B639F3ED4D74A376BBCFDEC7DF7BC0425EB41C99950BE1A3B98EE8

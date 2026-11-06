@@ -89,13 +89,50 @@ function Get-InstalledWorkflowSkills {
     } | Sort-Object Category, Name)
 }
 
+# Day stamps shared with the Revit add-in and the AutoCAD panel: days since 1970-01-01 UTC, as text.
+#   AutodeskMcpConnector\open-check.txt         last update check made when an app opened
+#   AutodeskMcpSkillCollection\last-sync.txt     last successful Skills Sync
+#   AutodeskMcpSkillCollection\sync-reminder.txt last weekly Skills Sync reminder shown
+function Get-StatusToday { ([DateTime]::UtcNow - [DateTime]::new(1970, 1, 1, 0, 0, 0, [DateTimeKind]::Utc)).TotalDays }
+
+function Read-StatusDay {
+    param([string]$Path)
+    $value = 0.0
+    try {
+        if ((Test-Path -LiteralPath $Path -PathType Leaf) -and [double]::TryParse((Get-Content -LiteralPath $Path -Raw).Trim(), [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$value)) { return $value }
+    }
+    catch { }
+    -1.0
+}
+
+function Write-StatusDay {
+    param([string]$Path)
+    try {
+        New-Item -ItemType Directory -Path (Split-Path -Parent $Path) -Force | Out-Null
+        [IO.File]::WriteAllText($Path, (Get-StatusToday).ToString('0.000', [Globalization.CultureInfo]::InvariantCulture))
+    }
+    catch { }
+}
+
+# Same rules as the Revit add-in (OpenCheck) and SmartConnectorStartup.lsp.
+function Test-UpdateCheckDue {
+    param($Snapshot, [double]$Now = (Get-StatusToday))
+    $last = Read-StatusDay (Join-Path $script:StatusPaths.ConnectorState 'open-check.txt')
+    $Snapshot.AutoUpdates -and ($last -lt 0 -or ($Now - $last) -ge 0.8)
+}
+
+# Team PCs with the reminder on, whose last successful Skills Sync is more than a week old (or never ran).
+function Test-SyncReminderDue {
+    param($Snapshot, [double]$Now = (Get-StatusToday))
+    $Snapshot.TeamJoined -and $Snapshot.SyncReminder -and ($Snapshot.LastSyncDay -lt 0 -or ($Now - $Snapshot.LastSyncDay) -ge 7)
+}
+
 function Get-ConnectorSnapshot {
     $versionPath = Join-Path $RepositoryPath 'VERSION'
     $update = Read-StatusJson (Join-Path $script:StatusPaths.ConnectorState 'update-state.json')
     $sync = Read-StatusJson (Join-Path $script:StatusPaths.SkillState 'last-result.json')
     $autoCadReleases = @(Get-AutoCadReleasesInstalled)
-    $agentRunning = $false
-    try { $mutex = [Threading.Mutex]::OpenExisting('Local\SmartAutodeskConnector.Agent'); $mutex.Dispose(); $agentRunning = $true } catch { }
+    $skillSettings = Read-StatusJson (Join-Path $script:StatusPaths.SkillState 'settings.json')
     [pscustomobject]@{
         Version          = $(if (Test-Path -LiteralPath $versionPath) { (Get-Content -LiteralPath $versionPath -Raw).Trim() } else { '' })
         Installed        = Test-Path -LiteralPath (Join-Path $RepositoryPath 'installer\Setup-BimCad.ps1')
@@ -118,7 +155,8 @@ function Get-ConnectorSnapshot {
         LastSyncReason   = [string](Get-StatusValue $sync 'sync_reason')
         SyncSubmitted    = [int](Get-StatusValue $sync 'sync_submitted')
         SyncUpdated      = [int](Get-StatusValue $sync 'sync_updated') + [int](Get-StatusValue $sync 'sync_added')
-        AgentRunning     = $agentRunning
+        LastSyncDay      = Read-StatusDay (Join-Path $script:StatusPaths.SkillState 'last-sync.txt')
+        SyncReminder     = (Get-StatusValue $skillSettings 'enabled') -ne $false
     }
 }
 

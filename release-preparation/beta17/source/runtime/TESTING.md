@@ -35,17 +35,14 @@ If setup cannot find its payload, extract `Autodesk-MCP-Connector-<version>.zip`
 9. For Claude Code, confirm the shared skills appear under `~/.claude/skills` and run one relevant skill.
 10. If Codex and Claude are both installed, verify that both can read status. Do model-changing tests one at a time and confirm a concurrent write waits or returns the connector's busy message.
 
-## Verify Claude remote mode
+## Verify nothing runs in the background
 
-1. Run `src\autodesk\work\test-http-gateway.ps1`. Confirm authentication and origin checks pass, `execute_csharp` is absent, and the expected read/write tools remain.
-2. Assign the workstation a unique Cloudflare named tunnel and HTTPS hostname routed to `http://localhost:8765`.
-3. In setup choose **Claude remote** and enter that hostname and the workstation's tunnel token. Never reuse credentials between workstations.
-4. Confirm `Get-AutodeskMcpRemoteConnection.ps1` reports both gateway and tunnel running.
-5. Add the displayed `/mcp` URL and Authorization header to one Claude custom Web connector. Free accounts may have only one custom connector.
-6. From Claude, call `connection_status` and `document_info`. Verify `execute_csharp` is unavailable remotely.
-7. Close any Revit modal dialog before testing; a modal dialog prevents Revit's external event queue from processing requests.
+1. After Install / Repair, Task Scheduler (Task Scheduler Library) has no task starting with `Smart Autodesk Connector Agent`, `Autodesk MCP Usage Report`, `Autodesk MCP Weekly Skills` or `Autodesk MCP Connector Update Alerts`, and Task Manager shows no `powershell.exe` once the setup and Smart Connector windows are closed.
+2. On a PC upgraded from 1.0.0 or earlier, the same holds after the update, `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\Autodesk MCP Remote Connector.cmd` is gone, and `%LOCALAPPDATA%\AutodeskMcpConnector\remote` is deleted.
+3. Delete `%LOCALAPPDATA%\AutodeskMcpConnector\open-check.txt` and open Revit: with a newer public release, Revit asks **Update now** / **Later**. **Update now** opens the update window, which waits for Revit and AutoCAD to close and then installs.
+4. On a team PC, delete `%LOCALAPPDATA%\AutodeskMcpSkillCollection\last-sync.txt` and `sync-reminder.txt`, then open Revit (or use a Smart Connector button in AutoCAD): the Skills Sync reminder appears once.
 
-Automatic updates and the **Update** button require ordinary HTTPS access to the public release repository. They must work on Windows PowerShell when GitHub returns `latest.json` as either text or UTF-8 bytes, without Git and without a GitHub sign-in. The updater must reject a ZIP whose SHA-256 or internal `VERSION` differs from `latest.json`, and it must never replace a newer installed version with an older public release. When automatic updates are enabled, the scheduled check installs only a newer approved public release and shows a restart confirmation after success.
+Update checks and the **Update** button require ordinary HTTPS access to the public release repository. They must work on Windows PowerShell when GitHub returns `latest.json` as either text or UTF-8 bytes, without Git and without a GitHub sign-in. The updater must reject a ZIP whose SHA-256 or internal `VERSION` differs from `latest.json`, and it must never replace a newer installed version with an older public release. Update checks only offer a newer approved public release, and nothing is installed until the person chooses **Update now**.
 
 Claude Desktop registration must be written to `%APPDATA%\Claude\claude_desktop_config.json` for both classic and Microsoft Store/MSIX installations. Setup must preserve unrelated MCP registrations, add the **Autodesk MCP Connector** server, and report the exact configuration path. Fully quit and reopen Claude Desktop after Install / Repair; **Autodesk MCP Connector** must appear under the chat `+` menu → Connectors.
 

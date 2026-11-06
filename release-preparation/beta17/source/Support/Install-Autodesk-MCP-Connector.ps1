@@ -84,11 +84,8 @@ try {
             "[{0}] Setup was cancelled before anything was installed." -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') | Add-Content -LiteralPath $logPath -Encoding UTF8
             exit 0
         }
-        # First skill sync and usage report in the background once the PC is enrolled.
-        $centralRunner = Join-Path $env:LOCALAPPDATA 'BIM-CAD-MCP\scripts\weekly-skill-collection.ps1'
-        if (Test-Path (Join-Path $env:LOCALAPPDATA 'AutodeskMcpSkillCollection\service.json')) {
-            Start-Process powershell.exe -WindowStyle Hidden -ArgumentList ('-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -Action Sync' -f $centralRunner)
-        }
+        # No background work after setup. On a team PC that has never synced, Smart Connector offers Skills Sync
+        # when it opens (the Finish page opens it).
         if ($outcome.Result -ne 'ok') { exit 1 }
     }
     else {

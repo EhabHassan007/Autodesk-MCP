@@ -35,7 +35,7 @@ foreach ($spec in @(
         @('Update now', 'Update', 'Install the latest approved version now. Close Revit and AutoCAD first.'),
         @('Test connection', 'Test', 'Check Codex and Claude connections and any open AutoCAD or Revit session.'),
         @('Skills Sync', 'Sync', 'Send your saved skills for review and download the latest approved team skills.'),
-        @('Settings', 'Settings', 'Turn automatic updates on or off.'))) {
+        @('Settings', 'Settings', 'Turn update checks on or off.'))) {
     $button = New-BrandButton $spec[0] -Primary:($spec[1] -eq 'Install') -Width 116
     $button.Location = New-Object System.Drawing.Point($x, 110)
     $button.Tag = $spec[1]
