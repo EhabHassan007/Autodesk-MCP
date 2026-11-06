@@ -1,0 +1,42 @@
+name: Build setup exe
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  setup-exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Inno Setup if the runner lacks it
+        shell: powershell
+        run: |
+          $iscc = @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe") | Where-Object { Test-Path $_ }
+          if (-not $iscc -and -not (Get-Command ISCC.exe -ErrorAction SilentlyContinue)) { choco install innosetup -y --no-progress }
+
+      # Public build only: no -Team, so no join code is involved.
+      - name: Build installer ZIP and setup exe
+        shell: powershell
+        run: powershell -ExecutionPolicy Bypass -File release-preparation\beta17\build.ps1
+
+      - name: Check the setup exe
+        shell: powershell
+        run: |
+          $exe = @(Get-ChildItem release-preparation\beta17 -Filter 'Smart-Autodesk-Connector-Setup-*.exe')
+          if ($exe.Count -ne 1 -or $exe[0].Name -like '*-TEAM.exe') { throw "Expected one public setup exe, found: $($exe.Name -join ', ')" }
+          if ($exe[0].Length -lt 100KB) { throw 'The setup exe is unexpectedly small.' }
+          "$($exe[0].Name): $([int]($exe[0].Length / 1KB)) KB"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: smart-autodesk-connector-setup
+          path: release-preparation/beta17/Smart-Autodesk-Connector-Setup-*.exe
+          retention-days: 30
