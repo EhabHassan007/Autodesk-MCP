@@ -1,11 +1,13 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('Run','Register','Unregister')][string]$Action = 'Run',
+    [ValidateSet('Run','Unregister')][string]$Action = 'Run',
     [string]$StateRoot = (Join-Path $env:LOCALAPPDATA 'AutodeskMcpSkillCollection'),
     [switch]$LibraryOnly
 )
 # Sends the per-day skill and tool counts recorded by the connector (names only) to the
 # team skill service, for the administrator's dashboard. Unsent counts are kept and retried.
+# Runs only as part of Skills Sync, which the person starts; nothing is scheduled. Unregister removes the
+# usage task that earlier versions scheduled.
 $ErrorActionPreference = 'Stop'
 $usagePath = Join-Path $StateRoot 'usage.jsonl'
 $pendingPath = Join-Path $StateRoot 'usage-pending.jsonl'
@@ -109,26 +111,9 @@ function Send-Usage {
     "Reported $sent usage record(s)."
 }
 
-function Register-UsageTask {
-    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
-    $taskName = 'Autodesk MCP Usage Report - ' + $identity.User.Value
-    $engine = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-    $runner = Join-Path $StateRoot 'scripts\send-usage.ps1'
-    foreach ($path in @($runner, $StateRoot)) { if ($path.Contains('"')) { throw 'Unsupported quote in installation path.' } }
-    $arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "{0}" -Action Run -StateRoot "{1}"' -f $runner, $StateRoot
-    $taskAction = New-ScheduledTaskAction -Execute $engine -Argument $arguments
-    $triggers = @((New-ScheduledTaskTrigger -AtLogOn -User $identity.Name), (New-ScheduledTaskTrigger -Daily -At ([datetime]::ParseExact('12:00','HH:mm',[Globalization.CultureInfo]::InvariantCulture))))
-    $principal = New-ScheduledTaskPrincipal -UserId $identity.Name -LogonType Interactive -RunLevel Limited
-    $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -RunOnlyIfNetworkAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 10)
-    Register-ScheduledTask -TaskName $taskName -Action $taskAction -Trigger $triggers -Principal $principal -Settings $settings `
-        -Description 'Report which Autodesk MCP Connector skills and tools were used (names and daily counts only) to the team skill service.' -Force | Out-Null
-    "Usage reporting scheduled at sign-in and daily at 12:00: $taskName"
-}
-
 if ($LibraryOnly) { return }
 try {
     switch ($Action) {
-        'Register' { Register-UsageTask }
         'Unregister' {
             $taskName = 'Autodesk MCP Usage Report - ' + [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
             if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) { Unregister-ScheduledTask -TaskName $taskName -Confirm:$false }

@@ -1,5 +1,5 @@
-# Smart Connector settings: one switch for automatic updates, plus version information.
-# Opened from the Revit ribbon, the notification-area menu and the Setup window. Run directly
+# Smart Connector settings: one switch for update checks, plus version information.
+# Opened from the Setup window. Run directly
 # (powershell -STA -File Settings.ps1) or dot-source with -LibraryOnly and call Show-ConnectorSettings.
 param([string]$RepositoryPath = (Split-Path -Parent $PSScriptRoot), [switch]$LibraryOnly)
 
@@ -27,12 +27,12 @@ function Show-ConnectorSettings {
     $null = Add-BrandHeader $form -Title 'Settings' -Subtitle 'Smart Connector' -Height 76
 
     $auto = New-Object Windows.Forms.CheckBox
-    $auto.Text = 'Install updates automatically (recommended)'
+    $auto.Text = 'Check for updates when Revit or AutoCAD opens (recommended)'
     $auto.Font = New-BrandFont 10.5 ([Drawing.FontStyle]::Bold) 'Segoe UI Semibold'
     $auto.AutoSize = $true; $auto.Location = New-Object Drawing.Point(26, 100)
     $auto.Checked = $current.AutoUpdate
     $form.Controls.Add($auto)
-    $form.Controls.Add((New-BrandLabel 'Updates install by themselves when Revit and AutoCAD are closed. You get a notice when one is ready. When this is off, use Check Updates in Revit or AutoCAD to look for a new version.' 46 128 -Width 400 -Muted -Size 9))
+    $form.Controls.Add((New-BrandLabel 'Once a day, opening Revit, AutoCAD or Smart Connector looks for a new version and asks before installing it. When this is off, use Check Updates in Revit or AutoCAD.' 46 128 -Width 400 -Muted -Size 9))
 
     $when = ''
     if ($current.LastChecked) { try { $when = ([DateTime]::Parse($current.LastChecked).ToLocalTime()).ToString('g') } catch { } }

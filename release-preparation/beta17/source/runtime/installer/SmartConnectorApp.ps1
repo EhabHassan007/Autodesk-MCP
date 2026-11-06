@@ -1,7 +1,8 @@
 # Smart Connector app: one window for the connector's status and everything it can do.
 # Sections: Overview, Autodesk apps, AI connections, Workflow skills, Components, Updates, Settings,
-# Diagnostics, Help. Opened from the Revit and AutoCAD buttons, the notification-area icon, the Start menu
-# and the end of setup. Every action runs the existing setup, Skills Sync or update scripts.
+# Diagnostics, Help. Opened from the Revit and AutoCAD buttons, the Start menu and the end of setup. Every
+# action runs the existing setup, Skills Sync or update scripts. When it opens it checks for updates (at most
+# once a day) and shows the weekly Skills Sync reminder; nothing of Smart Connector runs after it closes.
 #   powershell -STA -File SmartConnectorApp.ps1 [-Section Skills]     (-SmokeTest builds every section and exits)
 param(
     [ValidateSet('Overview', 'Autodesk', 'AI', 'Skills', 'Components', 'Updates', 'Settings', 'Diagnostics', 'Help')]
@@ -21,11 +22,11 @@ $script:App = @{
     Section = $Section; Snapshot = $null; Repair = $null; RepairLines = New-Object System.Collections.Generic.List[string]
     Logs    = [ordered]@{
         'Setup log'            = Join-Path $env:LOCALAPPDATA 'AutodeskMcpConnector\setup.log'
-        'Background agent log' = Join-Path $env:LOCALAPPDATA 'AutodeskMcpConnector\agent.log'
         'Skills Sync log'      = Join-Path $env:LOCALAPPDATA 'AutodeskMcpSkillCollection\weekly.log'
         'Usage upload log'     = Join-Path $env:LOCALAPPDATA 'AutodeskMcpSkillCollection\usage-upload.log'
     }
     RequestPath = Join-Path $env:LOCALAPPDATA 'AutodeskMcpConnector\app-section.txt'
+    Check = $null
 }
 $script:Sections = [ordered]@{
     Overview    = @('Overview', 'overview')
@@ -50,6 +51,20 @@ if (-not $SmokeTest -and -not $script:AppMutex.WaitOne(0)) {
 
 # ---------- actions (each runs an existing script) ----------
 
+# 1.2.0 > 1.2.0-beta.3 > 1.1.9; an unreadable version compares as equal.
+function Compare-AppVersion {
+    param([string]$Left, [string]$Right)
+    $parse = { param($v) $m = [regex]::Match(([string]$v).Trim().TrimStart('v'), '^(\d+)\.(\d+)\.(\d+)(?:-(.+))?$'); if ($m.Success) { $m } else { $null } }
+    $a = & $parse $Left; $b = & $parse $Right
+    if (-not $a -or -not $b) { return 0 }
+    foreach ($i in 1..3) { $d = [int]$a.Groups[$i].Value - [int]$b.Groups[$i].Value; if ($d) { return [Math]::Sign($d) } }
+    $pa = $a.Groups[4].Value; $pb = $b.Groups[4].Value
+    if ($pa -eq $pb) { return 0 }
+    if (-not $pa) { return 1 }
+    if (-not $pb) { return -1 }
+    [Math]::Sign([string]::CompareOrdinal($pa, $pb))
+}
+
 function Start-AppScript {
     param([string]$Script, [string]$Arguments = '', [switch]$Wait)
     $path = Join-Path $RepositoryPath "installer\$Script"
@@ -64,14 +79,8 @@ function Invoke-AppAction {
         'SkillsSync'   { Start-AppScript 'ConnectorActions.ps1' '-Action SkillsSync' }
         'CheckUpdates' { Start-AppScript 'ConnectorActions.ps1' '-Action CheckUpdates' }
         'TestConnection' { Start-AppScript 'ConnectorActions.ps1' '-Action Status' }
-        'UpdateNow' {
-            $open = @(Get-Process -Name Revit, acad -ErrorAction SilentlyContinue)
-            New-Item -ItemType Directory -Path (Join-Path $env:LOCALAPPDATA 'AutodeskMcpConnector') -Force | Out-Null
-            New-Item -ItemType File -Path (Join-Path $env:LOCALAPPDATA 'AutodeskMcpConnector\update-requested.flag') -Force | Out-Null
-            try { Start-ConnectorAgent } catch { }
-            $message = if ($open.Count) { 'The update installs as soon as you close Revit and AutoCAD.' } else { 'The update is installing now. You get a notification when it is done.' }
-            [Windows.Forms.MessageBox]::Show($script:Form, $message, 'Smart Connector', 'OK', 'Information') | Out-Null
-        }
+        # The update window waits for Revit and AutoCAD to close, installs, and shows the result.
+        'UpdateNow' { Start-UpdateWindow $RepositoryPath }
         'OpenSkillsFolder' {
             $folder = Join-Path $env:LOCALAPPDATA 'AutodeskMcpSkillCollection\approved-skills'
             if (-not (Test-Path -LiteralPath $folder)) { $folder = Join-Path $RepositoryPath '.agents\skills' }
@@ -94,6 +103,23 @@ function Invoke-AppAction {
     }
 }
 
+function Set-SyncReminder {
+    param([bool]$On)
+    $runner = Get-ConnectorScript 'weekly-skill-collection.ps1' $RepositoryPath
+    $line = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -Action {1}' -f $runner, $(if ($On) { 'Enable' } else { 'Disable' })
+    $code = (Start-Process powershell.exe -ArgumentList $line -WindowStyle Hidden -Wait -PassThru).ExitCode
+    if ($code -ne 0) { [Windows.Forms.MessageBox]::Show($script:Form, 'The setting could not be saved. Try again, or open Diagnostics.', 'Smart Connector', 'OK', 'Warning') | Out-Null }
+}
+
+# When the app opens: look for an update in the background (at most once a day, unless switched off).
+function Start-OpenCheck {
+    $s = Get-ConnectorSnapshot
+    if (-not (Test-UpdateCheckDue $s)) { return }
+    Write-StatusDay (Join-Path $env:LOCALAPPDATA 'AutodeskMcpConnector\open-check.txt')
+    $line = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -Action CheckUpdate -RepositoryPath "{1}"' -f (Join-Path $RepositoryPath 'installer\Setup-BimCad.ps1'), $RepositoryPath
+    try { $script:App.Check = Start-Process powershell.exe -ArgumentList $line -WindowStyle Hidden -PassThru } catch { }
+}
+
 function Set-AutoUpdates {
     param([bool]$On)
     $action = if ($On) { 'EnableNotifications' } else { 'DisableNotifications' }
@@ -112,7 +138,7 @@ function Get-DiagnosticsText {
         "Claude Desktop installed: $(& $yesNo $s.ClaudeDesktop.Installed)   connected: $(& $yesNo $s.ClaudeDesktop.Connected)"
         "Claude Code installed: $(& $yesNo $s.ClaudeCode.Installed)   connected: $(& $yesNo $s.ClaudeCode.Connected)"
         "Codex installed: $(& $yesNo $s.Codex.Installed)   connected: $(& $yesNo $s.Codex.Connected)"
-        "Team skill service joined: $(& $yesNo $s.TeamJoined)   automatic updates: $(& $yesNo $s.AutoUpdates)   background agent: $(& $yesNo $s.AgentRunning)"
+        "Team skill service joined: $(& $yesNo $s.TeamJoined)   update checks: $(& $yesNo $s.AutoUpdates)   weekly sync reminder: $(& $yesNo $s.SyncReminder)"
         "Update ready: $(if ($s.AvailableVersion) { $s.AvailableVersion } else { 'none' })   last checked: $($s.LastChecked)"
         "Last Skills Sync: $($s.LastSync)   result: $($s.LastSyncStatus)   $($s.LastSyncReason)"
     ) -join "`r`n"
@@ -242,6 +268,23 @@ function Show-Overview {
     $null = Add-Text $hero $headline.Text 67 50 -Width 480 -Muted
     $null = Add-ActionButton $hero 'Check for updates' 'CheckUpdates' 548 30 -Width 140
     $null = Add-ActionButton $hero 'Skills Sync' 'SkillsSync' 698 30 -Primary -Width 116
+    # Reminders: a new version is ready, or the weekly Skills Sync is due.
+    $reminder = $null
+    if ($s.AvailableVersion -and (Compare-AppVersion $s.AvailableVersion $s.Version) -gt 0) {
+        $reminder = @('updates', ("Smart Connector {0} is ready to install." -f $s.AvailableVersion), 'Update now', 'UpdateNow')
+    }
+    elseif (Test-SyncReminderDue $s) {
+        $days = if ($s.LastSyncDay -lt 0) { 'Skills have not been synced on this computer yet.' } else { 'Your last Skills Sync was {0} days ago.' -f [int][Math]::Floor((Get-StatusToday) - $s.LastSyncDay) }
+        $reminder = @('sync', "$days Sync to send your saved skills for review and get newly approved ones.", 'Sync now', 'SkillsSync')
+    }
+    $top = 136
+    if ($reminder) {
+        $strip = New-BrandCard 32 128 832 52; $script:Content.Controls.Add($strip)
+        $strip.Controls.Add((New-BrandIconBox $reminder[0] 18 16 17))
+        $null = Add-Text $strip $reminder[1] 48 16 -Width 620
+        $null = Add-ActionButton $strip $reminder[2] $reminder[3] 698 9 -Primary -Width 116
+        $top = 196
+    }
 
     $cards = @(
         @('Revit 2024', 'revit', $(if ($s.RevitAddin) { @('Ready', 'Good') } elseif ($s.RevitInstalled) { @('Add-in missing', 'Warn') } else { @('Not installed', 'Off') }),
@@ -254,11 +297,11 @@ function Show-Overview {
         @('Workflow skills', 'skills', @("$(@(Get-InstalledWorkflowSkills).Count) installed", 'Good'),
             $(if ($s.LastSync) { 'Last sync ' + (Format-When $s.LastSync) } else { 'Not synced yet.' }) + "`n" + $(if ($s.TeamJoined) { 'Joined to the team skill service.' } else { 'Not joined to the team.' }), 'Skills'),
         @('Updates', 'updates', $(if ($s.AvailableVersion -and $s.AvailableVersion -ne $s.Version) { @("$($s.AvailableVersion) ready", 'Info') } else { @('Up to date', 'Good') }),
-            "Version $($s.Version)`n" + $(if ($s.AutoUpdates) { 'Installs updates automatically.' } else { 'Automatic updates are off.' }), 'Updates')
+            "Version $($s.Version)`n" + $(if ($s.AutoUpdates) { 'Checked when Revit, AutoCAD or this app opens.' } else { 'Update checks are off.' }), 'Updates')
     )
     for ($i = 0; $i -lt $cards.Count; $i++) {
         $spec = $cards[$i]
-        $card = New-BrandCard (32 + ($i % 3) * 284) (136 + [Math]::Floor($i / 3) * 168) 264 152
+        $card = New-BrandCard (32 + ($i % 3) * 284) ($top + [Math]::Floor($i / 3) * 168) 264 152
         $script:Content.Controls.Add($card)
         $card.Controls.Add((New-BrandIconBox $spec[1] 22 16 18))
         $null = Add-Text $card $spec[0] 48 18 -Bold
@@ -330,7 +373,7 @@ function Show-Components {
         @('revit', 'Revit 2024 add-in', 'Smart Connector tab in Revit', $(if ($s.RevitAddin) { @('Installed', 'Good') } elseif ($s.RevitInstalled) { @('Missing', 'Warn') } else { @('Not needed', 'Off') })),
         @('autocad', 'AutoCAD panel', 'Add-ins tab buttons and AI Markup', $(if ($s.AutoCadPanel) { @('Installed', 'Good') } elseif ($s.AutoCadInstalled) { @('Missing', 'Warn') } else { @('Not needed', 'Off') })),
         @('team', 'Team skill service', 'Shares your saved skills for review', $(if ($s.TeamJoined) { @('Joined', 'Good') } else { @('Not joined', 'Off') })),
-        @('sync', 'Background agent', 'Notification-area icon: updates and Skills Sync', $(if ($s.AgentRunning) { @('Running', 'Good') } else { @('Not running', 'Warn') }))
+        @('updates', 'Update checks', 'When Revit, AutoCAD or this app opens. Nothing runs in the background.', $(if ($s.AutoUpdates) { @('On', 'Good') } else { @('Off', 'Off') }))
     )
     for ($i = 0; $i -lt $rows.Count; $i++) { Add-StatusRow $card ($i * 76) $rows[$i][0] $rows[$i][1] $rows[$i][2] $rows[$i][3][0] $rows[$i][3][1] }
     $null = Add-ActionButton $script:Content $(if ($script:App.Repair) { 'Repairing...' } else { 'Repair' }) 'Repair' 32 492 -Primary -Width 116
@@ -345,11 +388,11 @@ function Show-Components {
 
 function Show-Updates {
     param($s)
-    Add-Heading 'Updates' 'New versions are checked when Windows starts, every 6 hours and whenever Revit or AutoCAD opens. They install when Revit and AutoCAD are closed.'
+    Add-Heading 'Updates' 'Smart Connector looks for a new version once a day, when you open Revit, AutoCAD or this app, and asks before installing. Updates install when Revit and AutoCAD are closed.'
     $card = New-BrandCard 32 96 832 152; $script:Content.Controls.Add($card)
-    $ready = $s.AvailableVersion -and $s.AvailableVersion -ne $s.Version
+    $ready = $s.AvailableVersion -and (Compare-AppVersion $s.AvailableVersion $s.Version) -gt 0
     Add-StatusRow $card 0 'connector' "Installed version $($s.Version)" $(if ($s.LastChecked) { 'Last checked ' + (Format-When $s.LastChecked -Utc) } else { 'Not checked yet.' }) $(if ($ready) { "$($s.AvailableVersion) ready" } else { 'Up to date' }) $(if ($ready) { 'Info' } else { 'Good' })
-    Add-StatusRow $card 76 'updates' 'Automatic updates' $(if ($s.AutoUpdates) { 'On: updates install by themselves.' } else { 'Off: use Check for updates.' }) $(if ($s.AutoUpdates) { 'On' } else { 'Off' }) $(if ($s.AutoUpdates) { 'Good' } else { 'Off' })
+    Add-StatusRow $card 76 'updates' 'Update checks' $(if ($s.AutoUpdates) { 'On: you are asked when a new version is ready.' } else { 'Off: use Check for updates.' }) $(if ($s.AutoUpdates) { 'On' } else { 'Off' }) $(if ($s.AutoUpdates) { 'Good' } else { 'Off' })
     $null = Add-ActionButton $script:Content 'Check for updates' 'CheckUpdates' 32 264 -Width 140
     if ($ready) { $null = Add-ActionButton $script:Content 'Update now' 'UpdateNow' 182 264 -Primary -Width 116 }
 }
@@ -358,16 +401,22 @@ function Show-Settings {
     param($s)
     Add-Heading 'Settings' 'Changes apply to this Windows user.'
     $auto = New-Object Windows.Forms.CheckBox
-    $auto.Text = 'Install updates automatically (recommended)'; $auto.AutoSize = $true; $auto.Checked = $s.AutoUpdates
+    $auto.Text = 'Check for updates when Revit, AutoCAD or Smart Connector opens (recommended)'; $auto.AutoSize = $true; $auto.Checked = $s.AutoUpdates
     $auto.Font = New-BrandFont 10.5 ([Drawing.FontStyle]::Bold) 'Segoe UI Semibold'; $auto.Location = New-Object Drawing.Point(32, 100)
     $auto.Add_Click({ $this.Enabled = $false; Set-AutoUpdates $this.Checked; Request-Section 'Settings' })
     $script:Content.Controls.Add($auto)
-    $null = Add-Text $script:Content 'Updates install when Revit and AutoCAD are closed. When this is off, use Check for updates.' 52 130 -Width 760 -Size 9 -Muted
-    $null = Add-Text $script:Content 'Private skills' 32 176 -Bold
-    $null = Add-Text $script:Content 'Skills on this list stay on your computer: Skills Sync never sends them for review.' 32 200 -Width 760 -Size 9 -Muted
-    $null = Add-ActionButton $script:Content 'Edit private skills' 'PrivateSkills' 32 228 -Width 150
-    $null = Add-Text $script:Content 'Team skill service' 32 284 -Bold
-    $null = Add-Text $script:Content $(if ($s.TeamJoined) { 'This computer has joined. Your administrator sees its name, your name and email, and which skills and tools are used (names and counts only).' } else { 'Not joined. Ask your administrator for the team setup file to join.' }) 32 308 -Width 760 -Size 9 -Muted
+    $null = Add-Text $script:Content 'At most once a day. You are asked before anything is installed, and it installs when Revit and AutoCAD are closed. When this is off, use Check for updates.' 52 130 -Width 760 -Size 9 -Muted
+    $remind = New-Object Windows.Forms.CheckBox
+    $remind.Text = 'Remind me weekly to sync my skills'; $remind.AutoSize = $true; $remind.Checked = $s.SyncReminder; $remind.Enabled = $s.TeamJoined
+    $remind.Font = New-BrandFont 10.5 ([Drawing.FontStyle]::Bold) 'Segoe UI Semibold'; $remind.Location = New-Object Drawing.Point(32, 166)
+    $remind.Add_Click({ $this.Enabled = $false; Set-SyncReminder $this.Checked; Request-Section 'Settings' })
+    $script:Content.Controls.Add($remind)
+    $null = Add-Text $script:Content $(if ($s.TeamJoined) { 'When your last Skills Sync is more than a week old, Revit, AutoCAD and this app remind you once a day.' } else { 'Available once this computer has joined the team skill service.' }) 52 196 -Width 760 -Size 9 -Muted
+    $null = Add-Text $script:Content 'Private skills' 32 242 -Bold
+    $null = Add-Text $script:Content 'Skills on this list stay on your computer: Skills Sync never sends them for review.' 32 266 -Width 760 -Size 9 -Muted
+    $null = Add-ActionButton $script:Content 'Edit private skills' 'PrivateSkills' 32 294 -Width 150
+    $null = Add-Text $script:Content 'Team skill service' 32 350 -Bold
+    $null = Add-Text $script:Content $(if ($s.TeamJoined) { 'This computer has joined. Your administrator sees its name, your name and email, and which skills and tools are used (names and counts only). Usage counts are sent only when you run Skills Sync.' } else { 'Not joined. Ask your administrator for the team setup file to join.' }) 32 374 -Width 760 -Size 9 -Muted
 }
 
 function Show-Diagnostics {
@@ -401,7 +450,7 @@ function Show-Help {
         @('In Revit', 'Open a model, then ask Claude or Codex to work with it. The Smart Connector tab has Skills Sync, Connection Status, updates and settings.'),
         @('In AutoCAD', 'Open a drawing and use the Add-ins tab. AI Markup lets you sketch on the drawing and type a task; paste the copied request into Claude. Clear Markup removes it.'),
         @('Workflow skills', 'Approved team workflows are installed for Claude and Codex. Save your own skills as usual; Skills Sync sends them to your administrator for review.'),
-        @('Updates', 'Updates install by themselves when Revit and AutoCAD are closed. Save your work when a notification says an update is ready.'),
+        @('Updates', 'Once a day, opening Revit, AutoCAD or this app looks for a new version and asks you. Choose Update now, save your work and close Revit and AutoCAD; the update window installs it.'),
         @('Something is wrong', 'Open Diagnostics, copy the summary and send it to your administrator. Repair in Components fixes most connection problems.')
     )
     $y = 100
@@ -483,6 +532,11 @@ $script:App.Ticks = 0
 $timer.Add_Tick({
     try {
         Update-Repair
+        # The update check started on opening has finished: show its result.
+        if ($script:App.Check -and $script:App.Check.HasExited) {
+            $script:App.Check = $null
+            if ($script:App.Section -in 'Overview', 'Updates') { Show-Section $script:App.Section }
+        }
         if (Test-Path -LiteralPath $script:App.RequestPath) {
             $requested = (Get-Content -LiteralPath $script:App.RequestPath -Raw).Trim()
             Remove-Item -LiteralPath $script:App.RequestPath -Force
@@ -494,7 +548,7 @@ $timer.Add_Tick({
     }
     catch { }
 })
-$script:Form.Add_Shown({ $script:Form.Activate(); $timer.Start() })
+$script:Form.Add_Shown({ $script:Form.Activate(); $timer.Start(); try { Start-OpenCheck } catch { } })
 Show-Section $Section
 [void]$script:Form.ShowDialog()
 $timer.Stop(); $script:Form.Dispose()

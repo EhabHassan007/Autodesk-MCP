@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Reflection;
 using System.Text.RegularExpressions;
 using Autodesk.Revit.Attributes;
@@ -35,7 +36,6 @@ namespace BimCadMcp.Revit
         internal static string StateRoot { get { return Path.Combine(LocalAppData, "AutodeskMcpSkillCollection"); } }
         internal static string ConnectorState { get { return Path.Combine(LocalAppData, "AutodeskMcpConnector"); } }
         internal static string UpdateStatePath { get { return Path.Combine(ConnectorState, "update-state.json"); } }
-        internal static string UpdateRequestPath { get { return Path.Combine(ConnectorState, "update-requested.flag"); } }
 
         internal static string FindRoot()
         {
@@ -91,16 +91,182 @@ namespace BimCadMcp.Revit
             Process.Start(info);
         }
 
-        // The agent is single-instance; starting it when it already runs is harmless.
-        internal static void EnsureAgentRunning()
+        internal static string InstalledVersion()
+        {
+            try { return File.ReadAllText(Path.Combine(FindRoot(), "VERSION")).Trim(); }
+            catch (Exception) { return ""; }
+        }
+
+        // The update window waits until Revit and AutoCAD are closed, then installs the new version and shows
+        // the result. It is a separate window, so it keeps going after Revit closes.
+        internal static void StartUpdateWindow()
+        {
+            string root = FindRoot();
+            StartHidden(Path.Combine(root, "installer", "ConnectorActions.ps1"), "-Action InstallUpdate -RepositoryPath " + Quote(root));
+        }
+
+        // Same order as Setup-BimCad's Compare-ConnectorVersion: 1.2.0 > 1.2.0-beta.3 > 1.1.9.
+        internal static int CompareVersions(string left, string right)
+        {
+            Regex pattern = new Regex("^(\\d+)\\.(\\d+)\\.(\\d+)(?:-(.+))?$");
+            Match a = pattern.Match((left ?? "").Trim().TrimStart('v')), b = pattern.Match((right ?? "").Trim().TrimStart('v'));
+            if (!a.Success || !b.Success) return 0;
+            for (int i = 1; i <= 3; i++)
+            {
+                int difference = Int32.Parse(a.Groups[i].Value, CultureInfo.InvariantCulture) - Int32.Parse(b.Groups[i].Value, CultureInfo.InvariantCulture);
+                if (difference != 0) return Math.Sign(difference);
+            }
+            string pa = a.Groups[4].Value, pb = b.Groups[4].Value;
+            if (pa == pb) return 0;
+            if (pa.Length == 0) return 1;
+            if (pb.Length == 0) return -1;
+            string[] xa = pa.Split('.'), xb = pb.Split('.');
+            for (int i = 0; i < Math.Max(xa.Length, xb.Length); i++)
+            {
+                if (i >= xa.Length) return -1;
+                if (i >= xb.Length) return 1;
+                int na, nb;
+                if (Int32.TryParse(xa[i], out na) && Int32.TryParse(xb[i], out nb)) { if (na != nb) return Math.Sign(na - nb); }
+                else if (xa[i] != xb[i]) return Math.Sign(String.CompareOrdinal(xa[i], xb[i]));
+            }
+            return 0;
+        }
+    }
+
+    // When Revit opens. At most once a day it looks for a new Smart Connector version (one small download of the
+    // public release manifest, on a background thread) and asks whether to install it; when the last Skills Sync
+    // is more than a week old it reminds about Skills Sync. Nothing is scheduled and nothing runs outside Revit:
+    // the person answers each question. AutoCAD (SmartConnectorStartup.lsp) and the Smart Connector app use the
+    // same day stamps, so one reminder a day covers all three.
+    internal static class OpenCheck
+    {
+        internal const string DefaultManifest = "https://github.com/EhabHassan007/Autodesk-MCP-Releases/releases/latest/download/latest.json";
+        private static UIControlledApplication _application;
+        private static volatile string _availableVersion = "";
+        private static volatile bool _checkDone;
+        private static bool _syncDue, _shown;
+
+        internal static string CheckStampPath { get { return Path.Combine(Connector.ConnectorState, "open-check.txt"); } }
+        internal static string ReminderStampPath { get { return Path.Combine(Connector.StateRoot, "sync-reminder.txt"); } }
+        internal static string LastSyncPath { get { return Path.Combine(Connector.StateRoot, "last-sync.txt"); } }
+
+        // Days since 1970-01-01 UTC, the format of the stamp files.
+        internal static double Today { get { return (DateTime.UtcNow - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalDays; } }
+
+        internal static double ReadDay(string path)
         {
             try
             {
-                string agent = Script("connector-agent.ps1");
-                if (!File.Exists(agent)) return;
-                StartHidden(agent, "-Action Run -StateRoot " + Quote(StateRoot) + " -InstallRoot " + Quote(FindRoot()));
+                double value;
+                if (File.Exists(path) && Double.TryParse(File.ReadAllText(path).Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out value)) return value;
             }
-            catch (Exception exception) { Debug.WriteLine("Smart Connector agent start failed: " + exception.Message); }
+            catch (Exception) { }
+            return -1;
+        }
+
+        internal static void WriteDay(string path)
+        {
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
+                File.WriteAllText(path, Today.ToString("0.000", CultureInfo.InvariantCulture));
+            }
+            catch (Exception) { }
+        }
+
+        // Team PCs only, reminder switched on in Settings, last good sync over a week ago, not reminded today.
+        internal static bool SyncReminderDue(double now)
+        {
+            if (!File.Exists(Path.Combine(Connector.StateRoot, "service.json"))) return false;
+            if (Connector.ReadJsonValue(Path.Combine(Connector.StateRoot, "settings.json"), "enabled") == "false") return false;
+            double last = ReadDay(LastSyncPath), reminded = ReadDay(ReminderStampPath);
+            return (last < 0 || now - last >= 7) && (reminded < 0 || now - reminded >= 0.8);
+        }
+
+        internal static void Start(UIControlledApplication application)
+        {
+            try
+            {
+                _application = application;
+                double now = Today;
+                bool updatesOn = Connector.ReadJsonValue(Connector.UpdateStatePath, "notifications_user_disabled") != "true";
+                double lastCheck = ReadDay(CheckStampPath);
+                bool checkUpdates = updatesOn && (lastCheck < 0 || now - lastCheck >= 0.8);
+                _syncDue = SyncReminderDue(now);
+                if (!checkUpdates && !_syncDue) return;
+                if (checkUpdates)
+                {
+                    WriteDay(CheckStampPath);
+                    System.Threading.Tasks.Task.Factory.StartNew(new Action(CheckForUpdate));
+                }
+                else _checkDone = true;
+                application.Idling += OnIdling;
+            }
+            catch (Exception exception) { Debug.WriteLine("Smart Connector open check: " + exception.Message); }
+        }
+
+        private static void CheckForUpdate()
+        {
+            try
+            {
+                string manifest = Connector.ReadJsonValue(Connector.UpdateStatePath, "release_manifest");
+                if (String.IsNullOrWhiteSpace(manifest) || !manifest.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) manifest = DefaultManifest;
+                HttpWebRequest request = (HttpWebRequest)WebRequest.Create(manifest);
+                request.Timeout = 10000; request.ReadWriteTimeout = 10000;
+                request.UserAgent = "SmartConnector-Revit";
+                string text;
+                using (WebResponse response = request.GetResponse())
+                using (StreamReader reader = new StreamReader(response.GetResponseStream()))
+                {
+                    text = reader.ReadToEnd();
+                }
+                Match match = Regex.Match(text, "\"version\"\\s*:\\s*\"(?<v>[^\"]+)\"");
+                string installed = Connector.InstalledVersion();
+                if (match.Success && installed.Length > 0 && Connector.CompareVersions(match.Groups["v"].Value, installed) > 0)
+                    _availableVersion = match.Groups["v"].Value;
+            }
+            catch (Exception exception) { Debug.WriteLine("Smart Connector update check: " + exception.Message); }
+            finally { _checkDone = true; }
+        }
+
+        private static void OnIdling(object sender, Autodesk.Revit.UI.Events.IdlingEventArgs e)
+        {
+            if (!_checkDone || _shown) return;
+            _shown = true;
+            UIApplication app = sender as UIApplication;
+            try { if (app != null) app.Idling -= OnIdling; else _application.Idling -= OnIdling; } catch (Exception) { }
+            try
+            {
+                Forms.IWin32Window owner = app == null ? null : Owner.Of(app.MainWindowHandle);
+                // One question per opening: the update first; the sync reminder waits for the next day.
+                if (_availableVersion.Length > 0) AskUpdate(_availableVersion);
+                else if (_syncDue) AskSync(owner);
+            }
+            catch (Exception exception) { Debug.WriteLine("Smart Connector open check: " + exception.Message); }
+        }
+
+        private static void AskUpdate(string available)
+        {
+            TaskDialog dialog = new TaskDialog(Brand.Name);
+            dialog.MainInstruction = "Smart Connector " + available + " is available";
+            dialog.MainContent = "You have version " + Connector.InstalledVersion() + ". The update installs when Revit and AutoCAD are closed and takes about a minute.";
+            dialog.AddCommandLink(TaskDialogCommandLinkId.CommandLink1, "Update now", "Opens the update window. Save your work and close Revit; it installs straight after.");
+            dialog.AddCommandLink(TaskDialogCommandLinkId.CommandLink2, "Later", "You are asked again tomorrow. Check updates on the Smart Connector tab works any time.");
+            if (dialog.Show() == TaskDialogResult.CommandLink1) Connector.StartUpdateWindow();
+        }
+
+        private static void AskSync(Forms.IWin32Window owner)
+        {
+            WriteDay(ReminderStampPath);
+            double last = ReadDay(LastSyncPath);
+            TaskDialog dialog = new TaskDialog(Brand.Name);
+            dialog.MainInstruction = "Time to sync your skills";
+            dialog.MainContent = (last < 0 ? "Skills Sync has not run on this computer yet. " :
+                "Your last Skills Sync was " + ((int)(Today - last)).ToString(CultureInfo.InvariantCulture) + " days ago. ") +
+                "It sends your saved skills for review and downloads newly approved ones.";
+            dialog.AddCommandLink(TaskDialogCommandLinkId.CommandLink1, "Sync now");
+            dialog.AddCommandLink(TaskDialogCommandLinkId.CommandLink2, "Later", "You are reminded again tomorrow. The weekly reminder can be switched off in Settings.");
+            if (dialog.Show() == TaskDialogResult.CommandLink1) SkillsSyncCommand.Run(owner);
         }
     }
 
@@ -121,7 +287,7 @@ namespace BimCadMcp.Revit
         internal readonly Forms.CheckBox Option = new Forms.CheckBox();
 
         // After this long the window says the step continues in the background and can be closed;
-        // the step keeps running and the connector agent shows a notice when it finishes.
+        // the step keeps running and its result shows in the Smart Connector app.
         internal void ContinueInBackgroundAfter(int seconds, string title, string body)
         {
             _backgroundAfterSeconds = seconds; _backgroundTitle = title; _backgroundBody = body;
@@ -358,9 +524,9 @@ namespace BimCadMcp.Revit
                 RibbonPanel support = Panel(application, "Support");
                 support.AddStackedItems(
                     Button(assemblyPath, "BimCadMcpCheckUpdates", "Check updates", typeof(CheckUpdatesCommand),
-                        "Check for a new version of Smart Connector. Updates install by themselves when Revit and AutoCAD are closed.", Icons.Tile("updates", false), Icons.Tile("updates", true)),
+                        "Check for a new version of Smart Connector. Updates install when Revit and AutoCAD are closed.", Icons.Tile("updates", false), Icons.Tile("updates", true)),
                     Button(assemblyPath, "BimCadMcpSettings", "Settings", typeof(SettingsCommand),
-                        "Automatic updates and other Smart Connector settings.", Icons.Tile("settings", false), Icons.Tile("settings", true)));
+                        "Update checks, the weekly Skills Sync reminder and other Smart Connector settings.", Icons.Tile("settings", false), Icons.Tile("settings", true)));
                 support.AddStackedItems(
                     Button(assemblyPath, "BimCadMcpDiagnostics", "Diagnostics", typeof(DiagnosticsCommand),
                         "Logs and checks to send to your administrator when something does not work.", Icons.Tile("diagnostics", false), Icons.Tile("diagnostics", true)),
@@ -444,6 +610,11 @@ namespace BimCadMcp.Revit
             return new WindowHandle(data.Application.MainWindowHandle);
         }
 
+        internal static Forms.IWin32Window Of(IntPtr handle)
+        {
+            return new WindowHandle(handle);
+        }
+
         private sealed class WindowHandle : Forms.IWin32Window
         {
             private readonly IntPtr _handle;
@@ -485,23 +656,20 @@ namespace BimCadMcp.Revit
             if (output.Contains("[UPDATE_AVAILABLE]"))
             {
                 window.ShowResult("Version " + available + " is ready",
-                    "You have version " + installed + ". The update installs by itself as soon as Revit and AutoCAD are closed, " +
-                    "and takes about a minute. Choose Update now to install it the next time you close them, even if automatic updates are off.",
+                    "You have version " + installed + ". The update installs when Revit and AutoCAD are closed and takes about a minute. " +
+                    "Update now opens the update window: save your work and close Revit, and it installs straight after.",
                     Brand.Blue);
                 window.AddButton("Later", false, delegate { window.Close(); });
                 window.AddButton("Update now", true, delegate
                 {
-                    Directory.CreateDirectory(Connector.ConnectorState);
-                    File.WriteAllText(Connector.UpdateRequestPath, DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture));
-                    Connector.EnsureAgentRunning();
-                    window.ShowResult("Update scheduled", "Save your work and close Revit (and AutoCAD if it is open). " +
-                        "The update then installs by itself and you will see a notice when it is done.", Brand.Good);
+                    Connector.StartUpdateWindow();
+                    window.Close();
                 });
             }
             else if (output.Contains("[UP_TO_DATE]"))
             {
                 window.ShowResult("You're up to date", "Smart Connector " + installed + " is the latest approved version.", Brand.Good);
-                window.Option.Text = "Install updates automatically (recommended)";
+                window.Option.Text = "Check for updates when Revit or AutoCAD opens (recommended)";
                 window.Option.Checked = !userOff;
                 window.Option.Visible = true;
                 window.AddButton("Close", true, delegate
@@ -527,20 +695,24 @@ namespace BimCadMcp.Revit
     {
         public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
         {
+            return Run(Owner.Of(commandData));
+        }
+
+        internal static Result Run(Forms.IWin32Window owner)
+        {
             try
             {
                 string runner = Connector.Script("weekly-skill-collection.ps1");
                 using (TaskWindow window = new TaskWindow("Skills Sync"))
                 {
-                    Connector.EnsureAgentRunning();   // the agent announces the result if this window is closed first
                     window.ContinueInBackgroundAfter(15, "Syncing in the background",
                         "Skills Sync is still working. You can close this window and keep working; " +
-                        "a Windows notification shows the result when it is done.");
+                        "the result shows under Workflow skills in Smart Connector when it is done.");
                     // From Revit, only approved Revit skills are downloaded; your saved skills of any kind are still sent.
                     window.Run("Syncing skills…", "Sending your saved skills for review and downloading the latest approved Revit skills.",
                         runner, "-Action Sync -Product Revit -StateRoot " + Connector.Quote(Connector.StateRoot),
                         delegate(string output, int code) { ShowOutcome(window, output); });
-                    window.ShowDialog(Owner.Of(commandData));
+                    if (owner == null) window.ShowDialog(); else window.ShowDialog(owner);
                 }
                 return Result.Succeeded;
             }
@@ -556,7 +728,7 @@ namespace BimCadMcp.Revit
             if (output.Contains("A collection run is already active."))
             {
                 window.ShowResult("Skills Sync is already running",
-                    "A sync started earlier is still working in the background. You will get a Windows notification when it is done.", Brand.Blue);
+                    "A sync started earlier is still working in the background. Its result shows under Workflow skills in Smart Connector.", Brand.Blue);
                 window.AddButton("Close", true, delegate { window.Close(); });
                 return;
             }

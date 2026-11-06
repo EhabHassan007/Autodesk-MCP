@@ -8,8 +8,8 @@
     AutodeskProduct="AutoCAD"
     Name="Smart Connector"
     Description="AI Markup, Skills Sync, Check Updates, Settings and Connection Status for Smart Connector for Autodesk Revit and AutoCAD."
-    AppVersion="1.0.0"
-    FriendlyVersion="1.0.0"
+    AppVersion="1.1.0"
+    FriendlyVersion="1.1.0"
     ProductType="Application"
     SupportedLocales="Enu"
     AppNameSpace="smartautodeskconnector.local"
@@ -22,7 +22,7 @@
     <RuntimeRequirements OS="Win64" Platform="AutoCAD*" SeriesMin="R23.0" />
     <ComponentEntry AppName="SmartAutodeskConnectorRibbon" Version="1.0.0" ModuleName="./Contents/SmartAutodeskConnector.cuix" AppDescription="Smart Connector panel on the Add-ins tab" />
     <!-- Demand-loaded: opening AutoCAD or a drawing runs nothing of ours; the LISP loads on the first button click. -->
-    <ComponentEntry AppName="SmartAutodeskConnectorCommands" Version="1.0.0" ModuleName="./Contents/SmartAutodeskConnector.lsp" AppDescription="Commands behind the Smart Connector buttons" LoadOnCommandInvocation="True" PerDocument="True">
+    <ComponentEntry AppName="SmartAutodeskConnectorCommands" Version="1.1.0" ModuleName="./Contents/SmartAutodeskConnector.lsp" AppDescription="Commands behind the Smart Connector buttons" LoadOnCommandInvocation="True" PerDocument="True">
       <Commands GroupName="SMARTAUTODESKCONNECTOR">
         <Command Local="SACOPEN" Global="SACOPEN" />
         <Command Local="SACSKILLSSYNC" Global="SACSKILLSSYNC" />

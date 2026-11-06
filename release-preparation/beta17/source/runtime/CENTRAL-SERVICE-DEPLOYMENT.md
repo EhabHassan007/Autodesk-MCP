@@ -63,7 +63,7 @@ Device credentials are revocable but do not expire automatically in this initial
 
 ## Flow and boundaries
 
-- Every Friday at 16:30 local time (or the existing configured weekly schedule), the signed-in user's task scans saved-skill directories.
+- When the person runs Skills Sync (from the button or the weekly reminder), it scans saved-skill directories.
 - New/changed candidates go to the service over HTTPS. Server validation is independent of client checks. Size/type/path/credential checks are heuristic; owner review is still required.
 - The GitHub App creates a deterministic intake branch and a draft PR. The service deduplicates identical batches across PCs, reuses an existing PR after a retry, and never merges.
 - After owner merge, the next successful sync downloads the approved main-branch skill library. Codex/Claude Code receive approved skills when this does not overwrite personal changes. The MCP workflow tools read the synchronized cache, so Claude can access guidance without uploading another ZIP.

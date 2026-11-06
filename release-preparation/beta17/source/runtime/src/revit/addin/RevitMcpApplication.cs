@@ -28,8 +28,8 @@ namespace BimCadMcp.Revit
             ConnectionState.MarkServerStarted(application.ControlledApplication.VersionNumber, _host.SessionId, _host.PipeName);
             SessionRegistry.Register(_host.SessionId, application.ControlledApplication.VersionNumber, _host.PipeName);
             RibbonUi.Create(application);
-            // Starts the notification-area agent so update notices also appear for this Revit session.
-            Connector.EnsureAgentRunning();
+            // Once a day: ask about a new Smart Connector version, and remind about Skills Sync after a week.
+            OpenCheck.Start(application);
             return Result.Succeeded;
         }
 

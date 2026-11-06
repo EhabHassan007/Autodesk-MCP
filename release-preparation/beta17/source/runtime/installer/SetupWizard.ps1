@@ -16,7 +16,7 @@ $script:WizardSteps = @(
     @{ Id = 'claude_desktop'; Label = 'Connect Claude Desktop' },
     @{ Id = 'claude_code';    Label = 'Connect Claude Code' },
     @{ Id = 'team';           Label = 'Join the team skill service' },
-    @{ Id = 'updates';        Label = 'Automatic updates' }
+    @{ Id = 'updates';        Label = 'Update checks' }
 )
 
 function Get-TermsVersion {
@@ -138,7 +138,7 @@ function Show-SetupWizard {
         @('revit', 'Revit and AutoCAD', 'Claude and Codex work with your open model or drawing.'),
         @('assistant', 'Claude and Codex', 'Connected for you. No settings files to edit.'),
         @('skills', 'Team workflow skills', 'Approved skills installed and kept in sync.'),
-        @('updates', 'Automatic updates', 'New versions install when Revit and AutoCAD are closed.')
+        @('updates', 'Update checks', 'Once a day, when Revit, AutoCAD or Smart Connector opens. You are asked before anything installs.')
     )
     for ($i = 0; $i -lt 4; $i++) {
         $card = New-BrandCard (28 + ($i % 2) * 254) (112 + [Math]::Floor($i / 2) * 80) 242 70; $welcome.Controls.Add($card)
@@ -200,7 +200,7 @@ function Show-SetupWizard {
         [pscustomobject]@{ Key = 'AutoCAD'; Name = $(if ($check.AutoCad.Count) { 'AutoCAD ' + ($check.AutoCad[-1]) } else { 'AutoCAD' }); Enabled = [bool]$check.AutoCad.Count; Checked = $true; Note = $(if ($check.AutoCad.Count) { 'Add-ins panel and AI Markup' } else { 'Not installed' }) })
     $null = & $addText $choose 'Also install' 28 218 0 9.5 $true
     $skillsBox = New-Object Windows.Forms.CheckBox; $skillsBox.Text = 'Team workflow skills'; $skillsBox.Checked = $true; $skillsBox.AutoSize = $true; $skillsBox.Location = New-Object Drawing.Point(28, 242)
-    $updatesBox = New-Object Windows.Forms.CheckBox; $updatesBox.Text = 'Automatic updates (recommended)'; $updatesBox.Checked = $true; $updatesBox.AutoSize = $true; $updatesBox.Location = New-Object Drawing.Point(200, 242)
+    $updatesBox = New-Object Windows.Forms.CheckBox; $updatesBox.Text = 'Check for updates (recommended)'; $updatesBox.Checked = $true; $updatesBox.AutoSize = $true; $updatesBox.Location = New-Object Drawing.Point(200, 242)
     $choose.Controls.AddRange(@($skillsBox, $updatesBox))
     $joinBox = New-Object Windows.Forms.CheckBox; $joinBox.Text = 'Join the team skill service'; $joinBox.Checked = $true; $joinBox.AutoSize = $true; $joinBox.Location = New-Object Drawing.Point(28, 268)
     $joinBox.Visible = $AskDetails; $choose.Controls.Add($joinBox)

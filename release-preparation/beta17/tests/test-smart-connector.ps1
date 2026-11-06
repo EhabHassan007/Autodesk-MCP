@@ -45,25 +45,6 @@ try{
  Assert (Test-OwnConnectorEntry 'powershell.exe -File C:\Users\x\AppData\Local\BIM-CAD-MCP\src\autodesk\autodesk-bridge.ps1') 'Own connector entry not recognised'
  Assert (-not (Test-OwnConnectorEntry 'npx -y @someone/revit-mcp-server')) 'Another tool''s Revit MCP server would be removed'
 
- # 3. Agent decisions.
- . (Join-Path $runtime 'scripts/connector-agent.ps1') -LibraryOnly
- Assert ((Compare-AgentVersion '1.0.0-beta.18' '1.0.0-beta.17') -eq 1 -and (Compare-AgentVersion '1.0.0-beta.9' '1.0.0-beta.10') -eq -1) 'Numeric pre-release compare wrong'
- Assert ((Compare-AgentVersion '1.0.0' '1.0.0-beta.20') -eq 1 -and (Compare-AgentVersion 'v1.0.0-beta.18' '1.0.0-beta.18') -eq 0) 'Release/pre-release compare wrong'
- Assert ((Get-AgentDecision '1.0.0-beta.18' '1.0.0-beta.19' $true $false @()) -eq 'install') 'Ready update not installed when apps are closed'
- Assert ((Get-AgentDecision '1.0.0-beta.18' '1.0.0-beta.19' $true $false @('Revit')) -eq 'wait') 'Update would install under an open Revit'
- Assert ((Get-AgentDecision '1.0.0-beta.18' '1.0.0-beta.19' $false $false @()) -eq 'none') 'Update installed although automatic updates are off'
- Assert ((Get-AgentDecision '1.0.0-beta.18' '1.0.0-beta.19' $false $true @()) -eq 'install') '"Update now" ignored when automatic updates are off'
- Assert ((Get-AgentDecision '1.0.0-beta.18' '1.0.0-beta.18' $true $true @()) -eq 'none') 'Same version reinstalled'
- Assert ((Get-AgentDecision '1.0.0-beta.19' '1.0.0-beta.18' $true $false @()) -eq 'none') 'Downgrade attempted'
- Assert ((Get-AgentDecision '1.0.0-beta.18' '' $true $false @()) -eq 'none') 'Install attempted with no update known'
- $now=Get-Date
- Assert ((Test-CheckOnAppStart @('AutoCAD') $now.AddMinutes(-31) $now) -and -not (Test-CheckOnAppStart @('AutoCAD') $now.AddMinutes(-5) $now) -and -not (Test-CheckOnAppStart @() $now.AddHours(-5) $now)) 'Update check on app start wrong'
- Assert ((Get-AgentDecision '1.0.0-beta.21' '1.0.0' $true $false @()) -eq 'install' -and (Compare-AgentVersion '1.0.1' '1.0.0') -eq 1) 'Beta PCs would not move to 1.0.0'
- Assert ((@(Get-StartedApps @('Revit') @('Revit','AutoCAD')) -join ',') -eq 'AutoCAD' -and @(Get-StartedApps @('Revit') @()).Count -eq 0) 'App start detection wrong'
- foreach($pair in @(@('[UPDATE_INSTALLED] x','installed'),@('[UPDATE_DEFERRED] Revit is open','deferred'),@('[UPDATE_AVAILABLE] Version','available'),@('[UP_TO_DATE] ok','current'),@('error','unknown'))){
-  Assert ((ConvertFrom-UpdateOutput $pair[0]) -eq $pair[1]) "Update output '$($pair[0])' misread"
- }
-
  # 4. Skills Sync counts from the approved-library install.
  . (Join-Path $runtime 'scripts/central-skill-sync.ps1') -RepositoryRoot (Join-Path $t 'repo') -StateRoot (Join-Path $t 'state') -LibraryOnly
  New-Item -ItemType Directory (Join-Path $t 'repo/.agents/skills'),(Join-Path $t 'state') -Force|Out-Null
@@ -98,6 +79,6 @@ try{
  $ui=Get-Content (Join-Path $runtime 'src/revit/addin/ConnectorUi.cs') -Raw
  foreach($c in 'CheckUpdatesCommand','SkillsSyncCommand','SettingsCommand','ConnectionStatusCommand'){Assert ($ui.Contains("typeof($c)")) "Ribbon lacks $c"}
  Assert ($ui.Contains('internal const string TabName = Brand.Name;') -and $ui.Contains('"Smart Connector"')) 'Ribbon tab is not named Smart Connector'
- "PASS: wizard markers, quoting and terms record; automatic updates on by default and only the user turns them off; updates wait for Revit/AutoCAD; old add-in builds removed; other tools' MCP servers kept; agent decisions; Skills Sync counts; $addin"
+ "PASS: wizard markers, quoting and terms record; automatic updates on by default and only the user turns them off; updates wait for Revit/AutoCAD; old add-in builds removed; other tools' MCP servers kept; Skills Sync counts; $addin"
 }
 finally{$env:LOCALAPPDATA=$savedLocal;Remove-Item $t -Recurse -Force -ErrorAction SilentlyContinue}

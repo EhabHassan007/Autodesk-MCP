@@ -1,69 +1,64 @@
 [CmdletBinding()]
 param(
-    # Sync is the on-demand Skills Sync button: upload and download now, even if the weekly run is off.
-    [ValidateSet('Enable','Disable','Status','Run','Preview','Sync')][string]$Action = 'Status',
+    # Sync is the Skills Sync button: upload and download now. Configure saves the Skills Sync settings and the
+    # weekly reminder; Enable and Disable switch only the reminder. Nothing is scheduled: the reminder appears
+    # when Revit, AutoCAD or Smart Connector opens and the last successful sync is more than a week old.
+    [ValidateSet('Configure','Enable','Disable','Status','Run','Preview','Sync')][string]$Action = 'Status',
     # The software whose Skills Sync button was pressed; it then downloads only that software's approved skills.
-    # Empty (the weekly run, the notification-area menu): the installed Autodesk products plus General.
+    # Empty: the installed Autodesk products plus General.
     [ValidateSet('', 'Revit', 'AutoCAD', '3dsMax')][string]$Product = '',
     [string]$RepositoryRoot = (Join-Path $env:LOCALAPPDATA 'BIM-CAD-MCP'),
     [string[]]$AdditionalSkillRoots = @(),
-    [ValidateSet('Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday')][string]$Day = 'Friday',
-    [ValidatePattern('^([01][0-9]|2[0-3]):[0-5][0-9]$')][string]$Time = '16:30',
+    [ValidateSet('', 'On', 'Off')][string]$Reminder = '',
     [string]$StateRoot = (Join-Path $env:LOCALAPPDATA 'AutodeskMcpSkillCollection')
 )
 $ErrorActionPreference = 'Stop'
 $settingsPath = Join-Path $StateRoot 'settings.json'
 $logPath = Join-Path $StateRoot 'weekly.log'
 $resultPath = Join-Path $StateRoot 'last-result.json'
-if ($Action -in @('Enable','Disable','Status')) {
-    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
-    $taskName = 'Autodesk MCP Weekly Skills - ' + $identity.User.Value
-}
+# Days since 1970-01-01 (UTC) of the last successful sync; the Revit add-in and the AutoCAD panel read it too.
+$lastSyncPath = Join-Path $StateRoot 'last-sync.txt'
 
-if ($Action -eq 'Enable') {
-    if (-not (Test-Path (Join-Path $RepositoryRoot '.agents\skills'))) { throw 'Install Smart Connector before enabling skill collection.' }
-
+function Write-SkillSettings {
+    param([bool]$ReminderOn)
     New-Item -ItemType Directory -Path $StateRoot -Force | Out-Null
-    $installRoot = Join-Path $StateRoot 'scripts'
-    New-Item -ItemType Directory -Path $installRoot -Force | Out-Null
-    foreach ($name in @('weekly-skill-collection.ps1','collect-skills-for-review.ps1','submit-team-knowledge.ps1','central-skill-sync.ps1','Initialize-SkillService.ps1','send-usage.ps1','connector-agent.ps1','SkillLibrary.ps1')) {
-        $source = Join-Path $PSScriptRoot $name
-        $destination = Join-Path $installRoot $name
-        if ([IO.Path]::GetFullPath($source) -ne [IO.Path]::GetFullPath($destination)) { Copy-Item -LiteralPath $source -Destination $destination -Force }
-    }
     $settings = [ordered]@{
         repository_root=$RepositoryRoot; repository_url='https://github.com/EhabHassan007/Autodesk-MCP.git'
-        reviewer='EhabHassan007'; additional_skill_roots=@($AdditionalSkillRoots)
-        day=$Day; time=$Time; task_name=$taskName; enabled=$true
+        reviewer='EhabHassan007'; additional_skill_roots=@($AdditionalSkillRoots); enabled=$ReminderOn
     }
     [IO.File]::WriteAllText($settingsPath, ($settings | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding($false)))
-    $engine = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-    $runner = Join-Path $installRoot 'weekly-skill-collection.ps1'
-    foreach ($path in @($runner,$StateRoot)) { if ($path.Contains('"')) { throw 'Unsupported quote in installation path.' } }
-    $arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "{0}" -Action Run -StateRoot "{1}"' -f $runner,$StateRoot
-    $taskAction = New-ScheduledTaskAction -Execute $engine -Argument $arguments
-    $trigger = New-ScheduledTaskTrigger -Weekly -WeeksInterval 1 -DaysOfWeek $Day -At ([datetime]::ParseExact($Time,'HH:mm',[Globalization.CultureInfo]::InvariantCulture))
-    $principal = New-ScheduledTaskPrincipal -UserId $identity.Name -LogonType Interactive -RunLevel Limited
-    $taskSettings = New-ScheduledTaskSettingsSet -StartWhenAvailable -RunOnlyIfNetworkAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 30)
-    Register-ScheduledTask -TaskName $taskName -Action $taskAction -Trigger $trigger -Principal $principal -Settings $taskSettings -Description 'Submit saved skill changes as draft GitHub pull requests for owner review. Never merges or publishes.' -Force | Out-Null
-    Write-Output "Enabled: $Day at $Time (this PC's local time), while this user is signed in. Missed runs are eligible to catch up."
-    Write-Output "Administrator device enrollment is required. Team GitHub accounts are not needed. Log: $logPath"
-    exit 0
 }
-if ($Action -eq 'Disable') {
-    if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) { Unregister-ScheduledTask -TaskName $taskName -Confirm:$false }
-    if (Test-Path $settingsPath) {
-        $saved = Get-Content $settingsPath -Raw | ConvertFrom-Json
-        $saved | Add-Member -NotePropertyName enabled -NotePropertyValue $false -Force
-        [IO.File]::WriteAllText($settingsPath, ($saved | ConvertTo-Json -Depth 5))
+
+function Write-LastSyncDay {
+    param([datetime]$When = [DateTime]::UtcNow)
+    $days = ($When.ToUniversalTime() - [DateTime]::new(1970, 1, 1, 0, 0, 0, [DateTimeKind]::Utc)).TotalDays
+    [IO.File]::WriteAllText($lastSyncPath, $days.ToString('0.000', [Globalization.CultureInfo]::InvariantCulture))
+}
+
+$saved = $null
+if (Test-Path $settingsPath) { try { $saved = Get-Content $settingsPath -Raw | ConvertFrom-Json } catch { } }
+if ($Action -in @('Configure','Enable','Disable')) {
+    if ($Action -eq 'Configure' -and -not (Test-Path (Join-Path $RepositoryRoot '.agents\skills'))) { throw 'Install Smart Connector before setting up Skills Sync.' }
+    if ($Action -ne 'Configure' -and $saved) {
+        if ($saved.repository_root) { $RepositoryRoot = [string]$saved.repository_root }
+        if (-not $AdditionalSkillRoots.Count) { $AdditionalSkillRoots = @($saved.additional_skill_roots) }
     }
-    Write-Output 'Weekly collection disabled. Local review history retained.'
+    $on = switch ($Action) { 'Enable' { $true } 'Disable' { $false } default { if ($Reminder) { $Reminder -eq 'On' } elseif ($saved) { $saved.enabled -ne $false } else { $true } } }
+    Write-SkillSettings -ReminderOn $on
+    # A PC updated from an earlier version keeps its last sync date, so it is not reminded straight away.
+    if (-not (Test-Path -LiteralPath $lastSyncPath) -and (Test-Path -LiteralPath $resultPath)) {
+        try {
+            $last = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
+            if ($last.sync_status -in @('ok','partial') -and $last.completed_at) { Write-LastSyncDay ([DateTime]::Parse([string]$last.completed_at)) }
+        }
+        catch { }
+    }
+    Write-Output $(if ($on) { 'Skills Sync reminder is on: you are reminded when your last sync is more than a week old.' } else { 'Skills Sync reminder is off. Use Skills Sync whenever you like.' })
     exit 0
 }
 if ($Action -eq 'Status') {
-    Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue | Select-Object TaskName,State
     if (Test-Path $resultPath) { Get-Content $resultPath -Raw }
-    else { Write-Output 'No collection run has completed yet.' }
+    else { Write-Output 'No Skills Sync has completed yet.' }
     Write-Output "Log: $logPath"
     exit 0
 }
@@ -74,7 +69,6 @@ try {
     catch [IO.IOException] { Write-Output 'A collection run is already active.'; exit 0 }
     if (Test-Path $settingsPath) {
         $config = Get-Content $settingsPath -Raw | ConvertFrom-Json
-        if ($Action -eq 'Run' -and $config.enabled -eq $false) { Write-Output 'Weekly collection is disabled.'; exit 0 }
         $RepositoryRoot = [string]$config.repository_root
         $AdditionalSkillRoots = @($config.additional_skill_roots)
     }
@@ -118,6 +112,7 @@ try {
     # The Skills Sync window shows sync_reason; without it, it can only guess at the internet connection.
     if ($failure -and -not $result['sync_reason']) { $result['sync_status'] = 'failed'; $result['sync_reason'] = 'Skills Sync stopped: ' + $failure }
     [IO.File]::WriteAllText($resultPath, ($result | ConvertTo-Json -Depth 5))
+    if ($Action -in @('Run','Sync') -and -not $failure -and [string]$result['sync_status'] -in @('ok','partial')) { Write-LastSyncDay }
     Write-Output $text
     if ($failure) { exit 1 }
 }

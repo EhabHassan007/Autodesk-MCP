@@ -40,6 +40,24 @@ jobs:
           "Ran $($tests.Count) tests; $($failed.Count) failed." | Write-Host
           if ($failed.Count) { throw ('Failed: ' + ($failed -join ', ')) }
 
+      # The Revit add-in is compiled on each PC by the .NET Framework compiler that ships with Windows. Compile it
+      # here with that same compiler, against the Revit 2024 API reference assemblies from NuGet (references
+      # only, used for this check and never shipped), so a compile error is caught before release.
+      - name: Compile the Revit 2024 add-in
+        shell: powershell
+        run: |
+          $refs = Join-Path $env:RUNNER_TEMP 'revit-2024-api'
+          New-Item -ItemType Directory -Path $refs -Force | Out-Null
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          foreach ($name in 'revitapi', 'revitapiui') {
+            $package = Join-Path $env:RUNNER_TEMP "$name.nupkg"
+            Invoke-WebRequest -UseBasicParsing -OutFile $package -Uri "https://api.nuget.org/v3-flatcontainer/nice3point.revit.api.$name/2024.3.60/nice3point.revit.api.$name.2024.3.60.nupkg"
+            $zip = [IO.Compression.ZipFile]::OpenRead($package)
+            try { foreach ($entry in $zip.Entries | Where-Object FullName -like 'ref/net48/*.dll') { [IO.Compression.ZipFileExtensions]::ExtractToFile($entry, (Join-Path $refs $entry.Name), $true) } }
+            finally { $zip.Dispose() }
+          }
+          & release-preparation\beta17\source\runtime\src\revit\build-revit-addin.ps1 -RevitInstallPath $refs -OutputPath (Join-Path $env:RUNNER_TEMP 'revit-addin')
+
       # The upgrade test installs a real release package over an older install.
       - name: Upgrade from an older release
         shell: powershell
