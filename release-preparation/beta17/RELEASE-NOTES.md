@@ -2,6 +2,7 @@ Smart Autodesk Connector 1.0.0
 
 First full release. Installed PCs on any beta update to it automatically.
 
+- New logo: the S drawn as one clean line, with blue CAD grip squares at its ends, in flat brand colours that stay sharp down to 16 px. Used for the app icon, setup, the notification area and the Revit and AutoCAD buttons.
 - Setup file: Smart-Autodesk-Connector-Setup-1.0.0.exe installs for the signed-in Windows user without administrator rights. The team version asks for name and email and joins the PC to the team skill service.
 - Automatic updates: the connector checks when Windows starts, every 6 hours, and whenever Revit or AutoCAD is opened, and installs a new version as soon as Revit and AutoCAD are closed. A notification offers "Update now".
 - AI Markup in AutoCAD: two new buttons on the Add-ins tab. AI Markup lets you sketch on the drawing, type what Claude should do, and copies the request with the sketch as coordinates; paste it into Claude. Clear Markup removes it. Commands AI and AICLEAR; the markup layer does not plot.
@@ -10,4 +11,4 @@ First full release. Installed PCs on any beta update to it automatically.
 - Skills grouped by software category; Skills Sync buttons in Revit and on the AutoCAD Add-ins tab; setup continues past a failed step and replaces the old flat skill library on upgrade.
 - Your own skill edits, team registration and update preferences are kept on update.
 
-SHA-256: B51089E8FBFAAA048C22FB1FB9DCDFF47E41020B0ED35F5C0157C87151C509F1
+SHA-256: A03F88CF0041EC215A75387BBB62671EC0E752E319D753F77C452564DE0071BE

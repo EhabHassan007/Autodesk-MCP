@@ -265,18 +265,19 @@ namespace BimCadMcp.Revit
         {
             return Tile(delegate(Media.DrawingContext c, Media.Pen p)
             {
-                // The logo's "S" connector with its two nodes.
+                // The logo's grip S: two bowls with blue CAD grip squares at its ends.
                 Media.StreamGeometry s = new Media.StreamGeometry();
                 using (Media.StreamGeometryContext g = s.Open())
                 {
-                    g.BeginFigure(new System.Windows.Point(21.5, 9), false, false);
-                    g.ArcTo(new System.Windows.Point(16, 16), new System.Windows.Size(6, 4.5), 0, true, Media.SweepDirection.Counterclockwise, true, false);
-                    g.ArcTo(new System.Windows.Point(10.5, 23), new System.Windows.Size(6, 4.5), 0, true, Media.SweepDirection.Clockwise, true, false);
+                    g.BeginFigure(new System.Windows.Point(21, 10.5), false, false);
+                    g.ArcTo(new System.Windows.Point(16, 15.5), new System.Windows.Size(5, 5), 0, true, Media.SweepDirection.Counterclockwise, true, false);
+                    g.ArcTo(new System.Windows.Point(11, 20.5), new System.Windows.Size(5, 5), 0, true, Media.SweepDirection.Clockwise, true, false);
                 }
                 s.Freeze();
                 c.DrawGeometry(null, p, s);
-                c.DrawEllipse(new Media.SolidColorBrush(Media.Color.FromRgb(32, 201, 171)), null, new System.Windows.Point(22.5, 9), 3, 3);
-                c.DrawEllipse(new Media.SolidColorBrush(Media.Color.FromRgb(47, 128, 237)), null, new System.Windows.Point(9.5, 23), 3, 3);
+                Media.SolidColorBrush grip = new Media.SolidColorBrush(Media.Color.FromRgb(47, 128, 237));
+                c.DrawRectangle(grip, null, new System.Windows.Rect(18.6, 8.1, 4.8, 4.8));
+                c.DrawRectangle(grip, null, new System.Windows.Rect(8.6, 18.1, 4.8, 4.8));
             });
         }
 
@@ -338,19 +339,20 @@ namespace BimCadMcp.Revit
                 float k = size / 256f;
                 g.ScaleTransform(k, k);
                 using (Drawing.Drawing2D.GraphicsPath tile = new Drawing.Drawing2D.GraphicsPath())
-                using (Drawing.SolidBrush navy = new Drawing.SolidBrush(Drawing.Color.FromArgb(28, 45, 76)))
-                using (Drawing.Drawing2D.LinearGradientBrush gradient = new Drawing.Drawing2D.LinearGradientBrush(new Drawing.PointF(70, 60), new Drawing.PointF(186, 200), Brand.Teal, Brand.Blue))
-                using (Drawing.Pen pen = new Drawing.Pen(gradient, 26f))
+                using (Drawing.SolidBrush navy = new Drawing.SolidBrush(Drawing.Color.FromArgb(22, 36, 61)))
+                using (Drawing.SolidBrush teal = new Drawing.SolidBrush(Brand.Teal))
+                using (Drawing.SolidBrush blue = new Drawing.SolidBrush(Brand.Blue))
+                using (Drawing.Pen pen = new Drawing.Pen(teal, size <= 24 ? 34f : size <= 32 ? 28f : 22.5f))
                 using (Drawing.Drawing2D.GraphicsPath s = new Drawing.Drawing2D.GraphicsPath())
                 {
                     tile.AddArc(8, 8, 104, 104, 180, 90); tile.AddArc(144, 8, 104, 104, 270, 90);
                     tile.AddArc(144, 144, 104, 104, 0, 90); tile.AddArc(8, 144, 104, 104, 90, 90); tile.CloseFigure();
                     g.FillPath(navy, tile);
-                    pen.StartCap = Drawing.Drawing2D.LineCap.Round; pen.EndCap = Drawing.Drawing2D.LineCap.Round;
-                    s.AddArc(76, 52, 104, 76, 330, -240); s.AddArc(76, 128, 104, 76, 270, 240);
+                    // Grip S, as in assets\New-BrandAssets.ps1: one teal line, blue grip squares at its ends.
+                    s.AddArc(90.5f, 49.25f, 75, 75, 0, -270); s.AddArc(90.5f, 124.25f, 75, 75, 270, 270);
                     g.DrawPath(pen, s);
-                    using (Drawing.SolidBrush teal = new Drawing.SolidBrush(Brand.Teal)) g.FillEllipse(teal, 151, 49, 44, 44);
-                    using (Drawing.SolidBrush blue = new Drawing.SolidBrush(Brand.Blue)) g.FillEllipse(blue, 61, 163, 44, 44);
+                    g.FillRectangle(blue, 148.5f, 69.75f, 34, 34);
+                    g.FillRectangle(blue, 73.5f, 144.75f, 34, 34);
                 }
             }
             return bitmap;
