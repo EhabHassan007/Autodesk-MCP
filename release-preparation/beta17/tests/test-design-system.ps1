@@ -39,9 +39,12 @@ $icon = New-BrandIconBox 'revit' 20 250 200
 $form.Controls.Add($icon)
 foreach ($current in 0, 3, 5) {
     Set-BrandStepRail $rail $current
-    $bitmap = New-Object Drawing.Bitmap $form.Width, $form.Height
-    $form.DrawToBitmap($bitmap, (New-Object Drawing.Rectangle 0, 0, $form.Width, $form.Height))
-    Assert ($bitmap.GetPixel(100, 300).ToArgb() -eq $script:BrandColors.Header.ToArgb()) 'Step rail is not navy'
+    $bitmap = New-Object Drawing.Bitmap $rail.Width, $rail.Height
+    $rail.DrawToBitmap($bitmap, (New-Object Drawing.Rectangle 0, 0, $rail.Width, $rail.Height))
+    # Left margin of the rail, beside the step markers: plain navy.
+    Assert ($bitmap.GetPixel(6, [int]($rail.Height / 2)).ToArgb() -eq $script:BrandColors.Header.ToArgb()) 'Step rail is not navy'
+    $ink = 0; for ($y = 90; $y -lt 300; $y += 2) { for ($x = 20; $x -lt 180; $x += 2) { if ($bitmap.GetPixel($x, $y).ToArgb() -ne $script:BrandColors.Header.ToArgb()) { $ink++ } } }
+    Assert ($ink -gt 200) 'Step rail drew no steps'
     $bitmap.Dispose()
 }
 Set-BrandBadge $badges[0] 'Connected' 'Good'
