@@ -22,17 +22,29 @@ jobs:
       - name: Run release-preparation/beta17/tests
         shell: powershell
         run: |
-          $tests = Get-ChildItem release-preparation\beta17\tests -Filter 'test-*.ps1' | Sort-Object Name
+          # GitHub runs this step with ErrorActionPreference Stop; a test writing to stderr must not end the run.
+          $ErrorActionPreference = 'Continue'
+          # test-beta15-upgrade needs a built package and runs in its own step below.
+          $tests = Get-ChildItem release-preparation\beta17\tests -Filter 'test-*.ps1' | Where-Object Name -ne 'test-beta15-upgrade.ps1' | Sort-Object Name
           $tests += Get-Item release-preparation\beta17\tests\check-beta15.ps1
           $failed = @()
           foreach ($test in $tests) {
             Write-Host "::group::$($test.Name)"
             $output = & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $test.FullName 2>&1
             $code = $LASTEXITCODE
-            $output | ForEach-Object { Write-Host $_ }
+            $output | ForEach-Object { Write-Host ([string]$_) }
             Write-Host '::endgroup::'
             if ($code -ne 0) { $failed += $test.Name; Write-Host "::error title=$($test.Name)::exit $code" }
             else { Write-Host "OK  $($test.Name)" }
           }
           "Ran $($tests.Count) tests; $($failed.Count) failed." | Write-Host
           if ($failed.Count) { throw ('Failed: ' + ($failed -join ', ')) }
+
+      # The upgrade test installs a real release package over an older install.
+      - name: Upgrade from an older release
+        shell: powershell
+        run: |
+          powershell -ExecutionPolicy Bypass -File release-preparation\beta17\build.ps1 | Out-Host
+          $package = Get-ChildItem release-preparation\beta17 -Filter 'Autodesk-MCP-Connector-*.zip' | Where-Object Name -notlike '*-TEAM.zip' | Select-Object -First 1
+          powershell -NoProfile -ExecutionPolicy Bypass -File release-preparation\beta17\tests\test-beta15-upgrade.ps1 -PackagePath $package.FullName -TestBasePath $env:RUNNER_TEMP
+          if ($LASTEXITCODE -ne 0) { throw "test-beta15-upgrade failed (exit $LASTEXITCODE)" }
