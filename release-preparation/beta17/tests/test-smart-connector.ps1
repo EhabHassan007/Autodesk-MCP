@@ -56,6 +56,9 @@ try{
  Assert ((Get-AgentDecision '1.0.0-beta.18' '1.0.0-beta.18' $true $true @()) -eq 'none') 'Same version reinstalled'
  Assert ((Get-AgentDecision '1.0.0-beta.19' '1.0.0-beta.18' $true $false @()) -eq 'none') 'Downgrade attempted'
  Assert ((Get-AgentDecision '1.0.0-beta.18' '' $true $false @()) -eq 'none') 'Install attempted with no update known'
+ $now=Get-Date
+ Assert ((Test-CheckOnAppStart @('AutoCAD') $now.AddMinutes(-31) $now) -and -not (Test-CheckOnAppStart @('AutoCAD') $now.AddMinutes(-5) $now) -and -not (Test-CheckOnAppStart @() $now.AddHours(-5) $now)) 'Update check on app start wrong'
+ Assert ((Get-AgentDecision '1.0.0-beta.21' '1.0.0' $true $false @()) -eq 'install' -and (Compare-AgentVersion '1.0.1' '1.0.0') -eq 1) 'Beta PCs would not move to 1.0.0'
  Assert ((@(Get-StartedApps @('Revit') @('Revit','AutoCAD')) -join ',') -eq 'AutoCAD' -and @(Get-StartedApps @('Revit') @()).Count -eq 0) 'App start detection wrong'
  foreach($pair in @(@('[UPDATE_INSTALLED] x','installed'),@('[UPDATE_DEFERRED] Revit is open','deferred'),@('[UPDATE_AVAILABLE] Version','available'),@('[UP_TO_DATE] ok','current'),@('error','unknown'))){
   Assert ((ConvertFrom-UpdateOutput $pair[0]) -eq $pair[1]) "Update output '$($pair[0])' misread"

@@ -49,6 +49,32 @@ function Add-Release($Zip, [string]$PayloadPath) {
     }
 }
 
+# Setup .exe (Inno Setup 6). Without the compiler only the ZIPs are built, with a warning.
+function Find-InnoCompiler {
+    $command = Get-Command ISCC.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($command) { return $command.Source }
+    foreach ($folder in @(${env:ProgramFiles(x86)}, $env:ProgramFiles, (Join-Path $env:LOCALAPPDATA 'Programs'))) {
+        if (-not $folder) { continue }
+        $candidate = Join-Path $folder 'Inno Setup 6\ISCC.exe'
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
+    }
+    $null
+}
+function New-SetupExe([string]$PayloadPath, [string]$Name) {
+    $compiler = Find-InnoCompiler
+    if (-not $compiler) {
+        Write-Warning "Inno Setup 6 was not found, so $Name.exe was not built. Install it once with: winget install JRSoftware.InnoSetup"
+        return
+    }
+    $numeric = $version -replace '-.*$', ''
+    if ($numeric -notmatch '^\d+\.\d+\.\d+$') { throw "VERSION must start with major.minor.patch: $version" }
+    & $compiler /Qp "/DAppVersion=$version" "/DNumericVersion=$numeric" "/DPayloadZip=$PayloadPath" `
+        "/DInstallScript=$(Join-Path $s 'Support\Install-Autodesk-MCP-Connector.ps1')" "/DIconFile=$(Join-Path $r 'assets\logo.ico')" `
+        "/O$b" "/F$Name" (Join-Path $b 'setup\SmartAutodeskConnector.iss')
+    if ($LASTEXITCODE -ne 0) { throw "Inno Setup could not build $Name.exe (exit $LASTEXITCODE)." }
+    "$Name.exe"
+}
+
 # Ask before writing anything, so a cancelled prompt leaves no half-built output.
 $joinJson = $null
 if ($TeamJoinCode) { $Team = [switch]$true }
@@ -150,6 +176,7 @@ New-Zip (Join-Path $b 'beta17-source-and-tests.zip') {
     Add-File $z (Join-Path $b 'build.ps1') 'build.ps1'
 }
 "$name $h"
+New-SetupExe $payload "Smart-Autodesk-Connector-Setup-$version"
 
 # 6. Optional private team installer: same files, plus the join code inside its payload.
 if ($Team) {
@@ -159,6 +186,8 @@ if ($Team) {
         $teamName = "Autodesk-MCP-Connector-$version-TEAM.zip"
         New-Zip (Join-Path $b $teamName) { param($z) Add-Release $z $teamPayload }
         "$teamName (private: share inside the company only)"
+        $teamSetup = New-SetupExe $teamPayload "Smart-Autodesk-Connector-Setup-$version-TEAM"
+        if ($teamSetup) { "$teamSetup (private: share inside the company only)" }
     }
     finally {
         $joinJson = $null

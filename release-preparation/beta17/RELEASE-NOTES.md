@@ -1,24 +1,12 @@
-Smart Autodesk Connector 1.0.0-beta.21 — central-service pilot
+Smart Autodesk Connector 1.0.0
 
-This is an administrator pilot. Automatic team sharing requires the dedicated GitHub App, Render deployment and per-PC enrollment; those are not configured yet.
+First full release. Installed PCs on any beta update to it automatically.
 
-- One setup includes weekly saved-skill submission for owner review and approved-library synchronization, using revocable device credentials instead of team GitHub sign-ins.
-- Simplified Install / Repair, Update, Test connection and Settings interface.
-- 27 shared workflows, including Create unfolded walls and AutoCAD project title update.
-- Fixes a Windows PowerShell 5.1 hang when reading workflow text through MCP. Workflow content is now read as plain UTF-8, preventing file metadata from expanding during JSON serialization.
-- `connection_status` now checks AutoCAD and Revit together and succeeds when either is reachable, so an AutoCAD-only user is no longer told the connector is not connected while Revit is closed.
-- Existing local skill edits and disabled-update preferences are preserved.
-- AutoCAD stays responsive while Codex or Claude reads drawings: one list_entities call examines at most 2000 objects (continue from next_offset), each object is asked only for the properties its type has, and the connector releases its references to AutoCAD objects after every call instead of holding them for the whole session.
-- Skills Sync restores a helper file missing from its own copy of the scripts (seen as "SkillLibrary.ps1 is not recognized") instead of failing, and a failed sync now shows the real reason instead of "Check the internet connection".
-- Skills Sync no longer stops every submission when one skill has two different saved copies (for example in Codex and in Claude). Only that skill is held back, and the result names it and where both copies are. Unedited copies of an earlier approved version are no longer treated as saved skills.
+- Setup file: Smart-Autodesk-Connector-Setup-1.0.0.exe installs for the signed-in Windows user without administrator rights. The team version asks for name and email and joins the PC to the team skill service.
+- Automatic updates: the connector checks when Windows starts, every 6 hours, and whenever Revit or AutoCAD is opened, and installs a new version as soon as Revit and AutoCAD are closed. A notification offers "Update now".
+- AutoCAD stays responsive in long sessions: drawing reads are bounded and the connector releases its references to AutoCAD objects after every call.
+- Skills Sync: restores its own missing helper files, shows the real reason when it fails, and holds back only a skill that has two different saved copies on the PC, naming both locations.
+- Skills grouped by software category; Skills Sync buttons in Revit and on the AutoCAD Add-ins tab; setup continues past a failed step and replaces the old flat skill library on upgrade.
+- Your own skill edits, team registration and update preferences are kept on update.
 
-Validation on 2026-10-28: six regression scripts passed on a GitHub-hosted Windows runner using Windows PowerShell 5.1: parser/client registration isolation, approved-library sync, offline central preview, task preference preservation, MCP workflow reading/path validation, and a simulated beta15 upgrade with checksum rejection and downgrade protection. The installer interface smoke test also passed. Six Python service tests previously passed with a fake GitHub backend.
-
-Validation run: https://github.com/EhabHassan007/Autodesk-MCP-Releases/actions/runs/40639965911
-Source: https://github.com/EhabHassan007/Autodesk-MCP/tree/f3f6ecd/release-preparation/beta17
-
-Still outstanding: live GitHub App and HTTPS hosting, Windows device enrollment/DPAPI and real scheduled execution, and installation/update with Revit running followed by successful restart and Claude/Codex connection checks. Hosted tests do not exercise a live Revit model.
-
-Keep this release as a pilot until those checks pass. Beta15 remains the public Latest release; no team update notification has been enabled for beta17.
-
-SHA-256: 476EE900B47E6F45C4A7961E9508A799B247925879BE57F8F77E057F26437E2E
+SHA-256: 8D9585FE7D48CA492535D1DA1045243E3091C6E03C75D060EE96DB79CE148ADF
