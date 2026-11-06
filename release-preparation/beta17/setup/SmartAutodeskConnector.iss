@@ -1,6 +1,6 @@
 ; Smart Connector setup .exe (Inno Setup 6). Compiled by build.ps1; do not compile by hand.
-; The .exe only carries the connector payload and its install script. When opened it shows the connector's
-; own setup window and waits for it; Inno Setup's own wizard pages never appear. Updates still arrive
+; The .exe only carries the connector payload and its install script. It unpacks them into
+; %LOCALAPPDATA%\SmartConnectorSetup, shows the connector's own setup window, waits for it and removes the folder. Updates still arrive
 ; automatically through latest.json and the release ZIP.
 #ifndef AppVersion
   #error Define AppVersion, NumericVersion, PayloadZip, InstallScript and IconFile (build.ps1 does this).
@@ -27,28 +27,32 @@ Compression=lzma2/max
 SolidCompression=yes
 
 [Files]
-Source: "{#InstallScript}"; DestDir: "{tmp}"; Flags: dontcopy
-Source: "{#PayloadZip}"; DestDir: "{tmp}"; DestName: "Autodesk-MCP-Payload.zip"; Flags: dontcopy
+; Unpacked into one fixed folder, not %TEMP%, so a single antivirus exclusion covers setup. Removed afterwards.
+Source: "{#InstallScript}"; DestDir: "{localappdata}\SmartConnectorSetup"; Flags: ignoreversion
+Source: "{#PayloadZip}"; DestDir: "{localappdata}\SmartConnectorSetup"; DestName: "Autodesk-MCP-Payload.zip"; Flags: ignoreversion
 
 [Code]
 function InitializeSetup(): Boolean;
+begin
+  Result := IsWin64;
+  if not Result then
+    MsgBox('Smart Connector needs 64-bit Windows.', mbError, MB_OK);
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
 var
   ResultCode: Integer;
-  PowerShell, Parameters: String;
+  Folder, PowerShell, Parameters: String;
 begin
-  Result := False;
-  if not IsWin64 then
-  begin
-    MsgBox('Smart Connector needs 64-bit Windows.', mbError, MB_OK);
+  if CurStep <> ssPostInstall then
     exit;
-  end;
-  ExtractTemporaryFile('Install-Autodesk-MCP-Connector.ps1');
-  ExtractTemporaryFile('Autodesk-MCP-Payload.zip');
+  Folder := ExpandConstant('{localappdata}\SmartConnectorSetup');
   { Setup is a 32-bit program; Sysnative reaches the 64-bit PowerShell that Revit and AutoCAD detection need. }
   PowerShell := ExpandConstant('{sysnative}\WindowsPowerShell\v1.0\powershell.exe');
-  Parameters := '-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File "' +
-    ExpandConstant('{tmp}\Install-Autodesk-MCP-Connector.ps1') + '" -Install';
-  if not Exec(PowerShell, Parameters, ExpandConstant('{tmp}'), SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+  Parameters := '-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File "' + Folder + '\Install-Autodesk-MCP-Connector.ps1" -Install';
+  { The connector's own setup window takes over; Inno Setup's window steps aside. }
+  WizardForm.Hide;
+  if not Exec(PowerShell, Parameters, Folder, SW_HIDE, ewWaitUntilTerminated, ResultCode) then
     MsgBox('Smart Connector setup could not start Windows PowerShell (' + SysErrorMessage(ResultCode) + ').', mbError, MB_OK);
-  { The connector's setup window has finished; leave without showing Inno Setup's own pages. }
+  DelTree(Folder, True, True, True);
 end;
