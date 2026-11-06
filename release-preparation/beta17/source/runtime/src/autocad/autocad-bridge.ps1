@@ -11,7 +11,7 @@ $target = @{type='string';minLength=1;description='Exact drawing path returned b
 $toolList = @(
     (New-Tool 'drawing_info' 'Read active drawing identity, units, layouts, object count and save state. Call before writes.' @{} @() $true),
     (New-Tool 'list_layers' 'Read all layers in the active drawing.' @{} @() $true),
-    (New-Tool 'list_entities' 'Read paginated top-level model-space or named-layout objects, including geometry/text where available. Does not expand blocks or xrefs. Offset refers to collection index.' @{layout=$str;layer=$str;offset=@{type='integer';minimum=0};limit=@{type='integer';minimum=1;maximum=200}} @() $true),
+    (New-Tool 'list_entities' 'Read paginated top-level model-space or named-layout objects, including geometry/text where available. Does not expand blocks or xrefs. Offset refers to collection index; one call examines at most 2000 objects, so continue from next_offset when it is set.' @{layout=$str;layer=$str;offset=@{type='integer';minimum=0};limit=@{type='integer';minimum=1;maximum=200}} @() $true),
     (New-Tool 'get_entity' 'Read an object by handle from the expected drawing.' @{expected_drawing=$target;handle=$str} @('expected_drawing','handle') $true),
     (New-Tool 'create_entity' 'Create a line, circle or single-line text in model space or a named layout. Requires an existing unlocked layer. Coordinates are WCS, lengths are drawing units. Does not save.' @{expected_drawing=$target;kind=@{type='string';enum=@('line','circle','text')};layer=$str;layout=$str;point=$point;end=$point;radius=@{type='number';exclusiveMinimum=0};text=$str;height=@{type='number';exclusiveMinimum=0}} @('expected_drawing','kind','layer','point') $false),
     (New-Tool 'edit_entity' 'Edit a top-level entity by handle. Actions: move by WCS displacement, change_layer, replace_text (TEXT/MTEXT), set_radius (circle), delete. One Undo group per call. Does not edit inside block definitions or xrefs; does not save.' @{expected_drawing=$target;handle=$str;action=@{type='string';enum=@('move','change_layer','replace_text','set_radius','delete')};displacement=$point;layer=$str;text=@{type='string'};radius=@{type='number';exclusiveMinimum=0}} @('expected_drawing','handle','action') $false),
@@ -123,13 +123,30 @@ function Get-AutoCadConnectionStatus([int]$TimeoutMilliseconds = 3000) {
 }
 function Drawing-Id($doc) { if ($doc.Path) { $doc.FullName } else { $doc.Name } }
 function Assert-Target($doc,$expected) { if ((Drawing-Id $doc) -ine $expected) { throw 'Active drawing changed or expected_drawing is incorrect. Read drawing_info again.' } }
+# Every property read is a call into AutoCAD that waits for its main thread, so AutoCAD stalls while a
+# tool runs. Read only the properties an object type actually has (learned once per type), not all 16 on every object.
+$script:EntityProperties=@('Color','Linetype','Lineweight','StartPoint','EndPoint','Center','Radius','InsertionPoint','TextString','Height','Rotation','Coordinates','Closed','Length','Area','Name')
+$script:PropertiesByType=@{}
 function Read-Entity($entity) {
-    $r=@{handle=$entity.Handle;type=$entity.ObjectName;layer=$entity.Layer}
-    foreach ($p in @('Color','Linetype','Lineweight','StartPoint','EndPoint','Center','Radius','InsertionPoint','TextString','Height','Rotation','Coordinates','Closed','Length','Area','Name')) {
+    $type=[string]$entity.ObjectName
+    $r=@{handle=$entity.Handle;type=$type;layer=$entity.Layer}
+    if (-not $script:PropertiesByType.ContainsKey($type)) {
+        $members=@($entity.PSObject.Properties | ForEach-Object { $_.Name })
+        $known=@($script:EntityProperties | Where-Object { $members -contains $_ })
+        # No member list (unusual COM object): fall back to trying every property, as before.
+        $script:PropertiesByType[$type]=$(if ($members.Count) { $known } else { $script:EntityProperties })
+    }
+    foreach ($p in $script:PropertiesByType[$type]) {
         try { $v=$entity.$p; if ($null -ne $v) { $r[$p]=$v } } catch { }
     }
     return $r
 }
+# AutoCAD keeps every object this process has touched alive until .NET releases its reference. A long-lived
+# connector (one per open Codex or Claude window) would otherwise hold thousands of them all day.
+function Clear-CadReferences { [GC]::Collect(); [GC]::WaitForPendingFinalizers(); [GC]::Collect() }
+# One list_entities call examines at most this many objects, so a layer filter on a large drawing returns
+# in seconds with next_offset instead of holding AutoCAD for minutes.
+$script:MaxScanPerCall=2000
 function Get-Space($doc,$layout) { if (!$layout -or $layout -eq 'Model') { return ,$doc.ModelSpace } else { return ,($doc.Layouts.Item($layout).Block) } }
 function Assert-Unlocked($doc,$layer) { $l=$doc.Layers.Item($layer); if ($l.Lock) { throw "Layer is locked: $layer" } }
 
@@ -143,11 +160,12 @@ function Invoke-CadTool($name,$a) {
         'drawing_info' { return @{name=$doc.Name;path=$doc.FullName;drawing_id=(Drawing-Id $doc);version=$cad.Version;units_code=$doc.GetVariable('INSUNITS');model_space_objects=$doc.ModelSpace.Count;saved=$doc.Saved;read_only=$doc.ReadOnly;active_layout=$doc.ActiveLayout.Name;layouts=@($doc.Layouts | ForEach-Object {$_.Name})} }
         'list_layers' { return @{drawing=(Drawing-Id $doc);layers=@($doc.Layers | ForEach-Object {@{name=$_.Name;color=$_.Color;on=$_.LayerOn;frozen=$_.Freeze;locked=$_.Lock}})} }
         'list_entities' {
-            $space=Get-Space $doc $a.layout; $limit=100; if ($a.limit) {$limit=$a.limit}; $i=[int]$a.offset
+            $space=Get-Space $doc $a.layout; $limit=100; if ($a.limit) {$limit=$a.limit}; $i=[int]$a.offset; $start=$i
+            $count=[int]$space.Count
             $items=New-Object System.Collections.Generic.List[object]
-            while ($i -lt $space.Count -and $items.Count -lt $limit) { $e=$space.Item($i); $i++; if (!$a.layer -or $e.Layer -ieq $a.layer) {$items.Add((Read-Entity $e))} }
-            $next=$null; if ($i -lt $space.Count) {$next=$i}
-            return @{drawing=(Drawing-Id $doc);entities=@($items.ToArray());next_offset=$next;collection_count=$space.Count}
+            while ($i -lt $count -and $items.Count -lt $limit -and ($i - $start) -lt $script:MaxScanPerCall) { $e=$space.Item($i); $i++; if (!$a.layer -or $e.Layer -ieq $a.layer) {$items.Add((Read-Entity $e))} }
+            $next=$null; if ($i -lt $count) {$next=$i}
+            return @{drawing=(Drawing-Id $doc);entities=@($items.ToArray());next_offset=$next;collection_count=$count;scanned=($i - $start)}
         }
         'get_entity' { return (Read-Entity ($doc.HandleToObject($a.handle))) }
     }
@@ -244,6 +262,7 @@ while ($null -ne ($line=[Console]::ReadLine())) {
         'tools/call' {
             try {$data=Invoke-CadTool $r.params.name $r.params.arguments; $response.result=@{content=@(@{type='text';text=($data | ConvertTo-Json -Depth 20 -Compress)});isError=$false}}
             catch {$response.result=@{content=@(@{type='text';text=$_.Exception.Message});isError=$true}}
+            finally {Clear-CadReferences}
         }
         default {$response.error=@{code=-32601;message='Method not found'}}
     }
