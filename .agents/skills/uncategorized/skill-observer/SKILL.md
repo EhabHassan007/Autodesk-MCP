@@ -1,6 +1,7 @@
 ---
 name: skill-observer
 description: Runs quietly alongside every session to improve the user's skills. Logs corrections, stated preferences and gaps that a skill should have handled, spots repeated manual work that could become a new skill, and on request reviews the log and proposes skill updates for approval. Use at the start of every session, and when the user asks "any observations?", "review skill observations" or wants to improve or create skills from past work.
+category: uncategorized
 ---
 
 # skill-observer

@@ -1,6 +1,7 @@
 ---
 name: squeeze
 description: Shrinks long command output before you read it, to save context and tokens. Use whenever a shell command is likely to print a lot — builds, installs, test suites, logs, git log, recursive listings, large JSON from APIs or tools — or when reading a big log or JSON file just to find what matters in it.
+category: uncategorized
 ---
 
 # squeeze

@@ -1,6 +1,7 @@
 ---
 name: indesign-portfolio-presentation
 description: Style Mohamed Nawara's landscape architecture portfolio directly in desktop Adobe InDesign, including a CV-based cover and introduction. Use when he supplies a CV for styled introductory pages, requests the saved portfolio treatment, or provides an updated portfolio for restyling.
+category: uncategorized
 ---
 
 # InDesign Portfolio Presentation

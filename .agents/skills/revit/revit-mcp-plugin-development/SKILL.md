@@ -1,6 +1,7 @@
 ---
 name: revit-mcp-plugin-development
 description: Develop, register, build, test, update, and release Revit MCP tools and combined Autodesk connectors with guarded writes, portable setup, recoverable updates, and multi-client skill delivery.
+category: revit
 ---
 
 # Revit MCP plugin development

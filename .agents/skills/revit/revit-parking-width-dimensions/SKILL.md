@@ -1,6 +1,7 @@
 ---
 name: revit-parking-width-dimensions
 description: Add native associative width dimensions to parking bays in specified Revit plan views through the Autodesk MCP connector, including rotated and mirrored bays. Preserve groups, reuse dimension styles, avoid duplicates, and verify coverage. Excludes changing bay sizes, clearance compliance reviews, and fabricated dimensions.
+category: revit
 ---
 
 # Revit parking width dimensions
