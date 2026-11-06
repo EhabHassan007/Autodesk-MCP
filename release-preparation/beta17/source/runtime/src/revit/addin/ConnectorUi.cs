@@ -12,13 +12,13 @@ using Forms = System.Windows.Forms;
 using Drawing = System.Drawing;
 using Media = System.Windows.Media;
 
-// Smart Autodesk Connector ribbon and dialogs. C# 5 only: the add-in is compiled on each PC with
+// Smart Connector ribbon and dialogs. C# 5 only: the add-in is compiled on each PC with
 // the .NET Framework compiler that ships with Windows.
 namespace BimCadMcp.Revit
 {
     internal static class Brand
     {
-        internal const string Name = "Smart Autodesk Connector";
+        internal const string Name = "Smart Connector";
         internal static readonly Drawing.Color Header = Drawing.Color.FromArgb(22, 36, 61);
         internal static readonly Drawing.Color Teal = Drawing.Color.FromArgb(32, 201, 171);
         internal static readonly Drawing.Color Blue = Drawing.Color.FromArgb(47, 128, 237);
@@ -48,7 +48,7 @@ namespace BimCadMcp.Revit
             }
             string defaultRoot = Path.Combine(LocalAppData, "BIM-CAD-MCP");
             if (File.Exists(Path.Combine(defaultRoot, "installer", "Setup-BimCad.ps1"))) return defaultRoot;
-            throw new DirectoryNotFoundException("The Smart Autodesk Connector installation folder could not be found. Run the installer again.");
+            throw new DirectoryNotFoundException("The Smart Connector installation folder could not be found. Run the installer again.");
         }
 
         // Scripts copied to the state folder keep working while an update replaces the install folder.
@@ -100,7 +100,7 @@ namespace BimCadMcp.Revit
                 if (!File.Exists(agent)) return;
                 StartHidden(agent, "-Action Run -StateRoot " + Quote(StateRoot) + " -InstallRoot " + Quote(FindRoot()));
             }
-            catch (Exception exception) { Debug.WriteLine("Smart Autodesk Connector agent start failed: " + exception.Message); }
+            catch (Exception exception) { Debug.WriteLine("Smart Connector agent start failed: " + exception.Message); }
         }
     }
 
@@ -377,7 +377,7 @@ namespace BimCadMcp.Revit
                 Add(panel, assemblyPath, "BimCadMcpConnectionStatus", "Connection\nStatus", typeof(ConnectionStatusCommand),
                     "See whether Codex or Claude is connected to this Revit session.", Icons.Connection());
                 Add(panel, assemblyPath, "BimCadMcpCheckUpdates", "Check\nUpdates", typeof(CheckUpdatesCommand),
-                    "Check for a new version of Smart Autodesk Connector. Updates install by themselves when Revit and AutoCAD are closed.", Icons.Update());
+                    "Check for a new version of Smart Connector. Updates install by themselves when Revit and AutoCAD are closed.", Icons.Update());
                 Add(panel, assemblyPath, "BimCadMcpSkillsSync", "Skills\nSync", typeof(SkillsSyncCommand),
                     "Send your saved skills for review and download the latest approved team skills.", Icons.Sync());
                 Add(panel, assemblyPath, "BimCadMcpSettings", "Settings", typeof(SettingsCommand),
@@ -385,7 +385,7 @@ namespace BimCadMcp.Revit
             }
             catch (Exception exception)
             {
-                Debug.WriteLine("Smart Autodesk Connector ribbon error: " + exception);
+                Debug.WriteLine("Smart Connector ribbon error: " + exception);
             }
         }
 
@@ -425,7 +425,7 @@ namespace BimCadMcp.Revit
                 string root = Connector.FindRoot();
                 using (TaskWindow window = new TaskWindow("Check Updates"))
                 {
-                    window.Run("Checking for updates…", "Looking for a newer approved version of Smart Autodesk Connector.",
+                    window.Run("Checking for updates…", "Looking for a newer approved version of Smart Connector.",
                         Path.Combine(root, "installer", "Setup-BimCad.ps1"), "-Action CheckUpdate -RepositoryPath " + Connector.Quote(root),
                         delegate(string output, int code) { ShowOutcome(window, output, root); });
                     window.ShowDialog(Owner.Of(commandData));
@@ -462,7 +462,7 @@ namespace BimCadMcp.Revit
             }
             else if (output.Contains("[UP_TO_DATE]"))
             {
-                window.ShowResult("You're up to date", "Smart Autodesk Connector " + installed + " is the latest approved version.", Brand.Good);
+                window.ShowResult("You're up to date", "Smart Connector " + installed + " is the latest approved version.", Brand.Good);
                 window.Option.Text = "Install updates automatically (recommended)";
                 window.Option.Checked = !userOff;
                 window.Option.Visible = true;

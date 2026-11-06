@@ -1,9 +1,9 @@
 <?xml version="1.0"?>
 <RibbonRoot>
   <RibbonPanelSourceCollection xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-    <RibbonPanelSource UID="RBN_SAC_PANEL" Text="Smart Autodesk Connector" HiddenInEditor="false">
+    <RibbonPanelSource UID="RBN_SAC_PANEL" Text="Smart Connector" HiddenInEditor="false">
       <ModifiedRev MajorVersion="19" MinorVersion="1" UserVersion="0" />
-      <Name xlate="true" UID="XLS_SAC_PANEL_NAME">Smart Autodesk Connector</Name>
+      <Name xlate="true" UID="XLS_SAC_PANEL_NAME">Smart Connector</Name>
       <RibbonRow UID="RBN_SAC_ROW">
         <ModifiedRev MajorVersion="19" MinorVersion="1" UserVersion="0" />
         <RibbonCommandButton UID="RBN_SAC_BTN_AIMARKUP" Id="AcRibbonCommandButton" Text="AI Markup" ButtonStyle="LargeWithText" MenuMacroID="MM_SAC_AIMARKUP" KeyTip="">

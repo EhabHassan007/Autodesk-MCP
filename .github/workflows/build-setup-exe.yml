@@ -30,7 +30,7 @@ jobs:
       - name: Check the setup exe
         shell: powershell
         run: |
-          $exe = @(Get-ChildItem release-preparation\beta17 -Filter 'Smart-Autodesk-Connector-Setup-*.exe')
+          $exe = @(Get-ChildItem release-preparation\beta17 -Filter 'Smart-Connector-Setup-*.exe')
           if ($exe.Count -ne 1 -or $exe[0].Name -like '*-TEAM.exe') { throw "Expected one public setup exe, found: $($exe.Name -join ', ')" }
           if ($exe[0].Length -lt 100KB) { throw 'The setup exe is unexpectedly small.' }
           "$($exe[0].Name): $([int]($exe[0].Length / 1KB)) KB"
@@ -38,5 +38,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: smart-autodesk-connector-setup
-          path: release-preparation/beta17/Smart-Autodesk-Connector-Setup-*.exe
+          path: release-preparation/beta17/Smart-Connector-Setup-*.exe
           retention-days: 30

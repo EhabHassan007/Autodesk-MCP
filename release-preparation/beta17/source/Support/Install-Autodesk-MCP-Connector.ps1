@@ -31,7 +31,7 @@ function Show-SetupMessage {
         $owner.Show()
         $owner.Activate()
         [System.Windows.Forms.MessageBox]::Show(
-            $owner, $Message, 'Smart Autodesk Connector',
+            $owner, $Message, 'Smart Connector',
             [System.Windows.Forms.MessageBoxButtons]::OK, $Icon
         ) | Out-Null
     }
@@ -53,16 +53,16 @@ try {
     if (-not (Test-Path -LiteralPath $setup -PathType Leaf) -or
         -not (Test-Path -LiteralPath $coreSetup -PathType Leaf) -or
         -not (Test-Path -LiteralPath (Join-Path $packageRoot '.agents\skills') -PathType Container)) {
-        throw 'The Smart Autodesk Connector installation payload is invalid.'
+        throw 'The Smart Connector installation payload is invalid.'
     }
 
     if ($SmokeTest) {
         & powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File $setup -SmokeTest
-        if ($LASTEXITCODE -ne 0) { throw "Smart Autodesk Connector smoke test stopped with exit code $LASTEXITCODE." }
+        if ($LASTEXITCODE -ne 0) { throw "Smart Connector smoke test stopped with exit code $LASTEXITCODE." }
     }
     elseif ($Install) {
         New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
-        "[{0}] Starting Smart Autodesk Connector installation." -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') |
+        "[{0}] Starting Smart Connector installation." -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') |
             Set-Content -LiteralPath $logPath -Encoding UTF8
         $coreArguments = @('-Action', 'Install', '-RepositoryPath', (Join-Path $env:LOCALAPPDATA 'BIM-CAD-MCP'), '-InstallClaudeDesktopIfMissing')
         # Administrators deploy the enrollment file beside the INSTALL .cmd, outside the extracted payload.
@@ -91,7 +91,7 @@ try {
     }
     else {
         & powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -File $setup
-        if ($LASTEXITCODE -ne 0) { throw "Smart Autodesk Connector setup stopped with exit code $LASTEXITCODE." }
+        if ($LASTEXITCODE -ne 0) { throw "Smart Connector setup stopped with exit code $LASTEXITCODE." }
     }
 }
 catch {

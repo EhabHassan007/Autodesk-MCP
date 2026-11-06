@@ -21,7 +21,7 @@ if ($Action -in @('Enable','Disable','Status')) {
 }
 
 if ($Action -eq 'Enable') {
-    if (-not (Test-Path (Join-Path $RepositoryRoot '.agents\skills'))) { throw 'Install Smart Autodesk Connector before enabling skill collection.' }
+    if (-not (Test-Path (Join-Path $RepositoryRoot '.agents\skills'))) { throw 'Install Smart Connector before enabling skill collection.' }
 
     New-Item -ItemType Directory -Path $StateRoot -Force | Out-Null
     $installRoot = Join-Path $StateRoot 'scripts'

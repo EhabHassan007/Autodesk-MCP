@@ -1,4 +1,4 @@
-# Smart Autodesk Connector settings: one switch for automatic updates, plus version information.
+# Smart Connector settings: one switch for automatic updates, plus version information.
 # Opened from the Revit ribbon, the notification-area menu and the Setup window. Run directly
 # (powershell -STA -File Settings.ps1) or dot-source with -LibraryOnly and call Show-ConnectorSettings.
 param([string]$RepositoryPath = (Split-Path -Parent $PSScriptRoot), [switch]$LibraryOnly)
@@ -23,8 +23,8 @@ function Show-ConnectorSettings {
     . (Join-Path $Root 'installer\Brand.ps1')
     $current = Get-ConnectorSettingsState
     $form = New-BrandForm -Width 480 -Height 300
-    $form.Text = 'Smart Autodesk Connector settings'
-    $null = Add-BrandHeader $form -Title 'Settings' -Subtitle 'Smart Autodesk Connector' -Height 76
+    $form.Text = 'Smart Connector settings'
+    $null = Add-BrandHeader $form -Title 'Settings' -Subtitle 'Smart Connector' -Height 76
 
     $auto = New-Object Windows.Forms.CheckBox
     $auto.Text = 'Install updates automatically (recommended)'
@@ -51,7 +51,7 @@ function Show-ConnectorSettings {
             $setup = Join-Path $Root 'installer\Setup-BimCad.ps1'
             $p = Start-Process powershell.exe -WindowStyle Hidden -Wait -PassThru -ArgumentList ('-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -Action {1} -RepositoryPath "{2}"' -f $setup, $action, $Root)
             if ($p.ExitCode -ne 0) {
-                [Windows.Forms.MessageBox]::Show($form, 'The setting could not be saved. Try again, or contact your administrator.', 'Smart Autodesk Connector', 'OK', 'Warning') | Out-Null
+                [Windows.Forms.MessageBox]::Show($form, 'The setting could not be saved. Try again, or contact your administrator.', 'Smart Connector', 'OK', 'Warning') | Out-Null
                 return
             }
         }

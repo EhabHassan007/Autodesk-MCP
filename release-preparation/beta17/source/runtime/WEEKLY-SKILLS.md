@@ -1,8 +1,8 @@
 # Automatic skill sharing through the central service
 
-## Smart Autodesk Connector at a glance
+## Smart Connector at a glance
 
-- **Revit ribbon tab "Smart Autodesk Connector":**
+- **Revit ribbon tab "Smart Connector":**
   - **Connection Status:** is Codex or Claude connected to this Revit session?
   - **Check Updates:** look for a newer approved version. **Update now** installs it as soon as Revit and AutoCAD are closed.
   - **Skills Sync:** send your saved skills for review and download the latest approved team skills now, even if the weekly run is off.

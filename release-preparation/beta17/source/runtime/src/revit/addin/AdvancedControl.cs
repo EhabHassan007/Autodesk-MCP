@@ -137,7 +137,7 @@ namespace BimCadMcp.Revit
             }
             catch (Exception exception)
             {
-                System.Diagnostics.Debug.WriteLine("Smart Autodesk Connector session registration error: " + exception);
+                System.Diagnostics.Debug.WriteLine("Smart Connector session registration error: " + exception);
             }
         }
 
@@ -150,7 +150,7 @@ namespace BimCadMcp.Revit
             }
             catch (Exception exception)
             {
-                System.Diagnostics.Debug.WriteLine("Smart Autodesk Connector session cleanup error: " + exception);
+                System.Diagnostics.Debug.WriteLine("Smart Connector session cleanup error: " + exception);
             }
         }
     }
@@ -170,7 +170,7 @@ namespace BimCadMcp.Revit
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "AutodeskMcpConnector", "remote", "remote-config.json");
             string remoteSetup = File.Exists(remoteConfig)
-                ? "Configured (see Smart Autodesk Connector setup)"
+                ? "Configured (see Smart Connector setup)"
                 : "Not configured";
 
             TaskDialog dialog = new TaskDialog(Brand.Name);
@@ -189,7 +189,7 @@ namespace BimCadMcp.Revit
                 "Last operation: " + EmptyAsDash(snapshot.LastOperation) + "\n" +
                 "Last client connection: " + FormatUtc(snapshot.LastClientUtc) + "\n" +
                 "Last error: " + EmptyAsDash(snapshot.LastError) + "\n\n" +
-                "For Claude web or mobile, configure and enable the remote connector named Smart Autodesk Connector.";
+                "For Claude web or mobile, configure and enable the remote connector named Smart Connector.";
             dialog.CommonButtons = TaskDialogCommonButtons.Close;
             dialog.Show();
             return Result.Succeeded;
@@ -310,7 +310,7 @@ namespace BimCadMcp.Revit
             string resultText;
             if (mode == "transaction")
             {
-                using (Transaction transaction = new Transaction(document, "Smart Autodesk Connector: " + transactionName))
+                using (Transaction transaction = new Transaction(document, "Smart Connector: " + transactionName))
                 {
                     transaction.Start();
                     try

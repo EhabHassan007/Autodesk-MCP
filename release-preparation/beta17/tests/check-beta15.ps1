@@ -50,6 +50,6 @@ catch {
 if(-not $reported){throw 'Expected config failure report'}
 if([IO.File]::ReadAllText($paths[0]) -ne '{invalid json'){throw 'Malformed original config was changed'}
 $cfg=Get-Content $paths[1] -Raw | ConvertFrom-Json
-if(-not $cfg.mcpServers.'Smart Autodesk Connector' -or -not $cfg.mcpServers.keep){throw 'Second config path was not updated'}
+if(-not $cfg.mcpServers.'Smart Connector' -or -not $cfg.mcpServers.keep){throw 'Second config path was not updated'}
 'PASS: Claude Code and one malformed config do not block the other path; original malformed file preserved'
 Remove-Item $testRoot -Recurse -Force

@@ -39,7 +39,7 @@ $autoCadTools = @(Get-AutoCadMcpTools)
 $revitTools = @(Get-RevitMcpTools | ForEach-Object {
     if ([string]$_['name'] -ne 'connection_status') { return $_ }
     $tool = $_.Clone()
-    $tool['description'] = 'Check whether the Smart Autodesk Connector can reach AutoCAD and Revit. Reports AutoCAD (running full AutoCAD over COM, version, active drawing) and Revit (add-in sessions, active document, last error) separately. Succeeds when either product is reachable; a product that is closed is reported, not an error. Optional session_id selects a Revit session.'
+    $tool['description'] = 'Check whether the Smart Connector can reach AutoCAD and Revit. Reports AutoCAD (running full AutoCAD over COM, version, active drawing) and Revit (add-in sessions, active document, last error) separately. Succeeds when either product is reachable; a product that is closed is reported, not an error. Optional session_id selects a Revit session.'
     $tool
 })
 $workflowTools = @(
@@ -111,7 +111,7 @@ function Get-AutodeskConnectionStatus {
     $revit = Get-RevitMcpConnectionStatus $Arguments
     $summary = "AutoCAD: $($autoCad.summary) Revit: $($revit.summary)"
     if (-not ($autoCad.available -or $revit.available)) {
-        throw "Smart Autodesk Connector is running, but neither AutoCAD nor Revit is reachable. $summary"
+        throw "Smart Connector is running, but neither AutoCAD nor Revit is reachable. $summary"
     }
     @{connected=$true; summary=$summary; autocad=$autoCad; revit=$revit}
 }
@@ -175,7 +175,7 @@ function Invoke-AutodeskMcpRequest {
             $response.result = @{
                 protocolVersion = $protocol
                 capabilities = @{tools=@{}}
-                serverInfo = @{name='Smart Autodesk Connector';version=$connectorVersion}
+                serverInfo = @{name='Smart Connector';version=$connectorVersion}
                 instructions = 'Use list_skill_workflows and read_skill_workflow to load relevant shared guidance before CAD/BIM tasks; no separate skill upload is required to read this guidance. Authenticated Autodesk connector for Codex and Claude with AutoCAD and Revit tools. Model-changing calls are serialized across AI clients. For AutoCAD, read drawing_info before edits and save only when explicitly requested. For Revit, call list_sessions when multiple sessions may be open, read document_info before writes, pass expected_document, and verify every write with a separate read.'
             }
         }

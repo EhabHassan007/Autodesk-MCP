@@ -4,7 +4,7 @@ Version 2026-10-30 (DRAFT - to be reviewed by the owner and company legal/HR bef
 Please read these terms. Ticking "I accept" and installing means you agree to them.
 
 1. What this tool is
-Smart Autodesk Connector is an internal company tool. It connects Revit and AutoCAD on this computer to AI assistants (Codex and Claude) so they can read and, when you ask them to, change your open model or drawing. It also installs shared company workflow guidance ("skills") and keeps it up to date.
+Smart Connector for Autodesk Revit and AutoCAD (Smart Connector) is an internal company tool. It connects Revit and AutoCAD on this computer to AI assistants (Codex and Claude) so they can read and, when you ask them to, change your open model or drawing. It also installs shared company workflow guidance ("skills") and keeps it up to date.
 
 2. You stay in control of your work
 The AI assistants only act when you ask them to in Codex or Claude. You are responsible for reviewing what they do before you save, issue or rely on any model, drawing or document. Keep normal backups and save your work before large automated changes.

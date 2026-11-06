@@ -92,7 +92,7 @@ namespace BimCadMcp.Revit
 
         public string GetName()
         {
-            return "Smart Autodesk Connector request handler";
+            return "Smart Connector request handler";
         }
     }
 
@@ -127,7 +127,7 @@ namespace BimCadMcp.Revit
         internal void Start()
         {
             _thread = new Thread(ListenLoop);
-            _thread.Name = "Smart Autodesk Connector Revit pipe";
+            _thread.Name = "Smart Connector Revit pipe";
             _thread.IsBackground = true;
             _thread.Start();
         }
@@ -193,7 +193,7 @@ namespace BimCadMcp.Revit
                 {
                     if (!_stopping)
                     {
-                        System.Diagnostics.Debug.WriteLine("Smart Autodesk Connector pipe error: " + exception);
+                        System.Diagnostics.Debug.WriteLine("Smart Connector pipe error: " + exception);
                         Thread.Sleep(250);
                     }
                 }
@@ -354,7 +354,7 @@ namespace BimCadMcp.Revit
             if (parameter == null) throw new InvalidOperationException("Parameter was not found: " + parameterName);
             if (parameter.IsReadOnly) throw new InvalidOperationException("Parameter is read-only: " + parameterName);
 
-            using (Transaction transaction = new Transaction(document, "Smart Autodesk Connector: Set parameter"))
+            using (Transaction transaction = new Transaction(document, "Smart Connector: Set parameter"))
             {
                 transaction.Start();
                 bool changed;

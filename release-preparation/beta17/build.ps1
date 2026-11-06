@@ -127,12 +127,12 @@ $bundleCatalog = New-SkillCatalog $shipped 'references/'
 $skillText = @"
 ---
 name: autodesk-mcp-bim-workflows
-description: Work with Revit, AutoCAD and other software through Smart Autodesk Connector, using the team's approved workflow skills grouped by category.
+description: Work with Revit, AutoCAD and other software through Smart Connector, using the team's approved workflow skills grouped by category.
 ---
 
-# Smart Autodesk Connector workflows
+# Smart Connector workflows
 
-Use this skill for work performed through the local Smart Autodesk Connector, and for the team's other approved workflows.
+Use this skill for work performed through the local Smart Connector, and for the team's other approved workflows.
 
 Read only the reference that matches the current task. Preserve the user's model and documentation intent, follow every MUST rule in the selected reference, and verify live model changes by reading the affected elements back through the connector. A skill supplies procedure; it does not grant permission for unrelated changes.
 
@@ -176,7 +176,7 @@ New-Zip (Join-Path $b 'beta17-source-and-tests.zip') {
     Add-File $z (Join-Path $b 'build.ps1') 'build.ps1'
 }
 "$name $h"
-New-SetupExe $payload "Smart-Autodesk-Connector-Setup-$version"
+New-SetupExe $payload "Smart-Connector-Setup-$version"
 
 # 6. Optional private team installer: same files, plus the join code inside its payload.
 if ($Team) {
@@ -186,7 +186,7 @@ if ($Team) {
         $teamName = "Autodesk-MCP-Connector-$version-TEAM.zip"
         New-Zip (Join-Path $b $teamName) { param($z) Add-Release $z $teamPayload }
         "$teamName (private: share inside the company only)"
-        $teamSetup = New-SetupExe $teamPayload "Smart-Autodesk-Connector-Setup-$version-TEAM"
+        $teamSetup = New-SetupExe $teamPayload "Smart-Connector-Setup-$version-TEAM"
         if ($teamSetup) { "$teamSetup (private: share inside the company only)" }
     }
     finally {

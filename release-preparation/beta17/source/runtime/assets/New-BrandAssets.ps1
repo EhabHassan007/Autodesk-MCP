@@ -1,4 +1,4 @@
-# Generates the Smart Autodesk Connector logo files from one vector drawing:
+# Generates the Smart Connector logo files from one vector drawing:
 #   logo-256.png, logo-64.png, logo-32.png, logo-16.png and logo.ico (16-256 px).
 # Run again after changing the drawing; the outputs are committed next to this script.
 param([string]$OutputDirectory = $PSScriptRoot)

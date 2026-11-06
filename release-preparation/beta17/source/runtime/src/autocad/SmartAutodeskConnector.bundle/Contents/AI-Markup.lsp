@@ -1,6 +1,6 @@
 ;;; ===================================================================
 ;;; AI-Markup.lsp (v2) -  Mark up a drawing for Claude in one command
-;;; Shipped with Smart Autodesk Connector: AI Markup and Clear Markup on the Add-ins tab.
+;;; Shipped with Smart Connector: AI Markup and Clear Markup on the Add-ins tab.
 ;;;
 ;;;   AI       1. Draw freehand: click = pen down, move mouse to draw,
 ;;;               click again = pen up. Repeat for more strokes.

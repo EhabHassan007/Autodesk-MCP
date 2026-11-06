@@ -1,4 +1,4 @@
-;; Smart Autodesk Connector commands behind the buttons on the AutoCAD Add-ins tab.
+;; Smart Connector commands behind the buttons on the AutoCAD Add-ins tab.
 ;; Each command starts a hidden PowerShell that shows its own branded window, so AutoCAD stays free.
 ;; Demand-loaded by PackageContents.xml when one of these commands is first used; safe to load more than once.
 
@@ -11,9 +11,9 @@
   (if (findfile file)
     (if (startapp (sac:powershell)
           (strcat "-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File \"" file "\" " arguments))
-      (princ "\nSmart Autodesk Connector: the window opens in a moment.")
-      (princ "\nSmart Autodesk Connector: PowerShell could not be started."))
-    (princ "\nSmart Autodesk Connector is not installed for this user. Run its setup again."))
+      (princ "\nSmart Connector: the window opens in a moment.")
+      (princ "\nSmart Connector: PowerShell could not be started."))
+    (princ "\nSmart Connector is not installed for this user. Run its setup again."))
   (princ))
 
 (defun c:SACSKILLSSYNC () (sac:run "ConnectorActions.ps1" "-Action SkillsSync"))

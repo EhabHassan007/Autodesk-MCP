@@ -255,7 +255,7 @@ while ($null -ne ($line=[Console]::ReadLine())) {
     switch ($r.method) {
         'initialize' {
             $protocol='2024-11-05'; if ($r.params.protocolVersion -in @('2024-11-05','2025-03-26','2025-06-18','2025-11-25')) {$protocol=$r.params.protocolVersion}
-            $response.result=@{protocolVersion=$protocol;capabilities=@{tools=@{}};serverInfo=@{name='Smart Autodesk Connector - AutoCAD';version='0.4.0'};instructions='Read drawing_info before editing; use drawing_id as expected_drawing. Inspect entities before modifying their handles. Writes are enabled for any active writable drawing. Coordinates use WCS and drawing units. Each edit is an Undo group, not an atomic transaction; inspect after errors before retrying. Saving requires the separate save_drawing tool and user intent to save. Blocks and xrefs are not expanded by list_entities.'}
+            $response.result=@{protocolVersion=$protocol;capabilities=@{tools=@{}};serverInfo=@{name='Smart Connector - AutoCAD';version='0.4.0'};instructions='Read drawing_info before editing; use drawing_id as expected_drawing. Inspect entities before modifying their handles. Writes are enabled for any active writable drawing. Coordinates use WCS and drawing units. Each edit is an Undo group, not an atomic transaction; inspect after errors before retrying. Saving requires the separate save_drawing tool and user intent to save. Blocks and xrefs are not expanded by list_entities.'}
         }
         'ping' {$response.result=@{}}
         'tools/list' {$response.result=@{tools=$toolList}}
