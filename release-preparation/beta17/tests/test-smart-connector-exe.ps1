@@ -17,7 +17,12 @@ try {
     New-Item -ItemType Directory -Force (Join-Path $root '.agents') | Out-Null
     Copy-Item (Join-Path $runtime '.agents\skills') (Join-Path $root '.agents') -Recurse
     $version = (Get-Content (Join-Path $runtime 'VERSION') -Raw).Trim()
-    Assert ((& $exe --version) -eq $version) 'SmartConnector.exe --version is wrong'
+    # A Windows (GUI) program: PowerShell neither waits for nor captures "& $exe", so read its output through a pipe.
+    $versionInfo = New-Object Diagnostics.ProcessStartInfo($exe, '--version')
+    $versionInfo.UseShellExecute = $false; $versionInfo.RedirectStandardOutput = $true
+    $versionRun = [Diagnostics.Process]::Start($versionInfo)
+    $printed = $versionRun.StandardOutput.ReadToEnd(); $versionRun.WaitForExit()
+    Assert ($versionRun.ExitCode -eq 0 -and $printed.Trim() -eq $version) "SmartConnector.exe --version is wrong: $printed"
     'PASS: SmartConnector.exe compiles with the Windows compiler and reports its version'
 
     $env:LOCALAPPDATA = Join-Path $t 'local'
