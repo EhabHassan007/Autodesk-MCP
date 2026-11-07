@@ -40,6 +40,10 @@ namespace SmartConnector
 
         internal static string InstallerScript(string name) { return Path.Combine(Paths.Root, "installer", name); }
 
+        // The compiled program of this install (<install root>\bin\SmartConnector.exe). Skills Sync runs as its `skills`
+        // command; a copy taken from the repository has no program, and the PowerShell scripts do the same work there.
+        internal static string InstalledProgram { get { return Path.Combine(Paths.Root, "bin", "SmartConnector.exe"); } }
+
         // Start-Process ... -WindowStyle Hidden: no console window.
         internal static Process Hidden(string file, string arguments)
         {
@@ -278,6 +282,17 @@ namespace SmartConnector
             _timer.Start();
         }
 
+        // The same step as Run, started as the installed program: its output is UTF-8.
+        private void RunProgram(string heading, string text, string program, string arguments)
+        {
+            _title.Text = heading; _body.Text = text;
+            _process = Launch.Redirected(program, arguments, new UTF8Encoding(false));
+            _output = _process.StandardOutput.ReadToEndAsync();
+            _process.StandardError.ReadToEndAsync();
+            _started = DateTime.UtcNow;
+            _timer.Start();
+        }
+
         private void Start()
         {
             try
@@ -288,8 +303,12 @@ namespace SmartConnector
                         // After 15 s the window can be closed; the step continues and its result shows in the Smart Connector app.
                         _backgroundAfter = 15;
                         // From AutoCAD, only approved AutoCAD skills are downloaded; saved skills of any kind are still sent.
-                        Run("Syncing skills...", "Sending your saved skills for review and downloading the latest approved AutoCAD skills.",
-                            Launch.ConnectorScript("weekly-skill-collection.ps1"), "-Action Sync -Product AutoCAD -StateRoot " + Launch.Quote(Launch.StateRoot));
+                        if (File.Exists(Launch.InstalledProgram))
+                            RunProgram("Syncing skills...", "Sending your saved skills for review and downloading the latest approved AutoCAD skills.",
+                                Launch.InstalledProgram, "skills sync --action Sync --product AutoCAD --state-root " + Launch.Quote(Launch.StateRoot));
+                        else
+                            Run("Syncing skills...", "Sending your saved skills for review and downloading the latest approved AutoCAD skills.",
+                                Launch.ConnectorScript("weekly-skill-collection.ps1"), "-Action Sync -Product AutoCAD -StateRoot " + Launch.Quote(Launch.StateRoot));
                         break;
                     case "CheckUpdates":
                         Run("Checking for updates...", "Looking for a newer approved version of Smart Connector.",

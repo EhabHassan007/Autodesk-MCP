@@ -333,6 +333,22 @@ namespace BimCadMcp.Revit
             _timer.Tick += delegate { Poll(); };
         }
 
+        // The same step as Run, started as the installed program (SmartConnector.exe): its output is UTF-8.
+        internal void RunProgram(string title, string body, string program, string arguments, Action<string, int> onFinished)
+        {
+            _title.Text = title; _body.Text = body; _onFinished = onFinished;
+            ProcessStartInfo info = new ProcessStartInfo(program, arguments);
+            info.UseShellExecute = false; info.CreateNoWindow = true;
+            info.RedirectStandardOutput = true; info.RedirectStandardError = true;
+            info.StandardOutputEncoding = new System.Text.UTF8Encoding(false);
+            info.WorkingDirectory = Connector.LocalAppData;
+            _process = Process.Start(info);
+            _output = _process.StandardOutput.ReadToEndAsync();
+            _process.StandardError.ReadToEndAsync();
+            _started = DateTime.UtcNow;
+            _timer.Start();
+        }
+
         internal void Run(string title, string body, string script, string arguments, Action<string, int> onFinished)
         {
             _title.Text = title; _body.Text = body; _onFinished = onFinished;
@@ -712,16 +728,21 @@ namespace BimCadMcp.Revit
         {
             try
             {
-                string runner = Connector.Script("weekly-skill-collection.ps1");
+                // The compiled program runs Skills Sync; a copy taken from the repository has none, and the script does the same work.
+                string program = Path.Combine(Connector.FindRoot(), "bin", "SmartConnector.exe");
+                string runner = File.Exists(program) ? null : Connector.Script("weekly-skill-collection.ps1");
                 using (TaskWindow window = new TaskWindow("Skills Sync"))
                 {
                     window.ContinueInBackgroundAfter(15, "Syncing in the background",
                         "Skills Sync is still working. You can close this window and keep working; " +
                         "the result shows under Workflow skills in Smart Connector when it is done.");
                     // From Revit, only approved Revit skills are downloaded; your saved skills of any kind are still sent.
-                    window.Run("Syncing skills…", "Sending your saved skills for review and downloading the latest approved Revit skills.",
-                        runner, "-Action Sync -Product Revit -StateRoot " + Connector.Quote(Connector.StateRoot),
-                        delegate(string output, int code) { ShowOutcome(window, output); });
+                    Action<string, int> finished = delegate(string output, int code) { ShowOutcome(window, output); };
+                    string heading = "Syncing skills…", text = "Sending your saved skills for review and downloading the latest approved Revit skills.";
+                    if (runner == null)
+                        window.RunProgram(heading, text, program, "skills sync --action Sync --product Revit --state-root " + Connector.Quote(Connector.StateRoot), finished);
+                    else
+                        window.Run(heading, text, runner, "-Action Sync -Product Revit -StateRoot " + Connector.Quote(Connector.StateRoot), finished);
                     if (owner == null) window.ShowDialog(); else window.ShowDialog(owner);
                 }
                 return Result.Succeeded;

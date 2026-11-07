@@ -151,8 +151,9 @@ namespace SmartConnector
 
         private void SetSyncReminder(bool on)
         {
-            string runner = Launch.ConnectorScript("weekly-skill-collection.ps1");
-            int code = Launch.HiddenWait(Launch.PowerShell, "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File " + Launch.Quote(runner) + " -Action " + (on ? "Enable" : "Disable"));
+            int code;
+            if (File.Exists(Launch.InstalledProgram)) code = Launch.HiddenWait(Launch.InstalledProgram, "skills sync --action " + (on ? "Enable" : "Disable"));
+            else code = Launch.HiddenWait(Launch.PowerShell, "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File " + Launch.Quote(Launch.ConnectorScript("weekly-skill-collection.ps1")) + " -Action " + (on ? "Enable" : "Disable"));
             if (code != 0) MessageBox.Show(_form, "The setting could not be saved. Try again, or open Diagnostics.", "Smart Connector", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
 
