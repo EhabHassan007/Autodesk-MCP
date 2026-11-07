@@ -10,7 +10,8 @@ $saved = @{ local = $env:LOCALAPPDATA; roaming = $env:APPDATA }
 try {
     # 1. Nothing in the shipped connector schedules, hides a long-running process or serves the network.
     $retire = Join-Path $runtime 'scripts/retire-background-tasks.ps1'
-    $code = Get-ChildItem -LiteralPath $runtime -Recurse -File -Include *.ps1, *.cs, *.lsp, *.cmd | Where-Object { $_.FullName -ne (Resolve-Path $retire).Path }
+    # The two programs that remove what earlier versions set up (the script and its compiled port) necessarily name it.
+    $code = Get-ChildItem -LiteralPath $runtime -Recurse -File -Include *.ps1, *.cs, *.lsp, *.cmd | Where-Object { $_.FullName -ne (Resolve-Path $retire).Path -and $_.Name -ne 'SkillsRetire.cs' }
     foreach ($pattern in '(?<!Un)Register-ScheduledTask', 'New-ScheduledTaskTrigger', 'schtasks', 'HttpListener', 'TcpListener', 'cloudflared', 'connector-agent\.ps1', 'Start-ScheduledTask', 'CurrentVersion\\Run') {
         $hits = @($code | Select-String -Pattern $pattern | ForEach-Object { '{0}:{1}' -f $_.Path.Substring($runtime.Length), $_.LineNumber })
         Assert ($hits.Count -eq 0) ("Found '$pattern' in: " + ($hits -join ', '))
