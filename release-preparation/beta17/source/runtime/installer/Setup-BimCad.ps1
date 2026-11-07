@@ -517,6 +517,21 @@ function Get-RunningAutodeskApps {
     @(Get-Process -Name 'Revit', 'acad' -ErrorAction SilentlyContinue | ForEach-Object { if ($_.ProcessName -eq 'acad') { 'AutoCAD' } else { 'Revit' } } | Sort-Object -Unique)
 }
 
+# A running SmartConnector.exe locks its file, unlike the PowerShell bridges. Before the install folder is replaced,
+# stop only this install's own connector processes; the AI apps start it again when they next open.
+function Stop-SmartConnectorServers {
+    $folder = [IO.Path]::GetFullPath($RepositoryPath).TrimEnd('\') + '\'
+    foreach ($process in @(Get-Process -Name 'SmartConnector' -ErrorAction SilentlyContinue)) {
+        try {
+            if ($process.Path -and $process.Path.StartsWith($folder, [StringComparison]::OrdinalIgnoreCase)) {
+                Stop-Process -Id $process.Id -Force -ErrorAction Stop
+                $null = $process.WaitForExit(5000)
+            }
+        }
+        catch { Write-Step "Could not stop Smart Connector process $($process.Id): $($_.Exception.Message)" }
+    }
+}
+
 function Get-GitHubArchiveUrl {
     param(
         [string]$Url,
@@ -581,6 +596,7 @@ function Install-RepositoryArchive {
             Remove-Item -LiteralPath $backupPath -Recurse -Force
         }
         if (Test-Path -LiteralPath $RepositoryPath) {
+            Stop-SmartConnectorServers
             Move-Item -LiteralPath $RepositoryPath -Destination $backupPath
             $repositoryMoved = $true
         }
@@ -677,6 +693,7 @@ function Install-RepositoryClone {
             Remove-Item -LiteralPath $backupPath -Recurse -Force
         }
         if (Test-Path -LiteralPath $RepositoryPath) {
+            Stop-SmartConnectorServers
             Move-Item -LiteralPath $RepositoryPath -Destination $backupPath
             $repositoryMoved = $true
         }
@@ -761,6 +778,7 @@ function Install-PublicRelease {
             Remove-Item -LiteralPath $backupPath -Recurse -Force
         }
         if (Test-Path -LiteralPath $RepositoryPath) {
+            Stop-SmartConnectorServers
             Move-Item -LiteralPath $RepositoryPath -Destination $backupPath
             $repositoryMoved = $true
         }
@@ -824,7 +842,8 @@ function Get-Repository {
             # would leave every skill twice next to the new category folders. Approved team skills live elsewhere.
             $installedSkills = Join-Path $destination '.agents\skills'
             if (Test-Path -LiteralPath $installedSkills) { Remove-Item -LiteralPath $installedSkills -Recurse -Force }
-            foreach ($entry in @('installer','scripts','src','assets','.agents','README.md','SKILL-SUBMISSIONS.md','VERSION','TESTING.md')) {
+            Stop-SmartConnectorServers
+            foreach ($entry in @('installer','scripts','src','assets','bin','.agents','README.md','SKILL-SUBMISSIONS.md','VERSION','TESTING.md')) {
                 $item = Join-Path $source $entry
                 if (Test-Path -LiteralPath $item) {
                     Copy-Item -LiteralPath $item -Destination $destination -Recurse -Force
@@ -898,7 +917,15 @@ function Test-OwnConnectorEntry {
     param([string]$Text)
     # Only entries that launch this connector's own bridges count as duplicates; another
     # tool's server with a similar name is left alone.
-    $Text -match '(?i)BIM-CAD-MCP|autodesk-bridge\.ps1|autocad-bridge\.ps1|revit-bridge\.ps1'
+    $Text -match '(?i)BIM-CAD-MCP|SmartConnector\.exe|autodesk-bridge\.ps1|autocad-bridge\.ps1|revit-bridge\.ps1'
+}
+
+# How an AI app starts the connector: the compiled SmartConnector.exe when it is installed (bin\SmartConnector.exe),
+# otherwise the PowerShell bridge. Returns the command and its arguments.
+function Get-McpLaunch {
+    param([string]$Bridge, [string[]]$BridgeArguments = @())
+    if ($Bridge -like '*.exe') { return [pscustomobject]@{ Command = $Bridge; Arguments = @($BridgeArguments) } }
+    [pscustomobject]@{ Command = 'powershell.exe'; Arguments = @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $Bridge) + $BridgeArguments }
 }
 
 function Remove-LegacyMcpEntries {
@@ -940,8 +967,9 @@ function Register-McpServer {
         if ($existing.ExitCode -eq 0) {
             try {
                 $entry = ($existing.Output -join "`n") | ConvertFrom-Json
-                $expectedArgs = @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',$Bridge) + $BridgeArguments
-                if ($entry.enabled -ne $false -and $entry.transport.command -eq 'powershell.exe' -and
+                $launch = Get-McpLaunch $Bridge $BridgeArguments
+                $expectedArgs = $launch.Arguments
+                if ($entry.enabled -ne $false -and $entry.transport.command -eq $launch.Command -and
                     (($entry.transport.args | ConvertTo-Json -Compress) -ceq ($expectedArgs | ConvertTo-Json -Compress))) {
                     Write-Step 'The Smart Connector registration in Codex is already correct.'
                     Remove-LegacyMcpEntries 'Codex' $codex $LegacyNames
@@ -952,11 +980,8 @@ function Register-McpServer {
         }
         Remove-LegacyMcpEntries 'Codex' $codex $LegacyNames
         # mcp add replaces this named entry and leaves unrelated servers alone.
-        $command = @(
-            'mcp', 'add', $Name, '--',
-            'powershell.exe', '-NoProfile', '-NonInteractive',
-            '-ExecutionPolicy', 'Bypass', '-File', $Bridge
-        ) + $BridgeArguments
+        $launch = Get-McpLaunch $Bridge $BridgeArguments
+        $command = @('mcp', 'add', $Name, '--', $launch.Command) + $launch.Arguments
         $added = Invoke-External $codex $command
         $null = $added
         $verified = Invoke-External $codex @('mcp', 'get', $Name)
@@ -1191,11 +1216,8 @@ function Register-ClaudeCodeMcpServer {
             $null = $removed
         }
 
-        $command = @(
-            'mcp', 'add', '--transport', 'stdio', '--scope', 'user', $Name, '--',
-            'powershell.exe', '-NoProfile', '-NonInteractive',
-            '-ExecutionPolicy', 'Bypass', '-File', $Bridge
-        ) + $BridgeArguments
+        $launch = Get-McpLaunch $Bridge $BridgeArguments
+        $command = @('mcp', 'add', '--transport', 'stdio', '--scope', 'user', $Name, '--', $launch.Command) + $launch.Arguments
         $added = Invoke-External $claude $command
         $null = $added
         $verified = Invoke-External $claude @('mcp','get',$Name)
@@ -1256,9 +1278,10 @@ function Register-ClaudeDesktopMcpServer {
             }
         }
 
+        $launch = Get-McpLaunch $Bridge $BridgeArguments
         $entry = [pscustomobject][ordered]@{
-            command = 'powershell.exe'
-            args = @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',$Bridge) + $BridgeArguments
+            command = $launch.Command
+            args = @($launch.Arguments)
         }
         if ($config.mcpServers.PSObject.Properties[$Name]) {
             $config.mcpServers.PSObject.Properties[$Name].Value = $entry
@@ -1297,6 +1320,9 @@ function Register-DetectedAiClients {
 
     $bridge = Join-Path $Root 'src\autodesk\autodesk-bridge.ps1'
     $arguments = @('-RevitVersion','2024')
+    # The compiled connector replaces the PowerShell bridge wherever it is installed.
+    $compiled = Join-Path $Root 'bin\SmartConnector.exe'
+    if (Test-Path -LiteralPath $compiled -PathType Leaf) { $bridge = $compiled; $arguments = @('mcp') }
     $legacyNames = @('autocad','revit','AutoCAD MCP','Revit Connector','revit-mcp')
     # Claude Desktop shows the key as the connector's name; the previous product name is retired.
     $claudeDesktopLegacyNames = @($legacyNames + 'autodesk' + 'Autodesk MCP Connector' + 'Smart Autodesk Connector')
