@@ -32,6 +32,7 @@ namespace SmartConnector
         {
             if (args.Length == 1 && args[0] == "mcp") return McpServer.Run();
             if (args.Length == 1 && args[0] == "--version") { AttachConsole(); Console.WriteLine(Paths.Version); return 0; }
+            { int skillsCode; if (SkillsCommands.TryRun(args, out skillsCode)) return skillsCode; }
             string command = args.Length > 0 ? args[0] : "";
             if (command == "app" || command == "setup" || command == "action" || command == "settings") return WindowCommands.Run(command, args.Skip(1).ToArray());
             AttachConsole();

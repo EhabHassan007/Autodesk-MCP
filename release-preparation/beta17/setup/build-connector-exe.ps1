@@ -11,9 +11,12 @@ $runtime = (Resolve-Path (Join-Path $PSScriptRoot '..\source\runtime')).Path
 $sources = @(Get-ChildItem -LiteralPath (Join-Path $runtime 'src\connector') -Filter '*.cs' | Sort-Object Name | ForEach-Object FullName)
 if (-not $sources.Count) { throw 'No connector sources were found.' }
 # The windows use WinForms and System.Drawing; the icon family is drawn with WPF (PresentationCore and WindowsBase,
-# in the WPF subfolder; System.Xaml for the bitmap encoder's interfaces).
+# in the WPF subfolder; System.Xaml for the bitmap encoder's interfaces). Skills Sync (the `skills` command) uses
+# System.Security (the encrypted device token), System.IO.Compression (the review package) and System.Management
+# (finding the connector agent of earlier versions).
 $references = foreach ($name in 'System.dll', 'System.Core.dll', 'Microsoft.CSharp.dll', 'Microsoft.VisualBasic.dll', 'System.Web.Extensions.dll',
-    'System.Windows.Forms.dll', 'System.Drawing.dll', 'System.Xaml.dll', 'WPF\PresentationCore.dll', 'WPF\WindowsBase.dll') {
+    'System.Windows.Forms.dll', 'System.Drawing.dll', 'System.Xaml.dll', 'System.Security.dll', 'System.IO.Compression.dll', 'System.Management.dll',
+    'WPF\PresentationCore.dll', 'WPF\WindowsBase.dll') {
     $path = Join-Path $framework $name
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required reference was not found: $path" }
     "/reference:$path"
