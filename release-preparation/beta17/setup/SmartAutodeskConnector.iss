@@ -26,6 +26,10 @@ DisableFinishedPage=no
 ShowLanguageDialog=no
 Compression=lzma2/max
 SolidCompression=yes
+; An AI app may be running bin\SmartConnector.exe, which locks the file. Setup offers to close it; the AI app starts
+; it again when it next opens, so setup does not restart it itself.
+CloseApplications=yes
+RestartApplications=no
 
 [Messages]
 FinishedHeadingLabel=Smart Connector is installed

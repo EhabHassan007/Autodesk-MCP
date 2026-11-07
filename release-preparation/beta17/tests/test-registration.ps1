@@ -30,6 +30,18 @@ $script:calls=@();$script:matching=$false
 Register-McpServer -Name autodesk -Bridge "$root/src/autodesk/autodesk-bridge.ps1" -BridgeArguments @('-RevitVersion','2024')
 if(-not ($script:calls -match '^mcp add autodesk')){throw 'Did not repair wrong registration'}
 'PASS: existing correct Codex registration preserved; older duplicate removed; wrong registration replaced without removing other connectors'
+# The compiled SmartConnector.exe is started directly with "mcp"; a .ps1 bridge still goes through powershell.exe.
+$exe=Join-Path $tmp 'reg-test-bin/SmartConnector.exe';New-Item -ItemType Directory -Force (Split-Path $exe)|Out-Null;'x'|Set-Content $exe
+$launch=Get-McpLaunch $exe @('mcp')
+if($launch.Command -ne $exe -or (@($launch.Arguments) -join ' ') -ne 'mcp'){throw 'The exe is not launched directly with mcp'}
+$launch=Get-McpLaunch "$root/src/autodesk/autodesk-bridge.ps1" @('-RevitVersion','2024')
+if($launch.Command -ne 'powershell.exe' -or $launch.Arguments[-3] -notlike '*autodesk-bridge.ps1' -or $launch.Arguments[-1] -ne '2024'){throw 'The .ps1 bridge launch changed'}
+$script:calls=@();$script:matching=$false
+Register-McpServer -Name autodesk -Bridge $exe -BridgeArguments @('mcp')
+if(-not ($script:calls -contains "mcp add autodesk -- $exe mcp")){throw "Codex was not registered with the exe: $($script:calls -join ' | ')"}
+if(Test-OwnConnectorEntry 'other-tool.exe mcp'){throw 'Another tool counted as this connector'}
+if(-not (Test-OwnConnectorEntry "$exe mcp")){throw 'SmartConnector.exe not recognised as this connector'}
+'PASS: SmartConnector.exe registered directly with mcp; the .ps1 bridge launch is unchanged'
 # Execute the real Update action body with dependency stubs.
 $t=$null;$e=$null;$ast=[Management.Automation.Language.Parser]::ParseFile("$root/installer/Setup-BimCad.ps1",[ref]$t,[ref]$e)
 $sw=$ast.FindAll({param($n) $n -is [Management.Automation.Language.SwitchStatementAst]},$true)|Where-Object {$_.Condition.Extent.Text -eq '$Action'}

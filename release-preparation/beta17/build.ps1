@@ -33,12 +33,16 @@ function Add-Text($Zip, [string]$Name, [string]$Text) {
     $writer = New-Object IO.StreamWriter($entry.Open(), $utf8)
     try { $writer.Write($Text) } finally { $writer.Dispose() }
 }
-function Add-Payload($Zip, [string]$JoinJson) {
+# $Program adds the compiled bin/SmartConnector.exe. The payload stored in the repository is built without it, so it
+# stays source only and no binary is committed; the release ZIP and the setup .exe carry it.
+function Add-Payload($Zip, [string]$JoinJson, [string]$Program) {
     foreach ($f in Get-Files $r) {
         # A stray join file in the source tree must never reach any payload.
         if ($f.Rel -eq 'installer/team-join.json') { throw 'Remove source/runtime/installer/team-join.json; the join code is added only by -Team.' }
+        if ($f.Rel.StartsWith('bin/')) { throw "Remove source/runtime/$($f.Rel); bin/SmartConnector.exe is compiled by the build." }
         Add-File $Zip $f.Full ('Autodesk-MCP-Payload/' + $f.Rel)
     }
+    if ($Program) { Add-File $Zip $Program 'Autodesk-MCP-Payload/bin/SmartConnector.exe' }
     if ($JoinJson) { Add-Text $Zip 'Autodesk-MCP-Payload/installer/team-join.json' $JoinJson }
 }
 function Add-Release($Zip, [string]$PayloadPath) {
@@ -155,52 +159,64 @@ New-Zip $skillsZip {
     foreach ($f in Get-Files $shipped) { if ($f.Rel -ne 'README.md') { Add-File $z $f.Full ('autodesk-mcp-bim-workflows/references/' + $f.Rel) } }
 }
 
-# 2. Connector payload from the runtime tree (public: never contains a join code).
+# 2. Connector payload from the runtime tree (public: never contains a join code). The stored copy is source only.
 $payload = Join-Path $s 'Support\Autodesk-MCP-Payload.zip'
-New-Zip $payload { param($z) Add-Payload $z $null }
+New-Zip $payload { param($z) Add-Payload $z $null $null }
 
-# 3. Release ZIP: everything in source except the runtime tree.
-$name = "Autodesk-MCP-Connector-$version.zip"
-New-Zip (Join-Path $b $name) { param($z) Add-Release $z $payload }
-$h = (Get-FileHash -LiteralPath (Join-Path $b $name) -Algorithm SHA256).Hash.ToUpperInvariant()
+# 2b. Compile SmartConnector.exe, the MCP server the AI apps start, and build the release payload that carries it.
+$work = Join-Path ([IO.Path]::GetTempPath()) ("smart-connector-build-{0}" -f [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $work -Force | Out-Null
+try {
+    $program = Join-Path $work 'SmartConnector.exe'
+    $null = & (Join-Path $b 'setup\build-connector-exe.ps1') -OutputPath $program
+    $releasePayload = Join-Path $work 'Autodesk-MCP-Payload.zip'
+    New-Zip $releasePayload { param($z) Add-Payload $z $null $program }
 
-# 4. latest.json and the SHA line in the release notes.
-$published = [DateTimeOffset]::UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss.ffffffzzz")
-$latest = "{`n  `"schema_version`": 1,`n  `"version`": `"$version`",`n  `"download_url`": `"https://github.com/EhabHassan007/Autodesk-MCP-Releases/releases/download/v$version/$name`",`n  `"sha256`": `"$h`",`n  `"published_at`": `"$published`"`n}`n"
-[IO.File]::WriteAllText((Join-Path $b 'latest.json'), $latest, $utf8)
-$notesPath = Join-Path $b 'RELEASE-NOTES.md'
-$notes = ([IO.File]::ReadAllText($notesPath) -split "`nSHA-256:", 2)[0] + "`nSHA-256: $h`n"
-[IO.File]::WriteAllText($notesPath, $notes, $utf8)
+    # 3. Release ZIP: everything in source except the runtime tree.
+    $name = "Autodesk-MCP-Connector-$version.zip"
+    New-Zip (Join-Path $b $name) { param($z) Add-Release $z $releasePayload }
+    $h = (Get-FileHash -LiteralPath (Join-Path $b $name) -Algorithm SHA256).Hash.ToUpperInvariant()
 
-# 5. Upload bundle and source/tests archive (local only, git-ignored).
-New-Zip (Join-Path $b 'beta17-github-upload.zip') {
-    param($z)
-    foreach ($n in @($name, 'latest.json', 'RELEASE-NOTES.md')) { Add-File $z (Join-Path $b $n) $n }
-}
-New-Zip (Join-Path $b 'beta17-source-and-tests.zip') {
-    param($z)
-    foreach ($folder in @($r, (Join-Path $b 'tests'))) {
-        foreach ($f in Get-Files $folder) { Add-File $z $f.Full ($f.Full.Substring($b.Length).TrimStart('\').Replace('\', '/')) }
+    # 4. latest.json and the SHA line in the release notes.
+    $published = [DateTimeOffset]::UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss.ffffffzzz")
+    $latest = "{`n  `"schema_version`": 1,`n  `"version`": `"$version`",`n  `"download_url`": `"https://github.com/EhabHassan007/Autodesk-MCP-Releases/releases/download/v$version/$name`",`n  `"sha256`": `"$h`",`n  `"published_at`": `"$published`"`n}`n"
+    [IO.File]::WriteAllText((Join-Path $b 'latest.json'), $latest, $utf8)
+    $notesPath = Join-Path $b 'RELEASE-NOTES.md'
+    $notes = ([IO.File]::ReadAllText($notesPath) -split "`nSHA-256:", 2)[0] + "`nSHA-256: $h`n"
+    [IO.File]::WriteAllText($notesPath, $notes, $utf8)
+
+    # 5. Upload bundle and source/tests archive (local only, git-ignored).
+    New-Zip (Join-Path $b 'beta17-github-upload.zip') {
+        param($z)
+        foreach ($n in @($name, 'latest.json', 'RELEASE-NOTES.md')) { Add-File $z (Join-Path $b $n) $n }
     }
-    Add-File $z (Join-Path $b 'build.py') 'build.py'
-    Add-File $z (Join-Path $b 'build.ps1') 'build.ps1'
-}
-"$name $h"
-New-SetupExe $payload "Smart-Connector-Setup-$version"
+    New-Zip (Join-Path $b 'beta17-source-and-tests.zip') {
+        param($z)
+        foreach ($folder in @($r, (Join-Path $b 'tests'))) {
+            foreach ($f in Get-Files $folder) { Add-File $z $f.Full ($f.Full.Substring($b.Length).TrimStart('\').Replace('\', '/')) }
+        }
+        Add-File $z (Join-Path $b 'build.py') 'build.py'
+        Add-File $z (Join-Path $b 'build.ps1') 'build.ps1'
+        Add-File $z (Join-Path $b 'setup\build-connector-exe.ps1') 'setup/build-connector-exe.ps1'
+    }
+    "$name $h"
+    New-SetupExe $releasePayload "Smart-Connector-Setup-$version"
 
-# 6. Optional private team installer: same files, plus the join code inside its payload.
-if ($Team) {
-    $teamPayload = Join-Path ([IO.Path]::GetTempPath()) ("team-payload-{0}.zip" -f [guid]::NewGuid().ToString('N'))
-    try {
-        New-Zip $teamPayload { param($z) Add-Payload $z $joinJson }
-        $teamName = "Autodesk-MCP-Connector-$version-TEAM.zip"
-        New-Zip (Join-Path $b $teamName) { param($z) Add-Release $z $teamPayload }
-        "$teamName (private: share inside the company only)"
-        $teamSetup = New-SetupExe $teamPayload "Smart-Connector-Setup-$version-TEAM"
-        if ($teamSetup) { "$teamSetup (private: share inside the company only)" }
-    }
-    finally {
-        $joinJson = $null
-        if (Test-Path -LiteralPath $teamPayload) { Remove-Item -LiteralPath $teamPayload -Force }
+    # 6. Optional private team installer: same files, plus the join code inside its payload.
+    if ($Team) {
+        $teamPayload = Join-Path ([IO.Path]::GetTempPath()) ("team-payload-{0}.zip" -f [guid]::NewGuid().ToString('N'))
+        try {
+            New-Zip $teamPayload { param($z) Add-Payload $z $joinJson $program }
+            $teamName = "Autodesk-MCP-Connector-$version-TEAM.zip"
+            New-Zip (Join-Path $b $teamName) { param($z) Add-Release $z $teamPayload }
+            "$teamName (private: share inside the company only)"
+            $teamSetup = New-SetupExe $teamPayload "Smart-Connector-Setup-$version-TEAM"
+            if ($teamSetup) { "$teamSetup (private: share inside the company only)" }
+        }
+        finally {
+            $joinJson = $null
+            if (Test-Path -LiteralPath $teamPayload) { Remove-Item -LiteralPath $teamPayload -Force }
+        }
     }
 }
+finally { if (Test-Path -LiteralPath $work) { Remove-Item -LiteralPath $work -Recurse -Force } }
