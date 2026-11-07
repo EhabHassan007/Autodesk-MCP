@@ -488,8 +488,13 @@ function Show-SetupWizard {
     [void]$form.ShowDialog()
     $form.Dispose()
     if ($script:wizard.OpenApp) {
+        # The compiled Smart Connector program when it is installed; otherwise the PowerShell app.
+        $program = Join-Path $installRoot 'bin\SmartConnector.exe'
         $app = Join-Path $installRoot 'installer\SmartConnectorApp.ps1'
-        if (Test-Path -LiteralPath $app) {
+        if (Test-Path -LiteralPath $program -PathType Leaf) {
+            Start-Process $program -WorkingDirectory $env:LOCALAPPDATA -ArgumentList 'app'
+        }
+        elseif (Test-Path -LiteralPath $app) {
             Start-Process powershell.exe -WindowStyle Hidden -ArgumentList ('-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File "{0}" -RepositoryPath "{1}"' -f $app, $installRoot)
         }
     }

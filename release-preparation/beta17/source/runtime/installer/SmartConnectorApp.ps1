@@ -15,6 +15,12 @@ $ErrorActionPreference = 'Stop'
 # runs instead (choose apps, team details); it opens this app again when it finishes.
 $setupPending = Join-Path $RepositoryPath 'setup\setup-pending.txt'
 $firstRunSetup = Join-Path $RepositoryPath 'setup\Install-Autodesk-MCP-Connector.ps1'
+# The compiled Smart Connector program has the same setup window; it is used when it is installed.
+$firstRunProgram = Join-Path $RepositoryPath 'bin\SmartConnector.exe'
+if (-not $SmokeTest -and (Test-Path -LiteralPath $setupPending -PathType Leaf) -and (Test-Path -LiteralPath $firstRunProgram -PathType Leaf)) {
+    Start-Process $firstRunProgram -WorkingDirectory $env:LOCALAPPDATA -ArgumentList 'setup'
+    exit 0
+}
 if (-not $SmokeTest -and (Test-Path -LiteralPath $setupPending -PathType Leaf) -and (Test-Path -LiteralPath $firstRunSetup -PathType Leaf)) {
     Start-Process powershell.exe -WindowStyle Hidden -WorkingDirectory $env:LOCALAPPDATA -ArgumentList ('-NoProfile -ExecutionPolicy RemoteSigned -STA -WindowStyle Hidden -File "{0}" -Install -PayloadFolder "{1}"' -f $firstRunSetup, $RepositoryPath)
     exit 0

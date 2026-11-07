@@ -1,5 +1,6 @@
 ;; Smart Connector commands behind the buttons on the AutoCAD Add-ins tab.
-;; Each command starts a hidden PowerShell that shows its own branded window, so AutoCAD stays free.
+;; Each command opens its own branded window outside AutoCAD, so AutoCAD stays free: the compiled Smart Connector
+;; program (bin\SmartConnector.exe) when it is installed, otherwise a hidden PowerShell (an install from the repository).
 ;; Demand-loaded by PackageContents.xml when one of these commands is first used; safe to load more than once.
 ;; (Loading at AutoCAD startup is avoided on purpose: AutoCAD asked SECURELOAD for every drawing.)
 ;;
@@ -28,18 +29,31 @@
     (princ "\nSmart Connector is not installed for this user. Run its setup again."))
   (princ))
 
-(defun c:SACOPEN () (sac:run "SmartConnectorApp.ps1" "-Section Overview"))
+;; The compiled program with its arguments when it is installed; otherwise the PowerShell script with its own.
+;; startapp runs one command line, so the program path is quoted (a Windows user name can contain spaces).
+(defun sac:program () (strcat (sac:root) "\\bin\\SmartConnector.exe"))
+(defun sac:program-command () (strcat "\"" (sac:program) "\""))
+
+(defun sac:open (arguments script script-arguments)
+  (if (findfile (sac:program))
+    (if (startapp (sac:program-command) arguments)
+      (princ "\nSmart Connector: the window opens in a moment.")
+      (princ "\nSmart Connector could not be started."))
+    (sac:run script script-arguments))
+  (princ))
+
+(defun c:SACOPEN () (sac:open "app --section Overview" "SmartConnectorApp.ps1" "-Section Overview"))
 ;; Running Skills Sync or Check Updates by hand answers today's reminder or update question.
 (defun c:SACSKILLSSYNC ()
   (setq sacs:*sync-due* nil)
   (sacs:stamp (sacs:skills-file "sync-reminder.txt"))
-  (sac:run "ConnectorActions.ps1" "-Action SkillsSync"))
+  (sac:open "action --action SkillsSync" "ConnectorActions.ps1" "-Action SkillsSync"))
 (defun c:SACCHECKUPDATES ()
   (if (not sacs:*download-started*) (setq sacs:*check-update* nil))
   (sacs:stamp (sacs:connector-file "open-check.txt"))
-  (sac:run "ConnectorActions.ps1" "-Action CheckUpdates"))
-(defun c:SACSETTINGS () (sac:run "SmartConnectorApp.ps1" "-Section Settings"))
-(defun c:SACSTATUS () (sac:run "ConnectorActions.ps1" "-Action Status"))
+  (sac:open "action --action CheckUpdates" "ConnectorActions.ps1" "-Action CheckUpdates"))
+(defun c:SACSETTINGS () (sac:open "app --section Settings" "SmartConnectorApp.ps1" "-Section Settings"))
+(defun c:SACSTATUS () (sac:open "action --action Status" "ConnectorActions.ps1" "-Action Status"))
 
 ;; ---------- daily check ----------
 
@@ -179,7 +193,9 @@
                   (strcat "Your last Skills Sync was " (itoa (fix (- (sacs:today) last))) " days ago."))
                 "\n\nSync now? It sends your saved skills for review and downloads newly approved ones."
                 "\n\nThe weekly reminder can be switched off in Smart Connector Settings."))
-    (sacs:open-window "ConnectorActions.ps1" "-Action SkillsSync")))
+    (if (findfile (sac:program))
+      (startapp (sac:program-command) "action --action SkillsSync")
+      (sacs:open-window "ConnectorActions.ps1" "-Action SkillsSync"))))
 
 (defun sacs:ask-update (available)
   (if (sacs:ask "Smart Connector"
@@ -187,6 +203,7 @@
                 (vl-string-trim " \t\r\n" (sacs:read (sacs:install-file "VERSION"))) "."
                 "\n\nUpdate now? The update window opens: save your work and close AutoCAD and Revit, and it installs straight after."
                 "\n\nChoose No to be asked again tomorrow."))
+    ;; The update window stays PowerShell: it replaces the install folder, which the running program would hold open.
     (sacs:open-window "ConnectorActions.ps1" "-Action InstallUpdate")))
 
 ;; After each finished command until the work is done: start the download, then look at it; at most one

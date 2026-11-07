@@ -1655,19 +1655,30 @@ function Install-StartMenuShortcut {
         New-Item -ItemType Directory -Path $programs -Force | Out-Null
         $shell = New-Object -ComObject WScript.Shell
         $shortcut = $shell.CreateShortcut((Join-Path $programs 'Smart Connector.lnk'))
-        # The setup .exe already created one (RemoteSigned); keep it.
+        # The compiled Smart Connector program when it is installed (the setup .exe already points the entry at it);
+        # otherwise the PowerShell app (an install taken from the repository). An entry already right is kept.
+        $program = Join-Path $Root 'bin\SmartConnector.exe'
         $app = Join-Path $Root 'installer\SmartConnectorApp.ps1'
-        if ([string]$shortcut.Arguments -like ('*' + $app + '*')) {
+        $useProgram = Test-Path -LiteralPath $program -PathType Leaf
+        $current = if ($useProgram) { [string]$shortcut.TargetPath -eq $program } else { [string]$shortcut.Arguments -like ('*' + $app + '*') }
+        if ($current) {
             [void][Runtime.InteropServices.Marshal]::ReleaseComObject($shell)
             Write-Step 'Smart Connector is in the Start menu.'
             return
         }
-        $shortcut.TargetPath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-        $shortcut.Arguments = '-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File "{0}"' -f (Join-Path $Root 'installer\SmartConnectorApp.ps1')
+        if ($useProgram) {
+            $shortcut.TargetPath = $program
+            $shortcut.Arguments = 'app'
+            $shortcut.WindowStyle = 1
+        }
+        else {
+            $shortcut.TargetPath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+            $shortcut.Arguments = '-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File "{0}"' -f $app
+            $shortcut.WindowStyle = 7
+        }
         $shortcut.WorkingDirectory = $env:LOCALAPPDATA
         $shortcut.IconLocation = (Join-Path $Root 'assets\logo.ico') + ',0'
         $shortcut.Description = 'Smart Connector for Autodesk Revit and AutoCAD'
-        $shortcut.WindowStyle = 7
         $shortcut.Save()
         [void][Runtime.InteropServices.Marshal]::ReleaseComObject($shell)
         Write-Step 'Added Smart Connector to the Start menu.'
