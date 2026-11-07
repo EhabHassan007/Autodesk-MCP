@@ -89,6 +89,8 @@ The unified connector exposes both AutoCAD and Revit tools through the `autodesk
 
 The Revit named pipe remains local to the Windows computer. Claude Desktop, Claude Code and Codex use the STDIO bridge on that PC: `bin\SmartConnector.exe mcp`, a compiled program built from `src/connector` by the release build, or `src/autodesk/autodesk-bridge.ps1` where the compiled program is not installed (a copy taken from the repository rather than a release). Both offer the same tools with the same arguments. The optional Claude remote gateway (a local web server published through a Cloudflare tunnel) was removed in 1.1.0: it opened a route from the internet to a Revit session that can run code. Setup and updates stop it and delete its stored credentials on PCs that used it; revoke those tunnels in Cloudflare.
 
+Skills Sync (the Skills Sync button in Revit and AutoCAD, the Smart Connector app, the usage upload and the weekly reminder setting) also runs in that program: `bin\SmartConnector.exe skills sync|preview|collect|submit|usage|codex-sync|retire-tasks|configure|initialize` does what `scripts\weekly-skill-collection.ps1`, `central-skill-sync.ps1`, `collect-skills-for-review.ps1`, `submit-team-knowledge.ps1`, `send-usage.ps1`, `sync-codex-skills.ps1`, `retire-background-tasks.ps1`, `configure-connector-tasks.ps1` and `Initialize-SkillService.ps1` do, with the same files, requests and results (`src/connector/Skills*.cs`). The scripts remain as the fallback where the compiled program is not installed and as the reference for `tests\test-smart-connector-skills.ps1`, which runs both on the same input.
+
 ## Verify the bridge without editing a live drawing
 
 Run from the repository root:
