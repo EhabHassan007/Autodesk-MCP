@@ -555,7 +555,8 @@ namespace BimCadMcp.Revit
         }
     }
 
-    // Ribbon buttons that open the Smart Connector app at one of its sections.
+    // Ribbon buttons that open the Smart Connector app at one of its sections: the compiled program when it is
+    // installed (bin\SmartConnector.exe), otherwise the PowerShell window (an install taken from the repository).
     internal static class ConnectorApp
     {
         internal static Result Open(string section)
@@ -563,8 +564,17 @@ namespace BimCadMcp.Revit
             try
             {
                 string root = Connector.FindRoot();
-                Connector.StartHidden(Path.Combine(root, "installer", "SmartConnectorApp.ps1"),
-                    "-Section " + section + " -RepositoryPath " + Connector.Quote(root));
+                string program = Path.Combine(root, "bin", "SmartConnector.exe");
+                if (File.Exists(program))
+                {
+                    ProcessStartInfo info = new ProcessStartInfo(program, "app --section " + section);
+                    info.UseShellExecute = false;
+                    info.WorkingDirectory = Connector.LocalAppData;
+                    Process.Start(info);
+                }
+                else
+                    Connector.StartHidden(Path.Combine(root, "installer", "SmartConnectorApp.ps1"),
+                        "-Section " + section + " -RepositoryPath " + Connector.Quote(root));
                 return Result.Succeeded;
             }
             catch (Exception exception)

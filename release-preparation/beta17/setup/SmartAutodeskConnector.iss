@@ -51,11 +51,11 @@ Source: "{src}\enrollment.json"; DestDir: "{#InstallRoot}"; Flags: external skip
 Source: "{src}\skill-service-device.json"; DestDir: "{#InstallRoot}"; Flags: external skipifsourcedoesntexist ignoreversion
 
 [Icons]
-; RemoteSigned: the scripts this setup installed run; a script Windows marks as downloaded would be refused.
-Name: "{userprograms}\Smart Connector"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; \
-  Parameters: "-NoProfile -ExecutionPolicy RemoteSigned -STA -WindowStyle Hidden -File ""{#InstallRoot}\installer\SmartConnectorApp.ps1"""; \
+; The compiled Smart Connector program this setup installed (bin\SmartConnector.exe, always in this payload): the
+; shortcut runs no script. On the first open it shows the setup window.
+Name: "{userprograms}\Smart Connector"; Filename: "{#InstallRoot}\bin\SmartConnector.exe"; Parameters: "app"; \
   WorkingDir: "{localappdata}"; IconFilename: "{#InstallRoot}\assets\logo.ico"; \
-  Comment: "Smart Connector for Autodesk Revit and AutoCAD"; Flags: runminimized
+  Comment: "Smart Connector for Autodesk Revit and AutoCAD"
 
 [Code]
 function InitializeSetup(): Boolean;

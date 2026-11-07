@@ -23,11 +23,13 @@ try {
     'PASS: no scheduled tasks, no agent, no web gateway or tunnel, no hidden work after setup'
 
     # 1b. The setup .exe only installs files and a Start menu entry: it runs no program or script. The first open of
-    #     Smart Connector shows the setup window; the Start menu entry uses RemoteSigned, not Bypass.
+    #     Smart Connector shows the setup window; the Start menu entry opens the installed program (bin\SmartConnector.exe),
+    #     so no script runs from it and nothing bypasses the script policy.
     $iss = Get-Content (Join-Path $runtime '../../setup/SmartAutodeskConnector.iss') -Raw
     $code = $iss.Substring($iss.IndexOf('[Code]'))
     Assert ($code -notmatch 'Exec|ShellExec|powershell' -and $iss -notmatch '(?m)^\[Run\]') 'The setup .exe still starts a program'
-    Assert ($iss -match 'ExecutionPolicy RemoteSigned' -and $iss -notmatch 'ExecutionPolicy Bypass') 'The Start menu entry bypasses the script policy'
+    $icons = $iss.Substring($iss.IndexOf('[Icons]'), $iss.IndexOf('[Code]') - $iss.IndexOf('[Icons]'))
+    Assert ($icons.Contains('Filename: "{#InstallRoot}\bin\SmartConnector.exe"; Parameters: "app"') -and $icons -notmatch 'powershell|\.ps1|runminimized' -and $iss -notmatch 'ExecutionPolicy Bypass') 'The Start menu entry does not open the installed program, or bypasses the script policy'
     Assert ($iss -match 'recursesubdirs' -and $iss -notmatch 'Payload\.zip' -and $code -match 'setup-pending\.txt') 'Setup does not install the files itself or does not mark setup as pending'
     $appText = Get-Content (Join-Path $runtime 'installer/SmartConnectorApp.ps1') -Raw
     $coreText = Get-Content (Join-Path $runtime 'installer/Setup-BimCad.ps1') -Raw

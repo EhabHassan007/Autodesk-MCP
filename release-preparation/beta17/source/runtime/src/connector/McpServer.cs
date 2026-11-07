@@ -7,13 +7,22 @@ using System.Text;
 using System.Threading;
 using System.Web.Script.Serialization;
 
-// Smart Connector MCP server: one compiled program that Claude Desktop, Claude Code and Codex start to work with
-// Revit and AutoCAD on this computer. It replaces the PowerShell bridges (src\autodesk\autodesk-bridge.ps1,
-// src\revit\revit-bridge.ps1, src\autocad\autocad-bridge.ps1) with the same tools, answers and messages.
-//   SmartConnector.exe mcp         MCP over stdio (one JSON-RPC message per line, UTF-8)
-//   SmartConnector.exe --version   print the connector version
-// C# 5 only: built with the .NET Framework compiler that ships with Windows (release-preparation\beta17\setup\
-// build-connector-exe.ps1). Nothing is compiled on the PCs.
+// Smart Connector: one compiled program for the MCP server that Claude Desktop, Claude Code and Codex start to work
+// with Revit and AutoCAD on this computer, and for the Smart Connector windows. The MCP server replaces the PowerShell
+// bridges (src\autodesk\autodesk-bridge.ps1, src\revit\revit-bridge.ps1, src\autocad\autocad-bridge.ps1) with the same
+// tools, answers and messages; the windows replace installer\SmartConnectorApp.ps1, SetupWizard.ps1 and
+// ConnectorActions.ps1, and still run the same PowerShell scripts for the work behind their buttons.
+//   SmartConnector.exe mcp                       MCP over stdio (one JSON-RPC message per line, UTF-8)
+//   SmartConnector.exe --version                 print the connector version
+//   SmartConnector.exe app [--section <name>]    the Smart Connector app (Overview, Autodesk, AI, Skills, Components,
+//                                                Updates, Settings, Diagnostics or Help)
+//   SmartConnector.exe setup                     the setup window
+//   SmartConnector.exe action --action <name>    SkillsSync, CheckUpdates or Status, with its progress window
+//   SmartConnector.exe settings                  the update-check setting
+// --smoke-test builds the windows without showing them or running anything, and exits 0.
+// Built as a Windows (GUI) program so no console window flashes; Claude and Codex still talk to `mcp` over the
+// pipes they pass in. C# 5 only: built with the .NET Framework compiler that ships with Windows
+// (release-preparation\beta17\setup\build-connector-exe.ps1). Nothing is compiled on the PCs.
 namespace SmartConnector
 {
     public static class Program
@@ -22,9 +31,98 @@ namespace SmartConnector
         public static int Main(string[] args)
         {
             if (args.Length == 1 && args[0] == "mcp") return McpServer.Run();
-            if (args.Length == 1 && args[0] == "--version") { Console.WriteLine(Paths.Version); return 0; }
-            Console.Error.WriteLine("Smart Connector " + Paths.Version + ". Claude and Codex start it as: SmartConnector.exe mcp");
+            if (args.Length == 1 && args[0] == "--version") { AttachConsole(); Console.WriteLine(Paths.Version); return 0; }
+            string command = args.Length > 0 ? args[0] : "";
+            if (command == "app" || command == "setup" || command == "action" || command == "settings") return WindowCommands.Run(command, args.Skip(1).ToArray());
+            AttachConsole();
+            Console.Error.WriteLine("Smart Connector " + Paths.Version + ". Claude and Codex start it as: SmartConnector.exe mcp. The app opens with: SmartConnector.exe app");
             return 2;
+        }
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+        private static extern bool AttachConsole(int processId);
+        [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+        private static extern IntPtr GetStdHandle(int handle);
+
+        // A Windows program has no console. When started from a console without redirected output (typing
+        // SmartConnector.exe --version), write to that console; redirected output (pipes, files) is used as it is.
+        internal static void AttachConsole()
+        {
+            try { if (GetStdHandle(-11) == IntPtr.Zero) AttachConsole(-1); }
+            catch (Exception) { }
+        }
+    }
+
+    // The window commands and their options (--name value, --flag).
+    internal static class WindowCommands
+    {
+        internal static int Run(string command, string[] args)
+        {
+            Dictionary<string, string> options = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < args.Length; i++)
+            {
+                if (!args[i].StartsWith("--")) continue;
+                bool hasValue = i + 1 < args.Length && !args[i + 1].StartsWith("--");
+                options[args[i].Substring(2)] = hasValue ? args[++i] : "";
+            }
+            bool smokeTest = options.ContainsKey("smoke-test");
+            string value;
+            try
+            {
+                // Hidden helpers for the tests: the status snapshot and action outcomes as JSON, and the icon check.
+                if (command == "app" && options.ContainsKey("print-snapshot"))
+                {
+                    double now = options.TryGetValue("now", out value) && value.Length > 0 ? Double.Parse(value, System.Globalization.CultureInfo.InvariantCulture) : ConnectorStatus.Today;
+                    Program.AttachConsole(); Console.WriteLine(ConnectorStatus.Describe(now));
+                    return 0;
+                }
+                if (command == "action" && options.TryGetValue("outcome", out value))
+                {
+                    Console.WriteLine(ConnectorActions.Describe(value, new StreamReader(Console.OpenStandardInput(), new UTF8Encoding(false)).ReadToEnd()));
+                    return 0;
+                }
+                if (command == "app" && options.ContainsKey("check-icons")) return CheckIcons();
+
+                System.Windows.Forms.Application.EnableVisualStyles();
+                int code;
+                if (command == "app") code = SmartConnectorApp.Run(options.TryGetValue("section", out value) ? value : "Overview", smokeTest);
+                else if (command == "setup") code = SetupCommand.Run(smokeTest);
+                else if (command == "action") code = ActionWindow.Run(options.TryGetValue("action", out value) ? value : "Status", smokeTest);
+                else code = SettingsWindow.Run(smokeTest);
+                if (smokeTest && code == 0) Console.WriteLine("SMOKE_OK");
+                return code;
+            }
+            catch (Exception exception)
+            {
+                if (smokeTest) { Console.Error.WriteLine(exception); return 1; }
+                System.Windows.Forms.MessageBox.Show(exception.Message, Brand.Name, System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Error);
+                return 1;
+            }
+        }
+
+        // Every icon renders through WPF, plain and as a tile, at 100 % and 150 % (as tests\test-design-system.ps1
+        // checks for Brand.ps1). Prints one line per problem; exit code 1 when any icon drew nothing.
+        private static int CheckIcons()
+        {
+            int problems = 0;
+            foreach (string name in Brand.IconNames)
+                foreach (double scale in new[] { 1.0, 1.5 })
+                {
+                    System.Drawing.Bitmap plain = Brand.IconImage(name, 24, null, 0, false, scale);
+                    System.Drawing.Bitmap tile = Brand.IconImage(name, 32, null, 0, true, scale);
+                    if (plain.Width != Brand.Round(24 * scale) || Ink(plain) <= 8) { problems++; Console.WriteLine("Icon " + name + " drew nothing at " + scale); }
+                    if (Ink(tile) <= tile.Width * tile.Height * 0.6) { problems++; Console.WriteLine("Tile " + name + " is not filled at " + scale); }
+                }
+            if (Brand.IconError.Length > 0) Console.WriteLine("WPF: " + Brand.IconError);
+            Console.WriteLine(problems == 0 ? "ICONS_OK " + Brand.IconNames.Length : "ICONS_FAILED " + problems);
+            return problems == 0 ? 0 : 1;
+        }
+
+        private static int Ink(System.Drawing.Bitmap bitmap)
+        {
+            int count = 0;
+            for (int x = 0; x < bitmap.Width; x++) for (int y = 0; y < bitmap.Height; y++) if (bitmap.GetPixel(x, y).A > 40) count++;
+            return count;
         }
     }
 
@@ -89,6 +187,18 @@ namespace SmartConnector
         {
             IDictionary<string, object> dictionary = value as IDictionary<string, object>;
             return dictionary != null && dictionary.ContainsKey(key);
+        }
+
+        // JSON with every non-ASCII character escaped, for output whose code page is not known (the windows' test helpers).
+        internal static string Ascii(object value)
+        {
+            StringBuilder text = new StringBuilder();
+            foreach (char c in Serializer.Serialize(value))
+            {
+                if (c < 128) text.Append(c);
+                else text.Append("\\u").Append(((int)c).ToString("x4"));
+            }
+            return text.ToString();
         }
     }
 

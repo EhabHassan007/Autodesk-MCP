@@ -214,7 +214,7 @@ namespace SmartConnector
         private static readonly string[] Categories = { "revit", "autocad", "3ds-max", "other-software", "linkedin-marketing", "branding-ci", "general", "uncategorized" };
         private static readonly string[] TextExtensions = { ".md", ".txt", ".json", ".yaml", ".yml", ".toml", ".py", ".ps1", ".js", ".ts", ".sh", ".csv", ".xml" };
 
-        private sealed class Skill
+        internal sealed class Skill
         {
             internal string Name, Category, Path;
         }
@@ -241,7 +241,7 @@ namespace SmartConnector
             return new DirectoryInfo(root).GetDirectories().Where(d => !d.Name.StartsWith(".")).OrderBy(d => d.Name, StringComparer.CurrentCultureIgnoreCase);
         }
 
-        private static List<Skill> SkillsIn(string root)
+        internal static List<Skill> SkillsIn(string root)
         {
             List<Skill> skills = new List<Skill>();
             if (!Directory.Exists(root)) return skills;
