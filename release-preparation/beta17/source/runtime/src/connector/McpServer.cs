@@ -31,7 +31,15 @@ namespace SmartConnector
     // Folders of the installed connector. The program lives in <install root>\bin.
     internal static class Paths
     {
-        internal static string LocalAppData { get { return Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData); } }
+        // %LOCALAPPDATA% first, as the PowerShell bridges and setup scripts use it (on a normal PC it is the same folder).
+        internal static string LocalAppData
+        {
+            get
+            {
+                string variable = Environment.GetEnvironmentVariable("LOCALAPPDATA");
+                return String.IsNullOrWhiteSpace(variable) ? Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData) : variable;
+            }
+        }
         internal static string Root { get { return Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..")); } }
         internal static string ShippedSkills { get { return Path.Combine(Root, ".agents", "skills"); } }
         internal static string SkillState { get { return Path.Combine(LocalAppData, "AutodeskMcpSkillCollection"); } }

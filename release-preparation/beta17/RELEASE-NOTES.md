@@ -12,4 +12,4 @@ Lean core: Smart Connector now runs nothing in the background. This removes the 
 - Compiled MCP server: Claude and Codex now start `bin\SmartConnector.exe`, a compiled program, instead of running the PowerShell bridge scripts. It offers the same Revit and AutoCAD tools with the same arguments and safety checks (one model change at a time, read-only tools stay read-only, skill files are read only from the approved folders). It is compiled by the release build, never on your PC. Setup re-points Claude Desktop, Claude Code and Codex to it; an install without it keeps using the PowerShell bridge. Before an update replaces the files, a running copy of the connector is closed; Claude and Codex start it again the next time they open (setup already restarts Claude Desktop when it re-points it).
 - The Revit add-in is now compiled in the automated tests with the same Windows compiler the PCs use, against the Revit 2024 API reference assemblies.
 
-SHA-256: 7E6411654B261D83681F118B339CB9BF8C845C6D71F62C1C11CFC5045290D592
+SHA-256: 190D8C90849ED10EF8CE61A7FE9F7EC64F001B860B4FC1717DB81EB18F60F314

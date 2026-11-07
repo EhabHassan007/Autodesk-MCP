@@ -25,8 +25,14 @@ try{
  # Team: the payload inside carries the code and service address, and nothing else differs in its file list.
  Assert ((Entries $team) -join ',' -eq ((Entries $public) -join ',')) 'Team installer has a different file list'
  $teamPayload=Join-Path $t 'team-payload.zip';Read-Entry $team "Autodesk-MCP-Connector-$v/Support/Autodesk-MCP-Payload.zip" $teamPayload
- $publicEntries=Entries (Join-Path $copy 'source/Support/Autodesk-MCP-Payload.zip');$teamEntries=Entries $teamPayload
+ $publicPayload=Join-Path $t 'public-payload.zip';Read-Entry $public "Autodesk-MCP-Connector-$v/Support/Autodesk-MCP-Payload.zip" $publicPayload
+ $publicEntries=Entries $publicPayload;$teamEntries=Entries $teamPayload
  Assert (@(Compare-Object $publicEntries $teamEntries).Count -eq 1 -and $teamEntries -contains 'Autodesk-MCP-Payload/installer/team-join.json') 'Team payload should differ only by team-join.json'
+ # Both release payloads carry the compiled connector; the payload stored in the repository stays source only.
+ $storedEntries=Entries (Join-Path $copy 'source/Support/Autodesk-MCP-Payload.zip')
+ Assert ($publicEntries -contains 'Autodesk-MCP-Payload/bin/SmartConnector.exe') 'The release payload has no bin/SmartConnector.exe'
+ Assert (-not ($storedEntries -like 'Autodesk-MCP-Payload/bin/*')) 'The stored payload contains a compiled program'
+ Assert (@(Compare-Object $storedEntries $publicEntries).Count -eq 1) 'The release payload should differ from the stored payload only by bin/SmartConnector.exe'
  $joinFile=Join-Path $t 'team-join.json';Read-Entry $teamPayload 'Autodesk-MCP-Payload/installer/team-join.json' $joinFile
  $join=Get-Content $joinFile -Raw|ConvertFrom-Json
  Assert ($join.join_code -eq $code -and $join.service_url -eq 'https://autodesk-skill-service.autodesk-skills-ehabhassan007.workers.dev') 'Team join file is wrong'
@@ -35,6 +41,6 @@ try{
  $stopped=$false;try{$null=& (Join-Path $copy 'build.ps1')}catch{$stopped=$_.Exception.Message -like '*team-join.json*'}
  Assert $stopped 'A join file in source/runtime was not refused'
  Assert ((Get-Content (Join-Path $PSScriptRoot '../../.gitignore') -Raw).Contains('**/team-join.json')) 'team-join.json is not git-ignored'
- 'PASS: public installer never holds a join code; TEAM installer differs only by its payload''s team-join.json; stray join files stop the build'
+ 'PASS: public installer never holds a join code; TEAM installer differs only by its payload''s team-join.json; release payloads carry SmartConnector.exe, the stored one stays source only; stray join files stop the build'
 }
 finally{Remove-Item $t -Recurse -Force}
