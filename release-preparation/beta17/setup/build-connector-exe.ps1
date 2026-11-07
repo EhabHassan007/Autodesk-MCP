@@ -16,8 +16,11 @@ $references = foreach ($name in 'System.dll', 'System.Core.dll', 'Microsoft.CSha
 }
 New-Item -ItemType Directory -Path (Split-Path -Parent $OutputPath) -Force | Out-Null
 $icon = Join-Path $runtime 'assets\logo.ico'
-$iconArgument = if (Test-Path -LiteralPath $icon -PathType Leaf) { @("/win32icon:$icon") } else { @() }
-$output = & $compiler /nologo /noconfig /target:exe /optimize+ /platform:anycpu "/out:$OutputPath" @references @iconArgument $sources 2>&1
+# One plain argument list: splatting an array (@name) into a native command mangles it in Windows PowerShell 5.1.
+$arguments = @('/nologo', '/noconfig', '/target:exe', '/optimize+', '/platform:anycpu', "/out:$OutputPath") + @($references)
+if (Test-Path -LiteralPath $icon -PathType Leaf) { $arguments += "/win32icon:$icon" }
+$arguments += $sources
+$output = & $compiler $arguments 2>&1
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $OutputPath -PathType Leaf)) {
     throw ("SmartConnector.exe did not compile:`n" + ($output -join "`n"))
 }
