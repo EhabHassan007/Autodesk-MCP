@@ -10,7 +10,9 @@ function Assert([bool]$Condition, [string]$Message) { if (-not $Condition) { thr
 if ([Environment]::OSVersion.Platform -ne 'Win32NT') { 'SKIP: SmartConnector.exe needs Windows'; return }
 $runtime = (Resolve-Path (Join-Path $PSScriptRoot '../source/runtime')).Path
 $scripts = Join-Path $runtime 'scripts'
-$t = Join-Path ([IO.Path]::GetTempPath()) ('skills-exe-' + [guid]::NewGuid().ToString('N'))
+# A short base folder: Windows stops at 260 characters, and the review packages this test makes nest deeply.
+$shortBase = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [IO.Path]::GetTempPath() }
+$t = Join-Path $shortBase ('sx' + [guid]::NewGuid().ToString('N').Substring(0, 8))
 $root = Join-Path $t 'root'
 $exe = Join-Path $root 'bin\SmartConnector.exe'
 $savedLocal = $env:LOCALAPPDATA
