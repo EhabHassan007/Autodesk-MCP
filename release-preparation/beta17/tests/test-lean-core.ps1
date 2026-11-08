@@ -10,7 +10,10 @@ $saved = @{ local = $env:LOCALAPPDATA; roaming = $env:APPDATA }
 try {
     # 1. Nothing in the shipped connector schedules, hides a long-running process or serves the network.
     $retire = Join-Path $runtime 'scripts/retire-background-tasks.ps1'
-    $code = Get-ChildItem -LiteralPath $runtime -Recurse -File -Include *.ps1, *.cs, *.lsp, *.cmd | Where-Object { $_.FullName -ne (Resolve-Path $retire).Path }
+    # The places that may name tasks, the agent and the gateway are the cleanup of what earlier versions set up: the script
+    # and its compiled ports (SkillsRetire.cs and, in the install engine, EngineBackground.cs). They only remove; checked below.
+    $retireEngine = Join-Path $runtime 'src/connector/EngineBackground.cs'
+    $code = Get-ChildItem -LiteralPath $runtime -Recurse -File -Include *.ps1, *.cs, *.lsp, *.cmd | Where-Object { $_.FullName -ne (Resolve-Path $retire).Path -and $_.FullName -ne (Resolve-Path $retireEngine).Path -and $_.Name -ne 'SkillsRetire.cs' }
     foreach ($pattern in '(?<!Un)Register-ScheduledTask', 'New-ScheduledTaskTrigger', 'schtasks', 'HttpListener', 'TcpListener', 'cloudflared', 'connector-agent\.ps1', 'Start-ScheduledTask', 'CurrentVersion\\Run') {
         $hits = @($code | Select-String -Pattern $pattern | ForEach-Object { '{0}:{1}' -f $_.Path.Substring($runtime.Length), $_.LineNumber })
         Assert ($hits.Count -eq 0) ("Found '$pattern' in: " + ($hits -join ', '))
@@ -20,6 +23,9 @@ try {
     }
     $outer = Get-Content (Join-Path $runtime '../Support/Install-Autodesk-MCP-Connector.ps1') -Raw
     Assert ($outer -notmatch '-Action Sync') 'Setup still starts a hidden Skills Sync after installing'
+    # The compiled cleanup may delete tasks and processes of earlier versions; it never creates a task or a start-up entry.
+    $cleanup = Get-Content -LiteralPath $retireEngine -Raw
+    Assert ($cleanup.Contains('DeleteTask') -and $cleanup -notmatch 'RegisterTask|NewTask\b|schtasks|/Create|CurrentVersion\\Run|HttpListener|TcpListener') 'The compiled cleanup of earlier tasks creates something'
     'PASS: no scheduled tasks, no agent, no web gateway or tunnel, no hidden work after setup'
 
     # 1b. The setup .exe only installs files and a Start menu entry: it runs no program or script. The first open of

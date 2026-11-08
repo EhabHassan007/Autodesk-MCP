@@ -203,8 +203,11 @@
                 (vl-string-trim " \t\r\n" (sacs:read (sacs:install-file "VERSION"))) "."
                 "\n\nUpdate now? The update window opens: save your work and close AutoCAD and Revit, and it installs straight after."
                 "\n\nChoose No to be asked again tomorrow."))
-    ;; The update window stays PowerShell: it replaces the install folder, which the running program would hold open.
-    (sacs:open-window "ConnectorActions.ps1" "-Action InstallUpdate")))
+    ;; The update window is the compiled program's own (it replaces the installed files in place, setting its own exe
+    ;; aside); an install without the program uses ConnectorActions.ps1.
+    (if (findfile (sac:program))
+      (startapp (sac:program-command) "action --action InstallUpdate")
+      (sacs:open-window "ConnectorActions.ps1" "-Action InstallUpdate"))))
 
 ;; After each finished command until the work is done: start the download, then look at it; at most one
 ;; question per AutoCAD session, the update first.

@@ -26,6 +26,26 @@ function Get-TermsVersion {
     'unversioned'
 }
 
+# Setup-BimCad.ps1's arguments (-Action X -RepositoryPath Y) as the install engine's command line
+# (engine --action X --repository-path Y). A value is passed on as it is.
+function ConvertTo-EngineArguments {
+    param([string[]]$Arguments)
+    $flags = @('SkipRepositoryUpdate', 'InstallGitIfMissing', 'InstallClaudeDesktopIfMissing')
+    $result = @('engine')
+    $value = $false
+    foreach ($argument in $Arguments) {
+        if ($value) { $result += $argument; $value = $false; continue }
+        if ($argument -match '^-[A-Za-z]') {
+            $name = $argument.Substring(1)
+            $result += '--' + (($name -creplace '(?<=[a-z0-9])(?=[A-Z])', '-').ToLowerInvariant())
+            $value = $flags -inotcontains $name
+            continue
+        }
+        $result += $argument
+    }
+    $result
+}
+
 function Save-TermsAcceptance {
     param([string]$Version, [string]$StateDirectory = (Join-Path $env:LOCALAPPDATA 'AutodeskMcpConnector'))
     New-Item -ItemType Directory -Path $StateDirectory -Force | Out-Null
@@ -353,8 +373,17 @@ function Show-SetupWizard {
         & $showPage 4
         & $updateStep 'files' 'running' ''
         $psi = New-Object Diagnostics.ProcessStartInfo
-        $psi.FileName = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-        $psi.Arguments = ConvertTo-CommandLine (@('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $CoreSetup) + $arguments)
+        # The install engine of the compiled program (bin\SmartConnector.exe) when the payload has it; otherwise the script.
+        $engine = Join-Path (Split-Path -Parent (Split-Path -Parent $CoreSetup)) 'bin\SmartConnector.exe'
+        if (Test-Path -LiteralPath $engine -PathType Leaf) {
+            $psi.FileName = $engine
+            $psi.Arguments = ConvertTo-CommandLine (ConvertTo-EngineArguments $arguments)
+            $psi.StandardErrorEncoding = [Text.Encoding]::UTF8
+        }
+        else {
+            $psi.FileName = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+            $psi.Arguments = ConvertTo-CommandLine (@('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $CoreSetup) + $arguments)
+        }
         $psi.UseShellExecute = $false; $psi.CreateNoWindow = $true
         $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true
         $psi.StandardOutputEncoding = [Text.Encoding]::UTF8
