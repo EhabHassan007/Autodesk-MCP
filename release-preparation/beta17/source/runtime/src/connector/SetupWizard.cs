@@ -125,7 +125,7 @@ namespace SmartConnector
     // process list only, so the page opens at once.
     internal sealed class SystemCheck
     {
-        internal bool Windows64, NetOk, Revit2024, RevitRunning, ClaudeDesktop, ClaudeCode, Codex;
+        internal bool Windows64, NetOk, Revit2024, RevitRunning, ClaudeDesktop, ClaudeCode, Codex, CodexCli, ChatGptDesktop;
         internal int[] RevitOther = new int[0];
         internal string[] AutoCad = new string[0];
 
@@ -166,7 +166,9 @@ namespace SmartConnector
                 AutoCad = ConnectorStatus.AutoCadReleasesInstalled().Select(name => AutoCadNames.ContainsKey(name) ? AutoCadNames[name] : name).ToArray(),
                 ClaudeDesktop = ConnectorStatus.ClaudeDesktopInstalled(),
                 ClaudeCode = ConnectorStatus.CommandOnPath("claude"),
-                Codex = ConnectorStatus.CommandOnPath("codex")
+                CodexCli = ConnectorStatus.CommandOnPath("codex"),
+                ChatGptDesktop = ConnectorStatus.ChatGptDesktopInstalled(),
+                Codex = ConnectorStatus.CommandOnPath("codex") || ConnectorStatus.ChatGptDesktopInstalled()
             };
         }
     }
@@ -187,7 +189,7 @@ namespace SmartConnector
             new[] { "skills", "Install workflow skills for Codex and Claude" },
             new[] { "revit", "Revit 2024 add-in" },
             new[] { "autocad", "AutoCAD Add-ins panel" },
-            new[] { "codex", "Connect Codex" },
+            new[] { "codex", "Connect Codex / ChatGPT Desktop" },
             new[] { "claude_desktop", "Connect Claude Desktop" },
             new[] { "claude_code", "Connect Claude Code" },
             new[] { "team", "Join the team skill service" },
@@ -372,7 +374,7 @@ namespace SmartConnector
                 new[] { "autocad", "AutoCAD", check.AutoCad.Length > 0 ? "AutoCAD " + String.Join(", ", check.AutoCad) + ": buttons on the Add-ins tab" : "Not installed", check.AutoCad.Length > 0 ? "Found" : "Not found", check.AutoCad.Length > 0 ? "Good" : "Off" },
                 new[] { "claude", "Claude Desktop", check.ClaudeDesktop ? "Installed for this Windows user" : "Not installed; setup can install it", check.ClaudeDesktop ? "Found" : "Not found", check.ClaudeDesktop ? "Good" : "Off" },
                 new[] { "claude", "Claude Code", check.ClaudeCode ? "Command-line tool found" : "Not installed", check.ClaudeCode ? "Found" : "Not found", check.ClaudeCode ? "Good" : "Off" },
-                new[] { "codex", "Codex", check.Codex ? "Command-line tool found" : "Not installed; connect it later with Repair", check.Codex ? "Found" : "Not found", check.Codex ? "Good" : "Off" }
+                new[] { "codex", "Codex / ChatGPT Desktop", check.CodexCli ? "Codex command-line tool found" : check.ChatGptDesktop ? "ChatGPT Desktop found: connected through its Codex settings" : "Not installed; connect it later with Repair", check.Codex ? "Found" : "Not found", check.Codex ? "Good" : "Off" }
             };
             for (int i = 0; i < rows.Length; i++) AddRow(system, 92 + i * 44, rows[i][0], rows[i][1], rows[i][2], rows[i][3], rows[i][4]);
             if (check.RevitOther.Length > 0)
@@ -388,7 +390,7 @@ namespace SmartConnector
             {
                 new object[] { "ClaudeDesktop", "Claude Desktop", true, check.ClaudeDesktop ? "Installed" : "Installed for you during setup" },
                 new object[] { "ClaudeCode", "Claude Code", check.ClaudeCode, check.ClaudeCode ? "Installed" : "Not installed" },
-                new object[] { "Codex", "Codex", check.Codex, check.Codex ? "Installed" : "Not installed" }
+                new object[] { "Codex", "Codex / ChatGPT Desktop", check.Codex, check.CodexCli ? "Installed" : check.ChatGptDesktop ? "ChatGPT Desktop" : "Not installed" }
             });
             _cadGroup = MakeGroup(choose, "Autodesk software", 284, new[]
             {

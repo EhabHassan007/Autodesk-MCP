@@ -258,6 +258,21 @@ namespace SmartConnector
             catch (Exception) { return false; }
         }
 
+        // ChatGPT Desktop or the Codex desktop app (Microsoft Store packages or a per-user install). Their Codex side reads
+        // %USERPROFILE%\.codex\config.toml, the same file as the Codex command-line tool.
+        internal static bool ChatGptDesktopInstalled()
+        {
+            try
+            {
+                string packages = Path.Combine(Paths.LocalAppData, "Packages");
+                if (Directory.Exists(packages) && (Directory.GetDirectories(packages, "OpenAI.ChatGPT*").Length > 0 || Directory.GetDirectories(packages, "OpenAI.Codex*").Length > 0)) return true;
+                foreach (string exe in new[] { Path.Combine(Paths.LocalAppData, "Programs", "ChatGPT", "ChatGPT.exe"), Path.Combine(Paths.LocalAppData, "Programs", "Codex", "Codex.exe") })
+                    if (File.Exists(exe)) return true;
+            }
+            catch (Exception) { }
+            return false;
+        }
+
         // Get-Command for a program on PATH: the PATHEXT extensions and PowerShell scripts.
         internal static bool CommandOnPath(string name)
         {
@@ -358,7 +373,7 @@ namespace SmartConnector
             s.AutoCadPanel = File.Exists(AutoCadBundle);
             s.ClaudeDesktop = new Client { Installed = ClaudeDesktopInstalled(), Connected = ClaudeDesktopConnected() };
             s.ClaudeCode = new Client { Installed = CommandOnPath("claude"), Connected = ClaudeCodeConnected() };
-            s.Codex = new Client { Installed = CommandOnPath("codex"), Connected = CodexConnected() };
+            s.Codex = new Client { Installed = CommandOnPath("codex") || ChatGptDesktopInstalled(), Connected = CodexConnected() };
             s.TeamJoined = File.Exists(Path.Combine(SkillState, "service.json"));
             s.AutoUpdates = !PsJson.Truthy(PsJson.Value(update, "notifications_user_disabled"));
             s.AvailableVersion = PsJson.Text(PsJson.Value(update, "available_version"));

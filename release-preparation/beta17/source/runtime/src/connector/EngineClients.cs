@@ -67,6 +67,73 @@ namespace SmartConnector
             }
         }
 
+        // Writes [mcp_servers.<name>] into Codex's config.toml without the codex command-line tool (ChatGPT Desktop and the
+        // Codex app read the same file). Every other line of the file is kept; only this connector's own tables are
+        // replaced: the named one, and legacy-named ones whose command starts this connector. Backed up while writing.
+        private void RegisterCodexConfigFile(string name, string bridge, string[] bridgeArguments, string[] legacyNames)
+        {
+            McpLaunch launch = GetMcpLaunch(bridge, bridgeArguments);
+            string configPath = Path.Combine(CodexHome, "config.toml");
+            Step("Registering the " + name + " MCP server in Codex settings for ChatGPT Desktop at " + configPath + "...");
+            Directory.CreateDirectory(CodexHome);
+            string before = File.Exists(configPath) ? File.ReadAllText(configPath) : "";
+            string newline = before.Contains("\r\n") || before.Length == 0 ? "\r\n" : "\n";
+            List<string> kept = new List<string>();
+            List<string> table = null; string tableName = null;
+            Action flush = delegate
+            {
+                if (table == null) return;
+                bool ours = String.Equals(tableName, name, StringComparison.OrdinalIgnoreCase) ||
+                    (legacyNames.Any(l => String.Equals(tableName, l, StringComparison.OrdinalIgnoreCase)) && IsOwnConnectorEntry(String.Join("\n", table)));
+                if (!ours) kept.AddRange(table);
+                table = null; tableName = null;
+            };
+            foreach (string line in before.Replace("\r\n", "\n").Split('\n'))
+            {
+                Match header = Regex.Match(line, @"^\s*\[(?!\[)\s*mcp_servers\.(""[^""]*""|'[^']*'|[A-Za-z0-9_-]+)(\.[^\]]*)?\s*\]\s*(#.*)?$");
+                if (header.Success)
+                {
+                    string key = header.Groups[1].Value.Trim('"', '\'');
+                    // A subtable ([mcp_servers.x.env]) belongs to the same server.
+                    if (table != null && String.Equals(key, tableName, StringComparison.OrdinalIgnoreCase)) { table.Add(line); continue; }
+                    flush();
+                    table = new List<string> { line }; tableName = key;
+                    continue;
+                }
+                if (Regex.IsMatch(line, @"^\s*\[")) flush();
+                if (table != null) table.Add(line); else kept.Add(line);
+            }
+            flush();
+            while (kept.Count > 0 && kept[kept.Count - 1].Trim().Length == 0) kept.RemoveAt(kept.Count - 1);
+            Func<string, string> quote = delegate(string value) { return "\"" + value.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\""; };
+            List<string> entry = new List<string>
+            {
+                "[mcp_servers." + name + "]",
+                "command = " + quote(launch.Command),
+                "args = [" + String.Join(", ", launch.Arguments.Select(quote).ToArray()) + "]"
+            };
+            if (kept.Count > 0) kept.Add("");
+            kept.AddRange(entry);
+            string after = String.Join(newline, kept.ToArray()) + newline;
+            if (after == before) { Step("The Smart Connector registration for ChatGPT Desktop is already correct."); return; }
+            string backupPath = configPath + ".bim-cad-setup-" + Process.GetCurrentProcess().Id + ".bak";
+            bool hadConfig = File.Exists(configPath);
+            if (hadConfig) File.Copy(configPath, backupPath, true);
+            try
+            {
+                string temporaryPath = configPath + ".tmp-" + Process.GetCurrentProcess().Id;
+                File.WriteAllText(temporaryPath, after, new UTF8Encoding(false));
+                if (hadConfig) File.Replace(temporaryPath, configPath, null); else File.Move(temporaryPath, configPath);
+                Step("Smart Connector is registered for ChatGPT Desktop. Restart ChatGPT Desktop to load it.");
+            }
+            catch (Exception)
+            {
+                if (hadConfig && File.Exists(backupPath)) File.Copy(backupPath, configPath, true);
+                throw;
+            }
+            finally { if (File.Exists(backupPath)) File.Delete(backupPath); }
+        }
+
         private void RegisterMcpServer(string name, string bridge, string[] bridgeArguments, string[] legacyNames)
         {
             string codex = RequireCommand("codex");
@@ -435,6 +502,23 @@ namespace SmartConnector
                     Result("codex", "failed", "see the setup log");
                 }
             }
+            else if (ConnectorStatus.ChatGptDesktopInstalled())
+            {
+                // ChatGPT Desktop (or the Codex app) without the command-line tool: its Codex side reads the same
+                // config.toml, so the connector is written there directly.
+                try
+                {
+                    RegisterCodexConfigFile("autodesk", bridge, arguments, legacyNames);
+                    detected++;
+                    Result("codex", "ok", "restart ChatGPT Desktop to load it");
+                }
+                catch (Exception exception)
+                {
+                    registrationErrors.Add("ChatGPT Desktop: " + exception.Message);
+                    Warning("ChatGPT Desktop registration failed; continuing with other clients: " + exception.Message);
+                    Result("codex", "failed", "see the setup log");
+                }
+            }
             else { Step("Codex was not detected, so its MCP registration was skipped."); Result("codex", "skipped", "Codex is not installed"); }
 
             Phase("claude_code");
@@ -503,6 +587,12 @@ namespace SmartConnector
             {
                 External registration = InvokeAllowFailure(codex, "mcp", "get", "autodesk");
                 Step(registration.ExitCode == 0 ? "Codex has the Smart Connector registration." : "Smart Connector is not registered yet.");
+            }
+            else if (ConnectorStatus.ChatGptDesktopInstalled())
+            {
+                string config = Path.Combine(CodexHome, "config.toml");
+                bool registered = File.Exists(config) && File.ReadAllLines(config).Any(line => Regex.IsMatch(line, @"^\s*\[mcp_servers\.autodesk\]", RegexOptions.IgnoreCase));
+                Step(registered ? "ChatGPT Desktop has the Smart Connector registration (Codex settings)." : "Smart Connector is not registered for ChatGPT Desktop yet.");
             }
             else Step("Codex command was not detected.");
 
