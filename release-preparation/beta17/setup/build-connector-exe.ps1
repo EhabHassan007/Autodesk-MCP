@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param([Parameter(Mandatory = $true)][string]$OutputPath)
-# Builds SmartConnector.exe (the MCP server and the Smart Connector windows) from source\runtime\src\connector\*.cs
+# Builds SmartConnector.exe (the MCP server, the Smart Connector windows and the install engine) from source\runtime\src\connector\*.cs
 # with the .NET Framework 4 compiler that ships with Windows (C# 5). Used by build.ps1 for the release and the setup
 # .exe, and by the tests. Never runs on users' PCs.
 $ErrorActionPreference = 'Stop'
@@ -11,9 +11,11 @@ $runtime = (Resolve-Path (Join-Path $PSScriptRoot '..\source\runtime')).Path
 $sources = @(Get-ChildItem -LiteralPath (Join-Path $runtime 'src\connector') -Filter '*.cs' | Sort-Object Name | ForEach-Object FullName)
 if (-not $sources.Count) { throw 'No connector sources were found.' }
 # The windows use WinForms and System.Drawing; the icon family is drawn with WPF (PresentationCore and WindowsBase,
-# in the WPF subfolder; System.Xaml for the bitmap encoder's interfaces).
+# in the WPF subfolder; System.Xaml for the bitmap encoder's interfaces). The install engine (`engine`) uses ZIP files
+# (System.IO.Compression and its FileSystem helpers), DPAPI (System.Security) and WMI (System.Management).
 $references = foreach ($name in 'System.dll', 'System.Core.dll', 'Microsoft.CSharp.dll', 'Microsoft.VisualBasic.dll', 'System.Web.Extensions.dll',
-    'System.Windows.Forms.dll', 'System.Drawing.dll', 'System.Xaml.dll', 'WPF\PresentationCore.dll', 'WPF\WindowsBase.dll') {
+    'System.Windows.Forms.dll', 'System.Drawing.dll', 'System.Xaml.dll', 'WPF\PresentationCore.dll', 'WPF\WindowsBase.dll',
+    'System.IO.Compression.dll', 'System.IO.Compression.FileSystem.dll', 'System.Security.dll', 'System.Management.dll') {
     $path = Join-Path $framework $name
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required reference was not found: $path" }
     "/reference:$path"
