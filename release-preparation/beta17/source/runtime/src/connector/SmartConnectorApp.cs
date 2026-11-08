@@ -86,7 +86,7 @@ namespace SmartConnector
             }
         }
 
-        // ---------- actions (each runs an existing script) ----------
+        // ---------- actions (the install engine of this program, or the existing script) ----------
 
         // 1.2.0 > 1.2.0-beta.3 > 1.1.9; an unreadable version compares as equal.
         internal static int CompareVersion(string left, string right)
@@ -122,7 +122,7 @@ namespace SmartConnector
                 case "TestConnection": Launch.Program("action --action Status"); break;
                 case "UpdateNow":
                     // The update window waits for Revit and AutoCAD to close, installs, and shows the result. It replaces
-                    // the install folder, which this open window would hold, so the app closes once it has started it.
+                    // the installed files, including this program's own exe, so the app closes once it has started it.
                     Launch.UpdateWindow();
                     _form.Close();
                     break;
@@ -163,13 +163,13 @@ namespace SmartConnector
             Snapshot s = ConnectorStatus.Take();
             if (!ConnectorStatus.UpdateCheckDue(s, ConnectorStatus.Today)) return;
             ConnectorStatus.WriteDay(ConnectorStatus.OpenCheckPath);
-            try { _check = Launch.Hidden(Launch.PowerShell, "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File " + Launch.Quote(Launch.InstallerScript("Setup-BimCad.ps1")) + " -Action CheckUpdate -RepositoryPath " + Launch.Quote(Paths.Root)); }
+            try { _check = Launch.CoreHidden(Launch.InstallerScript("Setup-BimCad.ps1"), new[] { "-Action", "CheckUpdate", "-RepositoryPath", Paths.Root }); }
             catch (Exception) { }
         }
 
         private void SetAutoUpdates(bool on)
         {
-            int code = Launch.HiddenWait(Launch.PowerShell, AppScriptLine("Setup-BimCad.ps1", "-Action " + (on ? "EnableNotifications" : "DisableNotifications") + " -RepositoryPath " + Launch.Quote(Paths.Root)));
+            int code = Launch.CoreWait(Launch.InstallerScript("Setup-BimCad.ps1"), new[] { "-Action", on ? "EnableNotifications" : "DisableNotifications", "-RepositoryPath", Paths.Root });
             if (code != 0) MessageBox.Show(_form, "The setting could not be saved. Try again, or open Diagnostics.", "Smart Connector", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
 
@@ -197,7 +197,7 @@ namespace SmartConnector
         private void StartRepair()
         {
             if (_repair != null) return;
-            _repair = Launch.Redirected(Launch.PowerShell, "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File " + Launch.Quote(Launch.InstallerScript("Setup-BimCad.ps1")) + " -Action Install -RepositoryPath " + Launch.Quote(Paths.Root), null);
+            _repair = Launch.CoreRedirected(Launch.InstallerScript("Setup-BimCad.ps1"), new[] { "-Action", "Install", "-RepositoryPath", Paths.Root }, null);
             _repairOut = _repair.StandardOutput.ReadLineAsync();
             _repairErr = _repair.StandardError.ReadLineAsync();
             _repairLines.Clear(); _repairLines.Add("Repair started...");

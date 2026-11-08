@@ -134,13 +134,20 @@ namespace SmartConnector
         private static readonly string[] Helpers = { "SkillLibrary.ps1", "weekly-skill-collection.ps1", "collect-skills-for-review.ps1", "submit-team-knowledge.ps1",
             "central-skill-sync.ps1", "Initialize-SkillService.ps1", "send-usage.ps1" };
 
-        // Turning update checks on is still Setup-BimCad.ps1 -Action EnableNotifications; it moves to the compiled
-        // installer engine together with the rest of the install steps.
+        // Turning update checks on is the install engine's EnableNotifications action: this program's own `engine` command.
+        // A copy of the connector without the compiled program (taken from the repository) still uses Setup-BimCad.ps1.
         private static void EnableUpdateChecks(string repositoryRoot, SkillSink sink)
         {
-            string powershell = Path.Combine(Env.Windows, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
-            string script = Path.Combine(repositoryRoot, "installer", "Setup-BimCad.ps1");
-            ProcessResult result = SkillProcess.Run(powershell, new[] { "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script, "-Action", "EnableNotifications", "-RepositoryPath", repositoryRoot }, null, null, null);
+            string program = Path.Combine(repositoryRoot, "bin", "SmartConnector.exe");
+            ProcessResult result;
+            if (File.Exists(program))
+                result = SkillProcess.Run(program, new[] { "engine", "--action", "EnableNotifications", "--repository-path", repositoryRoot }, null, null, null);
+            else
+            {
+                string powershell = Path.Combine(Env.Windows, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+                string script = Path.Combine(repositoryRoot, "installer", "Setup-BimCad.ps1");
+                result = SkillProcess.Run(powershell, new[] { "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script, "-Action", "EnableNotifications", "-RepositoryPath", repositoryRoot }, null, null, null);
+            }
             foreach (string line in result.Lines) sink.Out(line);
             if (result.ExitCode != 0) throw new InvalidOperationException("Settings could not be saved (exit " + result.ExitCode + "). Open Settings to retry.");
         }

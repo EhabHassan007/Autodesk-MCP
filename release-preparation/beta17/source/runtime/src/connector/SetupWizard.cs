@@ -13,7 +13,8 @@ using Microsoft.Win32;
 // Smart Connector setup window: Welcome (with the terms), System check, Choose apps, AI connections, Install (live
 // steps) and Finish, with a step rail on the left. The C# port of installer\SetupWizard.ps1, TeamJoinDialog.ps1 and
 // the -Install path of Support\Install-Autodesk-MCP-Connector.ps1. The installing itself is still
-// installer\Setup-BimCad.ps1, started with the same arguments; its [PHASE]/[RESULT] lines drive the step list.
+// install engine (SmartConnector.exe engine, or installer\Setup-BimCad.ps1 when the program is not installed), started
+// with the same arguments; its [PHASE]/[RESULT] lines drive the step list.
 //   SmartConnector.exe setup [--smoke-test]
 namespace SmartConnector
 {
@@ -586,7 +587,8 @@ namespace SmartConnector
             BuildSteps(hidden);
             ShowPage(4);
             UpdateStep("files", "running", "");
-            _process = Launch.Redirected(Launch.PowerShell, CommandLine(new[] { "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", _coreSetup }.Concat(arguments)), Encoding.UTF8);
+            // The install engine of this program, or the script when the program is not installed.
+            _process = Launch.CoreRedirected(_coreSetup, arguments, Encoding.UTF8);
             // Async line reads polled from the UI timer, as the PowerShell window does.
             _readOut = _process.StandardOutput.ReadLineAsync();
             _readErr = _process.StandardError.ReadLineAsync();

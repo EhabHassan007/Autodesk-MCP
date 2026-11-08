@@ -11,11 +11,11 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 
 // Smart Connector actions behind the app's and the AutoCAD panel's buttons: the C# port of installer\ConnectorActions.ps1.
-// One hidden PowerShell step (Skills Sync, the update check or the status check, all still PowerShell) runs while a
-// branded window shows progress, then the window shows the result.
-//   SmartConnector.exe action --action SkillsSync|CheckUpdates|Status
-// The update window (ConnectorActions.ps1 -Action InstallUpdate) stays PowerShell: it replaces the install folder,
-// which a running bin\SmartConnector.exe would hold open (and Setup-BimCad stops every SmartConnector.exe there).
+// One hidden step (Skills Sync, which is still PowerShell, or the update check, the status check and the update, which
+// are the install engine of this program) runs while a branded window shows progress, then the window shows the result.
+//   SmartConnector.exe action --action SkillsSync|CheckUpdates|Status|InstallUpdate
+// The update window (InstallUpdate) waits until Revit and AutoCAD are closed, then runs `engine --action Update`. The
+// engine replaces the installed files in place and sets this program's own exe aside while it runs (EngineUpdate.cs).
 namespace SmartConnector
 {
     // Starting the installed scripts and programs. Every launch uses a known installed path and runs from
@@ -64,13 +64,13 @@ namespace SmartConnector
         }
 
         // A hidden step whose output is read: stdout in the given encoding, stderr as the child console writes it.
-        internal static Process Redirected(string file, string arguments, Encoding output)
+        internal static Process Redirected(string file, string arguments, Encoding output, Encoding error = null)
         {
             ProcessStartInfo info = new ProcessStartInfo(file, arguments);
             info.UseShellExecute = false; info.CreateNoWindow = true;
             info.RedirectStandardOutput = true; info.RedirectStandardError = true;
             info.StandardOutputEncoding = output ?? ConsoleEncoding;
-            info.StandardErrorEncoding = ConsoleEncoding;
+            info.StandardErrorEncoding = error ?? ConsoleEncoding;
             info.WorkingDirectory = Paths.LocalAppData;
             return Process.Start(info);
         }
@@ -95,10 +95,73 @@ namespace SmartConnector
             Hidden(PowerShell, "-NoProfile -NonInteractive -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File " + Quote(script) + " " + arguments).Dispose();
         }
 
-        // The update window (ConnectorActions.ps1 -Action InstallUpdate) waits until Revit and AutoCAD are closed, then installs and shows the result.
+        // The install engine of this program (bin\SmartConnector.exe engine ...) does what installer\Setup-BimCad.ps1 does.
+        // An install taken from the repository has no program, and keeps using the script.
+        internal static string EngineFile { get { return Path.Combine(Paths.Root, "bin", "SmartConnector.exe"); } }
+        internal static bool HasEngine { get { return File.Exists(EngineFile); } }
+
+        private static readonly string[] CoreFlags = { "SkipRepositoryUpdate", "InstallGitIfMissing", "InstallClaudeDesktopIfMissing" };
+
+        // Setup-BimCad.ps1's arguments (-Action X -RepositoryPath Y -SkipRepositoryUpdate) as the engine's command line
+        // (engine --action X --repository-path Y --skip-repository-update). A value is passed on as it is.
+        internal static string EngineArguments(IEnumerable<string> core)
+        {
+            List<string> result = new List<string> { "engine" };
+            bool value = false;
+            foreach (string argument in core)
+            {
+                if (value) { result.Add(argument); value = false; continue; }
+                if (argument.Length > 1 && argument[0] == '-' && Char.IsLetter(argument[1]))
+                {
+                    string name = argument.Substring(1);
+                    result.Add("--" + Regex.Replace(name, "(?<=[a-z0-9])(?=[A-Z])", "-").ToLowerInvariant());
+                    value = !CoreFlags.Contains(name, StringComparer.OrdinalIgnoreCase);
+                    continue;
+                }
+                result.Add(argument);
+            }
+            return SetupWizard.CommandLine(result);
+        }
+
+        private static string ScriptArguments(string script, IEnumerable<string> core, bool hidden)
+        {
+            List<string> all = new List<string> { "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass" };
+            if (hidden) all.AddRange(new[] { "-STA", "-WindowStyle", "Hidden" });
+            all.Add("-File"); all.Add(script);
+            all.AddRange(core);
+            return SetupWizard.CommandLine(all);
+        }
+
+        // One run of Setup-BimCad's work with its output read: the engine (UTF-8 on both pipes) or the script.
+        internal static Process CoreRedirected(string coreScript, IEnumerable<string> core, Encoding scriptOutput)
+        {
+            if (HasEngine) return Redirected(EngineFile, EngineArguments(core), Encoding.UTF8, Encoding.UTF8);
+            return Redirected(PowerShell, ScriptArguments(coreScript, core, false), scriptOutput);
+        }
+
+        // The same, started hidden without waiting (the caller disposes the Process).
+        internal static Process CoreHidden(string coreScript, IEnumerable<string> core)
+        {
+            if (HasEngine) return Hidden(EngineFile, EngineArguments(core));
+            return Hidden(PowerShell, ScriptArguments(coreScript, core, true));
+        }
+
+        // The same, hidden, and waited for: the exit code.
+        internal static int CoreWait(string coreScript, IEnumerable<string> core)
+        {
+            using (Process process = CoreHidden(coreScript, core))
+            {
+                process.WaitForExit();
+                return process.ExitCode;
+            }
+        }
+
+        // The update window waits until Revit and AutoCAD are closed, then installs and shows the result: this program's
+        // own window when the program is installed, otherwise ConnectorActions.ps1 -Action InstallUpdate.
         internal static void UpdateWindow()
         {
-            HiddenScript(InstallerScript("ConnectorActions.ps1"), "-Action InstallUpdate -RepositoryPath " + Quote(Paths.Root));
+            if (HasEngine) Program("action --action InstallUpdate");
+            else HiddenScript(InstallerScript("ConnectorActions.ps1"), "-Action InstallUpdate -RepositoryPath " + Quote(Paths.Root));
         }
 
         // Another window of this program, as its own process (the PowerShell windows start each other the same way).
@@ -182,6 +245,36 @@ namespace SmartConnector
             return outcome;
         }
 
+        // Result of the engine's Update (or Setup-BimCad -Action Update), for the update window. State is Installed,
+        // Deferred, Current or Failed.
+        internal static Outcome InstallUpdate(string output, string errorText, int exitCode)
+        {
+            output = output ?? "";
+            Match installed = Regex.Match(output, @"\[UPDATE_INSTALLED\] (.+)");
+            if (installed.Success)
+            {
+                Outcome done = new Outcome("Good", "Update installed", installed.Groups[1].Value.Trim() + "\n\nRestart Claude and Codex, then open Revit or AutoCAD as usual.");
+                done.State = "Installed";
+                return done;
+            }
+            if (output.IndexOf("[UPDATE_DEFERRED]", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                Outcome waiting = new Outcome("Accent", "Waiting", "");
+                waiting.State = "Deferred";
+                return waiting;
+            }
+            if (exitCode == 0 && Regex.IsMatch(output, "No newer release was installed", RegexOptions.IgnoreCase))
+            {
+                Outcome current = new Outcome("Good", "You're up to date", "There is no newer approved version to install.");
+                current.State = "Current";
+                return current;
+            }
+            string detail = (errorText ?? "").Trim();
+            Outcome failed = new Outcome("Bad", "The update didn't finish", (detail.Length > 0 ? detail + "\n\n" : "") + "Your current version keeps working. Try again later, or open Diagnostics in Smart Connector.");
+            failed.State = "Failed";
+            return failed;
+        }
+
         // Turns Setup-BimCad -Action Status output into one line per check.
         internal static Outcome ConnectionStatus(string output)
         {
@@ -204,9 +297,9 @@ namespace SmartConnector
         }
 
         // For action --outcome <name>: the outcome of the tool output on stdin, as JSON (compared with ConnectorActions.ps1 by the tests).
-        internal static string Describe(string name, string output)
+        internal static string Describe(string name, string output, string errorText = "", int exitCode = 0)
         {
-            Outcome o = name == "SkillsSync" ? SkillsSync(output) : name == "CheckUpdates" ? CheckUpdates(output) : ConnectionStatus(output);
+            Outcome o = name == "SkillsSync" ? SkillsSync(output) : name == "CheckUpdates" ? CheckUpdates(output) : name == "InstallUpdate" ? InstallUpdate(output, errorText, exitCode) : ConnectionStatus(output);
             return Json.Ascii(Json.Object("State", o.State, "Kind", o.Kind, "Title", o.Title, "Body", o.Body, "UserOff", o.UserOff));
         }
     }
@@ -214,7 +307,7 @@ namespace SmartConnector
     // The branded progress-and-result window of one action (Show-ConnectorAction).
     internal sealed class ActionWindow
     {
-        internal static readonly string[] Names = { "SkillsSync", "CheckUpdates", "Status" };
+        internal static readonly string[] Names = { "SkillsSync", "CheckUpdates", "Status", "InstallUpdate" };
 
         private readonly string _name;
         private readonly Form _form;
@@ -224,7 +317,9 @@ namespace SmartConnector
         private readonly FlowLayoutPanel _buttons = new FlowLayoutPanel();
         private readonly Timer _timer = new Timer();
         private Process _process;
-        private Task<string> _output;
+        private Task<string> _output, _errors;
+        private bool _waiting;
+        private int _lastExitCode;
         private DateTime _started = DateTime.UtcNow;
         private int _backgroundAfter;
         private bool _userOff;
@@ -232,7 +327,7 @@ namespace SmartConnector
         internal ActionWindow(string name)
         {
             _name = name;
-            string caption = name == "SkillsSync" ? "Skills Sync" : name == "CheckUpdates" ? "Check Updates" : "Connection Status";
+            string caption = name == "SkillsSync" ? "Skills Sync" : name == "CheckUpdates" ? "Check Updates" : name == "InstallUpdate" ? "Update Smart Connector" : "Connection Status";
             int height = name == "Status" ? 460 : 330;
             _form = Brand.NewForm(Brand.Name, 520, height);
             Brand.AddHeader(_form, caption, Brand.Name, 76);
@@ -293,12 +388,56 @@ namespace SmartConnector
             _timer.Start();
         }
 
+        // The same as Run, for the install engine (or Setup-BimCad.ps1 when the program is not installed). The error text is kept,
+        // for the update window.
+        private void RunCore(string heading, string text, params string[] core)
+        {
+            _title.Text = heading; _body.Text = text;
+            _process = Launch.CoreRedirected(Launch.InstallerScript("Setup-BimCad.ps1"), core, null);
+            _output = _process.StandardOutput.ReadToEndAsync();
+            _errors = _process.StandardError.ReadToEndAsync();
+            _started = DateTime.UtcNow;
+            _timer.Start();
+        }
+
+        private static string[] OpenAutodeskApps()
+        {
+            List<string> open = new List<string>();
+            if (ConnectorStatus.ProcessRunning("acad")) open.Add("AutoCAD");
+            if (ConnectorStatus.ProcessRunning("Revit")) open.Add("Revit");
+            return open.ToArray();
+        }
+
+        // Update window: while Revit or AutoCAD is open, say so and check again every 2 seconds; then install.
+        private void WaitThenInstall()
+        {
+            string[] open = OpenAutodeskApps();
+            if (open.Length == 0)
+            {
+                _waiting = false;
+                _buttons.Controls.Clear();
+                RunCore("Installing the update...", "Downloading and installing the new version. This takes about a minute; keep this window open.",
+                    "-Action", "Update", "-RepositoryPath", Paths.Root);
+                return;
+            }
+            _waiting = true;
+            _progress.Visible = true;
+            ShowResult(new Outcome("Accent", "Close " + String.Join(" and ", open) + " to update",
+                "Save your work and close " + String.Join(" and ", open) + ". The update starts as soon as they are closed and takes about a minute."));
+            _progress.Visible = true;
+            if (_buttons.Controls.Count == 0) AddButton("Cancel", false, _form.Close);
+            _timer.Start();
+        }
+
         private void Start()
         {
             try
             {
                 switch (_name)
                 {
+                    case "InstallUpdate":
+                        WaitThenInstall();
+                        break;
                     case "SkillsSync":
                         // After 15 s the window can be closed; the step continues and its result shows in the Smart Connector app.
                         _backgroundAfter = 15;
@@ -311,12 +450,12 @@ namespace SmartConnector
                                 Launch.ConnectorScript("weekly-skill-collection.ps1"), "-Action Sync -Product AutoCAD -StateRoot " + Launch.Quote(Launch.StateRoot));
                         break;
                     case "CheckUpdates":
-                        Run("Checking for updates...", "Looking for a newer approved version of Smart Connector.",
-                            Launch.InstallerScript("Setup-BimCad.ps1"), "-Action CheckUpdate -RepositoryPath " + Launch.Quote(Paths.Root));
+                        RunCore("Checking for updates...", "Looking for a newer approved version of Smart Connector.",
+                            "-Action", "CheckUpdate", "-RepositoryPath", Paths.Root);
                         break;
                     case "Status":
-                        Run("Checking the connection...", "Looking for AutoCAD, Codex and Claude.",
-                            Launch.InstallerScript("Setup-BimCad.ps1"), "-Action Status -Product AutoCAD -RepositoryPath " + Launch.Quote(Paths.Root));
+                        RunCore("Checking the connection...", "Looking for AutoCAD, Codex and Claude.",
+                            "-Action", "Status", "-Product", "AutoCAD", "-RepositoryPath", Paths.Root);
                         break;
                 }
             }
@@ -329,6 +468,13 @@ namespace SmartConnector
 
         private void Tick()
         {
+            if (_waiting)
+            {
+                if (OpenAutodeskApps().Length > 0) return;
+                _timer.Stop();
+                WaitThenInstall();
+                return;
+            }
             if (_process == null) return;
             if (!_process.HasExited || !_output.IsCompleted)
             {
@@ -344,7 +490,17 @@ namespace SmartConnector
             _timer.Stop();
             _progress.Visible = false;
             string output = _output.Result;
+            string errorText = _errors != null && _errors.IsCompleted ? _errors.Result : "";
+            _lastExitCode = _process.ExitCode;
             _process.Dispose(); _process = null;
+            if (_name == "InstallUpdate")
+            {
+                Outcome update = ConnectorActions.InstallUpdate(output, errorText, _lastExitCode);
+                // The engine found Revit or AutoCAD open after all: back to waiting.
+                if (update.State == "Deferred") { WaitThenInstall(); return; }
+                ShowResult(update); AddButton("Close", true, _form.Close);
+                return;
+            }
             Finish(output);
         }
 
@@ -371,7 +527,7 @@ namespace SmartConnector
                         AddButton("Close", true, delegate
                         {
                             if (_option.Checked == _userOff)
-                                Launch.HiddenScript(Launch.InstallerScript("Setup-BimCad.ps1"), (_option.Checked ? "-Action EnableNotifications" : "-Action DisableNotifications") + " -RepositoryPath " + Launch.Quote(Paths.Root));
+                                Launch.CoreHidden(Launch.InstallerScript("Setup-BimCad.ps1"), new[] { "-Action", _option.Checked ? "EnableNotifications" : "DisableNotifications", "-RepositoryPath", Paths.Root }).Dispose();
                             _form.Close();
                         });
                     }
@@ -449,7 +605,7 @@ namespace SmartConnector
                 if (auto.Checked != current.AutoUpdate)
                 {
                     string action = auto.Checked ? "EnableNotifications" : "DisableNotifications";
-                    int code = Launch.HiddenWait(Launch.PowerShell, "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File " + Launch.Quote(Launch.InstallerScript("Setup-BimCad.ps1")) + " -Action " + action + " -RepositoryPath " + Launch.Quote(Paths.Root));
+                    int code = Launch.CoreWait(Launch.InstallerScript("Setup-BimCad.ps1"), new[] { "-Action", action, "-RepositoryPath", Paths.Root });
                     if (code != 0)
                     {
                         MessageBox.Show(form, "The setting could not be saved. Try again, or contact your administrator.", "Smart Connector", MessageBoxButtons.OK, MessageBoxIcon.Warning);

@@ -6,6 +6,8 @@ The shareable ZIP is intentionally compact. After extraction its root shows `INS
 
 Every pull request and approved push to `main` builds the shareable ZIP in GitHub Actions. A signed-in repository collaborator can open **Actions → Build Autodesk MCP Connector package**, select a successful run, and download the package from **Artifacts**. Artifacts are retained for 90 days.
 
+The install engine (setup, Repair, update checks and updates) is compiled into `bin\SmartConnector.exe` and started as `SmartConnector.exe engine --action <Status|Install|Update|Test|CheckUpdate|EnableNotifications|DisableNotifications|...>`; it prints the same progress lines as `installer\Setup-BimCad.ps1`, which stays in the repository as the reference and as the fallback for an install without the program. An update replaces the installed files in place and sets aside any file that is in use as `<name>.old`, to be deleted at the next start.
+
 Do not copy or run the repository's `installer` folder by itself on another computer. Initial installation is self-contained. Manual and automatic updates use a separate public release channel over HTTPS, verify the ZIP with SHA-256, and require neither Git nor GitHub sign-in.
 
 One Autodesk connector for local Codex/Claude Code and authenticated Claude Free/Paid Chat access, plus the private BIM-CAD reusable skill library.

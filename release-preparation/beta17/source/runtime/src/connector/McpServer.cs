@@ -11,7 +11,7 @@ using System.Web.Script.Serialization;
 // with Revit and AutoCAD on this computer, and for the Smart Connector windows. The MCP server replaces the PowerShell
 // bridges (src\autodesk\autodesk-bridge.ps1, src\revit\revit-bridge.ps1, src\autocad\autocad-bridge.ps1) with the same
 // tools, answers and messages; the windows replace installer\SmartConnectorApp.ps1, SetupWizard.ps1 and
-// ConnectorActions.ps1, and still run the same PowerShell scripts for the work behind their buttons.
+// ConnectorActions.ps1; the work behind their buttons is the install engine (engine) and, for Skills Sync, the PowerShell scripts.
 //   SmartConnector.exe mcp                       MCP over stdio (one JSON-RPC message per line, UTF-8)
 //   SmartConnector.exe --version                 print the connector version
 //   SmartConnector.exe app [--section <name>]    the Smart Connector app (Overview, Autodesk, AI, Skills, Components,
@@ -19,6 +19,7 @@ using System.Web.Script.Serialization;
 //   SmartConnector.exe setup                     the setup window
 //   SmartConnector.exe action --action <name>    SkillsSync, CheckUpdates or Status, with its progress window
 //   SmartConnector.exe settings                  the update-check setting
+//   SmartConnector.exe engine --action <name>    the install engine (setup, repair, update, checks), see EngineCore.cs
 // --smoke-test builds the windows without showing them or running anything, and exits 0.
 // Built as a Windows (GUI) program so no console window flashes; Claude and Codex still talk to `mcp` over the
 // pipes they pass in. C# 5 only: built with the .NET Framework compiler that ships with Windows
@@ -30,10 +31,13 @@ namespace SmartConnector
         [STAThread]
         public static int Main(string[] args)
         {
+            // Files an update renamed aside while they were in use (this program's own earlier copy) go now. Best effort.
+            EngineCleanup.DeleteLeftovers();
             if (args.Length == 1 && args[0] == "mcp") return McpServer.Run();
             if (args.Length == 1 && args[0] == "--version") { AttachConsole(); Console.WriteLine(Paths.Version); return 0; }
             { int skillsCode; if (SkillsCommands.TryRun(args, out skillsCode)) return skillsCode; }
             string command = args.Length > 0 ? args[0] : "";
+            if (command == "engine") return InstallEngine.RunCommand(args.Skip(1).ToArray());
             if (command == "app" || command == "setup" || command == "action" || command == "settings") return WindowCommands.Run(command, args.Skip(1).ToArray());
             AttachConsole();
             Console.Error.WriteLine("Smart Connector " + Paths.Version + ". Claude and Codex start it as: SmartConnector.exe mcp. The app opens with: SmartConnector.exe app");
@@ -79,7 +83,9 @@ namespace SmartConnector
                 }
                 if (command == "action" && options.TryGetValue("outcome", out value))
                 {
-                    Console.WriteLine(ConnectorActions.Describe(value, new StreamReader(Console.OpenStandardInput(), new UTF8Encoding(false)).ReadToEnd()));
+                    string errorText, exitCode;
+                    options.TryGetValue("error", out errorText); options.TryGetValue("exit-code", out exitCode);
+                    Console.WriteLine(ConnectorActions.Describe(value, new StreamReader(Console.OpenStandardInput(), new UTF8Encoding(false)).ReadToEnd(), errorText ?? "", exitCode != null && exitCode.Length > 0 ? Int32.Parse(exitCode) : 0));
                     return 0;
                 }
                 if (command == "app" && options.ContainsKey("check-icons")) return CheckIcons();
