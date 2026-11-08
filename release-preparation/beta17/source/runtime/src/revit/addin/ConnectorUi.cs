@@ -97,12 +97,49 @@ namespace BimCadMcp.Revit
             catch (Exception) { return ""; }
         }
 
+        // The compiled Smart Connector program of this install (bin\SmartConnector.exe), or null for an install taken from the
+        // repository, which keeps using the PowerShell scripts.
+        internal static string Program(string root)
+        {
+            string program = Path.Combine(root, "bin", "SmartConnector.exe");
+            return File.Exists(program) ? program : null;
+        }
+
+        // The command line of one install-engine action: the program's `engine`, or Setup-BimCad.ps1 as before.
+        internal static ProcessStartInfo CoreStartInfo(string root, string action)
+        {
+            string program = Program(root);
+            if (program != null) return new ProcessStartInfo(program, "engine --action " + action + " --repository-path " + Quote(root));
+            return new ProcessStartInfo(PowerShell,
+                "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File " + Quote(Path.Combine(root, "installer", "Setup-BimCad.ps1")) + " -Action " + action + " -RepositoryPath " + Quote(root));
+        }
+
+        // Starts one install-engine action hidden, without waiting (turning update checks on or off).
+        internal static void StartCoreHidden(string root, string action)
+        {
+            ProcessStartInfo info = CoreStartInfo(root, action);
+            info.UseShellExecute = false;
+            info.CreateNoWindow = true;
+            info.WorkingDirectory = LocalAppData;
+            Process.Start(info);
+        }
+
         // The update window waits until Revit and AutoCAD are closed, then installs the new version and shows
-        // the result. It is a separate window, so it keeps going after Revit closes.
+        // the result. It is a separate window, so it keeps going after Revit closes: the compiled program's own
+        // window (action --action InstallUpdate), or ConnectorActions.ps1 for an install without the program.
         internal static void StartUpdateWindow()
         {
             string root = FindRoot();
-            StartHidden(Path.Combine(root, "installer", "ConnectorActions.ps1"), "-Action InstallUpdate -RepositoryPath " + Quote(root));
+            string program = Program(root);
+            if (program == null)
+            {
+                StartHidden(Path.Combine(root, "installer", "ConnectorActions.ps1"), "-Action InstallUpdate -RepositoryPath " + Quote(root));
+                return;
+            }
+            ProcessStartInfo info = new ProcessStartInfo(program, "action --action InstallUpdate");
+            info.UseShellExecute = false;
+            info.WorkingDirectory = LocalAppData;
+            Process.Start(info);
         }
 
         // Same order as Setup-BimCad's Compare-ConnectorVersion: 1.2.0 > 1.2.0-beta.3 > 1.1.9.
@@ -335,9 +372,20 @@ namespace BimCadMcp.Revit
 
         internal void Run(string title, string body, string script, string arguments, Action<string, int> onFinished)
         {
-            _title.Text = title; _body.Text = body; _onFinished = onFinished;
             ProcessStartInfo info = new ProcessStartInfo(Connector.PowerShell,
                 "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File " + Connector.Quote(script) + " " + arguments);
+            Start(title, body, info, onFinished);
+        }
+
+        // One install-engine action (the program's `engine`, or Setup-BimCad.ps1 without the program).
+        internal void RunCore(string title, string body, string root, string action, Action<string, int> onFinished)
+        {
+            Start(title, body, Connector.CoreStartInfo(root, action), onFinished);
+        }
+
+        private void Start(string title, string body, ProcessStartInfo info, Action<string, int> onFinished)
+        {
+            _title.Text = title; _body.Text = body; _onFinished = onFinished;
             info.UseShellExecute = false; info.CreateNoWindow = true;
             info.RedirectStandardOutput = true; info.RedirectStandardError = true;
             info.WorkingDirectory = Connector.LocalAppData;
@@ -644,8 +692,7 @@ namespace BimCadMcp.Revit
                 string root = Connector.FindRoot();
                 using (TaskWindow window = new TaskWindow("Check Updates"))
                 {
-                    window.Run("Checking for updates…", "Looking for a newer approved version of Smart Connector.",
-                        Path.Combine(root, "installer", "Setup-BimCad.ps1"), "-Action CheckUpdate -RepositoryPath " + Connector.Quote(root),
+                    window.RunCore("Checking for updates…", "Looking for a newer approved version of Smart Connector.", root, "CheckUpdate",
                         delegate(string output, int code) { ShowOutcome(window, output, root); });
                     window.ShowDialog(Owner.Of(commandData));
                 }
@@ -685,8 +732,7 @@ namespace BimCadMcp.Revit
                 window.AddButton("Close", true, delegate
                 {
                     if (window.Option.Checked == userOff)
-                        Connector.StartHidden(Path.Combine(root, "installer", "Setup-BimCad.ps1"),
-                            (window.Option.Checked ? "-Action EnableNotifications" : "-Action DisableNotifications") + " -RepositoryPath " + Connector.Quote(root));
+                        Connector.StartCoreHidden(root, window.Option.Checked ? "EnableNotifications" : "DisableNotifications");
                     window.Close();
                 });
             }
