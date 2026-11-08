@@ -251,6 +251,7 @@ namespace SmartConnector
         private string _result = "cancelled";
         private Process _process;
         private Task<string> _readOut, _readErr;
+        private DateTime _exitedAt = DateTime.MinValue;
         private readonly Dictionary<string, string> _status = new Dictionary<string, string>();
         private readonly Dictionary<string, string> _details = new Dictionary<string, string>();
         private string[] _join;
@@ -669,9 +670,15 @@ namespace SmartConnector
                 }
                 if (output) _readOut = task; else _readErr = task;
             }
-            if (_process.HasExited && _readOut == null && _readErr == null)
+            if (_process.HasExited)
             {
-                _timer.Stop(); Finish(_process.ExitCode);
+                // A program the engine started can keep the output pipe open after the engine has ended; finish a few
+                // seconds after the engine exits rather than wait for that program to close.
+                if (_exitedAt == DateTime.MinValue) _exitedAt = DateTime.UtcNow;
+                if ((_readOut == null && _readErr == null) || (DateTime.UtcNow - _exitedAt).TotalSeconds >= 3)
+                {
+                    _timer.Stop(); Finish(_process.ExitCode);
+                }
             }
         }
 

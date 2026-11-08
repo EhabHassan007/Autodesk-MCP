@@ -18,6 +18,7 @@ Lean core: Smart Connector now runs nothing in the background. This removes the 
 - Team registration in the normal setup: every PC that has not joined yet is asked for name, work email and the team code the administrator hands out, so its skills and usage appear on the team dashboard. The setup file carries no code; a TEAM build that carries one skips the code field. Joining can be unticked.
 - Team workflow skills and the daily update check are always installed; they are no longer options in setup.
 - Claude Code and Codex are found when they were installed after Windows started, through npm, winget or the Claude Code installer: Smart Connector reads the current PATH from Windows and looks in those installers' folders.
+- Fixed: setup could stay on "Connect Claude Desktop..." after every step had finished, until Claude Desktop was closed. Claude Desktop is now restarted through the Windows shell, and the setup window finishes a few seconds after the install engine ends.
 - The Revit add-in is now compiled in the automated tests with the same Windows compiler the PCs use, against the Revit 2024 API reference assemblies.
 
-SHA-256: F4549915D2D8B0A1ED2CC00F1915C65BA72ADB19ED5FFD54D68BC0E783B49D4A
+SHA-256: 554578DFEEDBCBDC73FBEA13B1844166D54397EB241AD32A79BC5D495064CFF6
