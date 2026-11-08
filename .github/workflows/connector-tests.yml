@@ -57,6 +57,21 @@ jobs:
             finally { $zip.Dispose() }
           }
           & release-preparation\beta17\source\runtime\src\revit\build-revit-addin.ps1 -RevitInstallPath $refs -OutputPath (Join-Path $env:RUNNER_TEMP 'revit-addin')
+          # Every ribbon image must be the size of its slot (32 x 32 large, 16 x 16 small): Revit cuts off the rest.
+          Add-Type -AssemblyName PresentationCore, WindowsBase
+          $addin = [Reflection.Assembly]::LoadFrom((Join-Path $env:RUNNER_TEMP 'revit-addin\BimCadMcp.Revit.dll'))
+          $icons = $addin.GetType('BimCadMcp.Revit.Icons', $true)
+          $flags = [Reflection.BindingFlags]'Static, NonPublic'
+          $images = @()
+          foreach ($name in 'status', 'sync', 'skills', 'updates', 'settings', 'diagnostics', 'help') {
+            foreach ($small in $true, $false) { $images += ,@("$name", $small, $icons.GetMethod('Tile', $flags).Invoke($null, @($name, $small))) }
+          }
+          foreach ($small in $true, $false) { $images += ,@('logo', $small, $icons.GetMethod('Logo', $flags).Invoke($null, @($small))) }
+          foreach ($entry in $images) {
+            $want = if ($entry[1]) { 16 } else { 32 }
+            if ([Math]::Abs($entry[2].Width - $want) -gt 0.01 -or [Math]::Abs($entry[2].Height - $want) -gt 0.01) { throw "Ribbon icon $($entry[0]) ($(if ($entry[1]) { 'small' } else { 'large' })) is $($entry[2].Width) x $($entry[2].Height); expected $want x $want." }
+          }
+          "Ribbon icons: $($images.Count) images, each 32 x 32 (large) or 16 x 16 (small)."
 
       # The upgrade test installs a real release package over an older install.
       - name: Upgrade from an older release

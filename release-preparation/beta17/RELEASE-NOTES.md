@@ -19,6 +19,7 @@ Lean core: Smart Connector now runs nothing in the background. This removes the 
 - Team workflow skills and the daily update check are always installed; they are no longer options in setup.
 - Claude Code and Codex are found when they were installed after Windows started, through npm, winget or the Claude Code installer: Smart Connector reads the current PATH from Windows and looks in those installers' folders.
 - Fixed: setup could stay on "Connect Claude Desktop..." after every step had finished, until Claude Desktop was closed. Claude Desktop is now restarted through the Windows shell, and the setup window finishes a few seconds after the install engine ends.
+- Fixed: in the Revit ribbon, Open Connector and the small buttons (Check updates, Settings, Diagnostics, Help) showed only the top-left quarter of their icons. Each icon is now drawn at the size of its button (32 x 32 or 16 x 16), and the automated tests check every ribbon icon's size.
 - The Revit add-in is now compiled in the automated tests with the same Windows compiler the PCs use, against the Revit 2024 API reference assemblies.
 
-SHA-256: 554578DFEEDBCBDC73FBEA13B1844166D54397EB241AD32A79BC5D495064CFF6
+SHA-256: C7A7196C4F11607636A57656ECC7438E2294F6997E188AFE46DCCE9B3B6B4DCC

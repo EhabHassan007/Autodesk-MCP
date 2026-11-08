@@ -488,19 +488,22 @@ namespace BimCadMcp.Revit
             return brush;
         }
 
-        // Every ribbon button: the navy tile with the teal-to-blue glyph from the icon family, drawn as vectors
-        // so Revit scales it for 16 px and 32 px buttons and any display scaling.
+        // Every ribbon button: the navy tile with the teal-to-blue glyph from the icon family, drawn as vectors.
+        // Revit shows an image at its own size and cuts off what does not fit, so the 32-unit tile is scaled to the
+        // slot: 32 for large buttons, 16 for small ones (an unscaled tile showed only its top-left quarter).
         internal static Media.ImageSource Tile(string name, bool small)
         {
             Media.DrawingGroup group = new Media.DrawingGroup();
             using (Media.DrawingContext context = group.Open())
             {
+                if (small) context.PushTransform(new Media.ScaleTransform(0.5, 0.5));
                 context.DrawRoundedRectangle(new Media.SolidColorBrush(Media.Color.FromRgb(22, 36, 61)), null, new System.Windows.Rect(0, 0, 32, 32), 7, 7);
                 Media.Pen pen = new Media.Pen(Gradient(), small ? 3.0 : 2.3);
                 pen.StartLineCap = Media.PenLineCap.Round; pen.EndLineCap = Media.PenLineCap.Round; pen.LineJoin = Media.PenLineJoin.Round;
                 context.PushTransform(new Media.TranslateTransform(4, 4));
                 context.DrawGeometry(null, pen, Media.Geometry.Parse(Paths[name]));
                 context.Pop();
+                if (small) context.Pop();
             }
             group.Freeze();
             Media.DrawingImage image = new Media.DrawingImage(group);
@@ -508,18 +511,22 @@ namespace BimCadMcp.Revit
             return image;
         }
 
-        // The logo itself (grip S on the tile), for Open Smart Connector.
-        internal static Media.ImageSource Logo()
+        // The logo itself (grip S on the tile), for Open Smart Connector. Drawn on 64 units and scaled to the slot:
+        // 32 for the large button, 16 for the small one.
+        internal static Media.ImageSource Logo(bool small)
         {
             Media.DrawingGroup group = new Media.DrawingGroup();
             using (Media.DrawingContext context = group.Open())
             {
+                double scale = small ? 0.25 : 0.5;
+                context.PushTransform(new Media.ScaleTransform(scale, scale));
                 context.DrawRoundedRectangle(new Media.SolidColorBrush(Media.Color.FromRgb(22, 36, 61)), null, new System.Windows.Rect(0, 0, 64, 64), 14, 14);
                 Media.Pen pen = new Media.Pen(new Media.SolidColorBrush(Media.Color.FromRgb(32, 201, 171)), 7);
                 context.DrawGeometry(null, pen, Media.Geometry.Parse("M42 21A10 10 0 1 0 32 31A10 10 0 1 1 22 41"));
                 Media.SolidColorBrush grip = new Media.SolidColorBrush(Media.Color.FromRgb(47, 128, 237));
                 context.DrawRectangle(grip, null, new System.Windows.Rect(37.5, 16.5, 9, 9));
                 context.DrawRectangle(grip, null, new System.Windows.Rect(17.5, 36.5, 9, 9));
+                context.Pop();
             }
             group.Freeze();
             Media.DrawingImage image = new Media.DrawingImage(group);
@@ -573,7 +580,7 @@ namespace BimCadMcp.Revit
                 // Connector: open the app, check the connection. Large buttons for the two daily actions.
                 RibbonPanel connector = Panel(application, "Connector");
                 connector.AddItem(Button(assemblyPath, "BimCadMcpOpenConnector", "Open\nConnector", typeof(OpenConnectorCommand),
-                    "Open the Smart Connector app: status of Revit, AutoCAD, Claude and Codex, skills, updates and settings.", Icons.Logo(), Icons.Logo()));
+                    "Open the Smart Connector app: status of Revit, AutoCAD, Claude and Codex, skills, updates and settings.", Icons.Logo(false), Icons.Logo(true)));
                 connector.AddItem(Button(assemblyPath, "BimCadMcpConnectionStatus", "Connection\nStatus", typeof(ConnectionStatusCommand),
                     "See whether Codex or Claude is connected to this Revit session.", Icons.Tile("status", false), Icons.Tile("status", true)));
 
