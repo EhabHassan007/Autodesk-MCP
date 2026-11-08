@@ -334,6 +334,25 @@ exit /b 0
     Assert ((Get-Content (Join-Path $s.Fake 'codex.log') -Raw).Replace('"', '').Contains("mcp add autodesk -- $exe mcp")) ('A wrong registration was not repaired: ' + (Show-Run $run))
     'PASS: a correct Codex registration is left alone, an older duplicate is removed, another tool''s server is kept, a wrong registration is replaced'
 
+    # ChatGPT Desktop without the codex command-line tool: the connector is written straight into Codex's config.toml
+    # (ChatGPT Desktop reads it); other servers and settings stay, an earlier Smart Connector entry under an old name is
+    # replaced, no byte-order mark is added, and a second run changes nothing.
+    $s = New-State 'chatgpt'
+    New-Item -ItemType Directory -Force (Join-Path $s.Local 'Packages\OpenAI.ChatGPT-Desktop_test') | Out-Null
+    $noCli = Join-Path $s.Base 'no-cli'; New-Item -ItemType Directory -Force $noCli | Out-Null
+    $config = Join-Path $s.Codex 'config.toml'
+    [IO.File]::WriteAllText($config, "model = `"gpt-5`"`r`n`r`n[mcp_servers.other]`r`ncommand = `"other.exe`"`r`n`r`n[mcp_servers.revit]`r`ncommand = `"powershell.exe`"`r`nargs = [`"-File`", `"C:\\BIM-CAD-MCP\\src\\revit\\revit-bridge.ps1`"]`r`n`r`n[mcp_servers.revit.env]`r`nA = `"1`"`r`n`r`n[profiles.x]`r`nmodel = `"o3`"`r`n")
+    $chatgptArguments = @('--action', 'Install', '--repository-path', $root, '--skills', 'Off', '--ai-clients', 'Codex', '--product', 'Revit')
+    $run = Invoke-Engine -State $s -Path $noCli -Arguments $chatgptArguments
+    Assert ($run.Code -eq 0 -and (Has-Line $run '^\[RESULT\] codex=ok restart ChatGPT Desktop to load it$')) ('ChatGPT Desktop registration: ' + (Show-Run $run))
+    $toml = [IO.File]::ReadAllText($config)
+    Assert ($toml.Contains('[mcp_servers.other]') -and $toml.Contains('[profiles.x]') -and $toml.Contains('model = "gpt-5"') -and -not $toml.Contains('[mcp_servers.revit') -and $toml.Contains('[mcp_servers.autodesk]') -and $toml.Contains('args = ["mcp"]') -and $toml.Contains('SmartConnector.exe')) ('config.toml after registration: ' + $toml)
+    $tomlBytes = [IO.File]::ReadAllBytes($config)
+    Assert (-not ($tomlBytes.Length -ge 3 -and $tomlBytes[0] -eq 239 -and $tomlBytes[1] -eq 187 -and $tomlBytes[2] -eq 191)) 'config.toml got a byte-order mark'
+    $run = Invoke-Engine -State $s -Path $noCli -Arguments $chatgptArguments
+    Assert ($run.Code -eq 0 -and (Has-Line $run 'registration for ChatGPT Desktop is already correct') -and [IO.File]::ReadAllText($config) -eq $toml) ('A second run changed config.toml: ' + (Show-Run $run))
+    'PASS: ChatGPT Desktop without the codex tool gets the connector in Codex''s config.toml; other servers and settings kept, an old Smart Connector entry replaced, no BOM, a second run changes nothing'
+
     # ---------- 4. Public release update ----------
     # A release: the installed files with a newer VERSION, a changed README, a new file, a file gone, and a different program.
     $releaseRoot = Join-Path $t 'release'
