@@ -261,7 +261,9 @@ public static class SkillStandIn
     $found = @(foreach ($item in $discovered) { $item.category + ':' + $item.name }) | Sort-Object
     Assert (($found -join ',') -eq ':legacy-c,linkedin-marketing:linkedin-b,revit:revit-a') ('Discovery wrong: ' + ($found -join ','))
     $repo = Join-Path $s 'repo'
-    Copy-Item $lib (Join-Path $repo '.agents\skills') -Recurse -Force
+    # Copy the contents explicitly: Windows PowerShell 5.1 copies a folder INTO an existing destination folder.
+    function Copy-Contents([string]$From, [string]$To) { New-Item -ItemType Directory -Force $To | Out-Null; Copy-Item (Join-Path $From '*') $To -Recurse -Force }
+    Copy-Contents $lib (Join-Path $repo '.agents\skills')
     Remove-Item (Join-Path $repo '.agents\skills\not-a-category') -Recurse
     $dest = Join-Path $s 'claude-skills'
     $run = Invoke-Skills @('codex-sync', '--action', 'Install', '--repository-root', $repo, '--destination', $dest)
@@ -272,8 +274,8 @@ public static class SkillStandIn
     $run = Invoke-Skills @('codex-sync', '--action', 'Install', '--repository-root', $repo, '--destination', (Join-Path $s 'dup'))
     Assert ($run.Code -eq 1 -and $run.Err -match 'unique across categories') 'Duplicate skill names across categories were accepted'
     # The collector sees a local copy identical to a categorised library skill as IDENTICAL, not NEW.
-    $collectRepo = Join-Path $s 'collect-repo'; Copy-Item $lib (Join-Path $collectRepo '.agents\skills') -Recurse
-    $local = Join-Path $s 'local-skills'; Copy-Item (Join-Path $lib 'revit\revit-a') (Join-Path $local 'revit-a') -Recurse -Force
+    $collectRepo = Join-Path $s 'collect-repo'; Copy-Contents $lib (Join-Path $collectRepo '.agents\skills')
+    $local = Join-Path $s 'local-skills'; Copy-Contents (Join-Path $lib 'revit\revit-a') (Join-Path $local 'revit-a')
     $run = Invoke-Skills @('collect', '--repository-root', $collectRepo, '--output-root', (Join-Path $s 'review'), '--additional-skill-root', $local, '--only-additional-skill-roots', '--exclusion-list-path', (Join-Path $s 'none.txt'))
     Assert ($run.Code -eq 0 -and $run.Out -match 'Candidates requiring a decision: 0') ('Categorised library skill reported as new: ' + $run.Out + $run.Err)
     'PASS: category folders and legacy flat skills discovered; installs stay flat; duplicate names refused; collector recognises categorised skills'
