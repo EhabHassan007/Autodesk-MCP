@@ -42,6 +42,9 @@ function Invoke-Engine {
     param([string[]]$Arguments, [hashtable]$State, [string]$Path = $script:fakeBin, [hashtable]$ExtraEnv = @{}, [int]$TimeoutSeconds = 240, [string]$Program = $script:exe)
     # Unless a test says which AutoCAD releases exist, none do (HKLM cannot be faked, and a real AutoCAD must never be touched).
     if ($Arguments -notcontains '--test-autocad-releases') { $Arguments = @($Arguments) + @('--test-autocad-releases', '') }
+    # Windows does not let a test change %ProgramFiles% for a child process (cmd.exe still sees the real one), so the
+    # engine takes the folder as a hidden option as well.
+    if ($Arguments -notcontains '--program-files') { $Arguments = @($Arguments) + @('--program-files', $State.Programs) }
     $line = (@('engine') + $Arguments | ForEach-Object { Quote-Argument $_ }) -join ' '
     $info = New-Object Diagnostics.ProcessStartInfo($Program, $line)
     $info.UseShellExecute = $false; $info.CreateNoWindow = $true
@@ -692,7 +695,15 @@ class StubCompiler {
     $fakeProbe = Invoke-Engine -State $s -Program $revitProgram -Arguments @('--action', 'Status', '--product', 'Revit') -ExtraEnv @{ WINDIR = $fakeWindows }
     if (-not ((Has-Line $plainProbe $seen) -and (Has-Line $fakeProbe $seen))) {
         $files = (Get-ChildItem -LiteralPath $s.Programs -Recurse -File | ForEach-Object { $_.FullName }) -join '; '
-        throw ('The stand-in Revit was not detected. Programs folder: ' + $s.Programs + ' holds: ' + $files + '. Detected without WINDIR override: ' + (Has-Line $plainProbe $seen) + '; with it: ' + (Has-Line $fakeProbe $seen) + '. Output with the override: ' + (Show-Run $fakeProbe))
+        # Two more facts: is the program 32-bit (Windows then replaces %ProgramFiles% for it), and what does a plain
+        # Windows process see for %ProgramFiles% when started the same way?
+        $architecture = [Reflection.AssemblyName]::GetAssemblyName($revitProgram).ProcessorArchitecture
+        $peBytes = [IO.File]::ReadAllBytes($revitProgram); $peMagic = '{0:X}' -f [BitConverter]::ToUInt16($peBytes, [BitConverter]::ToInt32($peBytes, 0x3C) + 24)
+        $echo = New-Object Diagnostics.ProcessStartInfo($env:ComSpec, '/c echo %ProgramFiles%')
+        $echo.UseShellExecute = $false; $echo.RedirectStandardOutput = $true; $echo.CreateNoWindow = $true
+        $echo.EnvironmentVariables['ProgramFiles'] = $s.Programs
+        $echoProcess = [Diagnostics.Process]::Start($echo); $echoSees = $echoProcess.StandardOutput.ReadToEnd().Trim(); $echoProcess.WaitForExit()
+        throw ('The stand-in Revit was not detected. Program architecture: ' + $architecture + ' (PE magic ' + $peMagic + '); cmd.exe sees ProgramFiles as: ' + $echoSees + '; this PowerShell is 64-bit: ' + [Environment]::Is64BitProcess + '. Programs folder: ' + $s.Programs + ' holds: ' + $files + '. Detected without WINDIR override: ' + (Has-Line $plainProbe $seen) + '; with it: ' + (Has-Line $fakeProbe $seen) + '. Output with the override: ' + (Show-Run $fakeProbe))
     }
     $run = Invoke-Engine -State $s -Program $revitProgram -Arguments @('--action', 'Install', '--repository-path', $revitCopy, '--skills', 'Off', '--ai-clients', 'Codex', '--product', 'Revit') -ExtraEnv @{ WINDIR = $fakeWindows }
     Assert ($run.Code -eq 0) ('Revit Install failed: ' + (Show-Run $run))

@@ -10,7 +10,9 @@ function Assert([bool]$Condition, [string]$Message) { if (-not $Condition) { thr
 if ([Environment]::OSVersion.Platform -ne 'Win32NT') { 'SKIP: SmartConnector.exe needs Windows'; return }
 $runtime = (Resolve-Path (Join-Path $PSScriptRoot '../source/runtime')).Path
 $scripts = Join-Path $runtime 'scripts'
-$t = Join-Path ([IO.Path]::GetTempPath()) ('skills-exe-' + [guid]::NewGuid().ToString('N'))
+# A short base folder: Windows stops at 260 characters, and the review packages this test makes nest deeply.
+$shortBase = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [IO.Path]::GetTempPath() }
+$t = Join-Path $shortBase ('sx' + [guid]::NewGuid().ToString('N').Substring(0, 8))
 $root = Join-Path $t 'root'
 $exe = Join-Path $root 'bin\SmartConnector.exe'
 $savedLocal = $env:LOCALAPPDATA
@@ -261,7 +263,9 @@ public static class SkillStandIn
     $found = @(foreach ($item in $discovered) { $item.category + ':' + $item.name }) | Sort-Object
     Assert (($found -join ',') -eq ':legacy-c,linkedin-marketing:linkedin-b,revit:revit-a') ('Discovery wrong: ' + ($found -join ','))
     $repo = Join-Path $s 'repo'
-    Copy-Item $lib (Join-Path $repo '.agents\skills') -Recurse -Force
+    # Copy the contents explicitly: Windows PowerShell 5.1 copies a folder INTO an existing destination folder.
+    function Copy-Contents([string]$From, [string]$To) { New-Item -ItemType Directory -Force $To | Out-Null; Copy-Item (Join-Path $From '*') $To -Recurse -Force }
+    Copy-Contents $lib (Join-Path $repo '.agents\skills')
     Remove-Item (Join-Path $repo '.agents\skills\not-a-category') -Recurse
     $dest = Join-Path $s 'claude-skills'
     $run = Invoke-Skills @('codex-sync', '--action', 'Install', '--repository-root', $repo, '--destination', $dest)
@@ -272,8 +276,8 @@ public static class SkillStandIn
     $run = Invoke-Skills @('codex-sync', '--action', 'Install', '--repository-root', $repo, '--destination', (Join-Path $s 'dup'))
     Assert ($run.Code -eq 1 -and $run.Err -match 'unique across categories') 'Duplicate skill names across categories were accepted'
     # The collector sees a local copy identical to a categorised library skill as IDENTICAL, not NEW.
-    $collectRepo = Join-Path $s 'collect-repo'; Copy-Item $lib (Join-Path $collectRepo '.agents\skills') -Recurse
-    $local = Join-Path $s 'local-skills'; Copy-Item (Join-Path $lib 'revit\revit-a') (Join-Path $local 'revit-a') -Recurse -Force
+    $collectRepo = Join-Path $s 'collect-repo'; Copy-Contents $lib (Join-Path $collectRepo '.agents\skills')
+    $local = Join-Path $s 'local-skills'; Copy-Contents (Join-Path $lib 'revit\revit-a') (Join-Path $local 'revit-a')
     $run = Invoke-Skills @('collect', '--repository-root', $collectRepo, '--output-root', (Join-Path $s 'review'), '--additional-skill-root', $local, '--only-additional-skill-roots', '--exclusion-list-path', (Join-Path $s 'none.txt'))
     Assert ($run.Code -eq 0 -and $run.Out -match 'Candidates requiring a decision: 0') ('Categorised library skill reported as new: ' + $run.Out + $run.Err)
     'PASS: category folders and legacy flat skills discovered; installs stay flat; duplicate names refused; collector recognises categorised skills'
@@ -295,6 +299,9 @@ public static class SkillStandIn
     $preview = ($result.details -split "`r?`n", 2)[1] | ConvertFrom-Json
     $names = @($preview.skills)
     Assert ($names -notcontains 'linkedin-profile-optimizer' -and $names -notcontains 'personal-notes' -and $names -contains 'revit-demo') ('Central exclusion failed: ' + ($names -join ','))
+    # The script reads the exclusion list from its own state folder, so give it the same list.
+    New-Item -ItemType Directory -Force (Join-Path $s 'state-ps') | Out-Null
+    Copy-Item (Join-Path $state 'excluded-skills.txt') (Join-Path $s 'state-ps\excluded-skills.txt') -Force
     $sameScript = Invoke-Script (Join-Path $scripts 'weekly-skill-collection.ps1') @('-Action', 'Preview', '-RepositoryRoot', $repo, '-StateRoot', (Join-Path $s 'state-ps'), '-AdditionalSkillRoots', $extra)
     $scriptNames = @(((Get-JsonText ((Read-Json (Join-Path $s 'state-ps\last-result.json')).details -split "`r?`n", 2)[1]) | ConvertFrom-Json).skills | Sort-Object)
     Assert ((@($names | Sort-Object) -join ',') -eq ($scriptNames -join ',') -and $scriptNames.Count -gt 0) ('Preview differs from the script: ' + ($names -join ',') + ' / ' + ($scriptNames -join ','))
