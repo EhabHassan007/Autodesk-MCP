@@ -30,8 +30,8 @@ ShowLanguageDialog=no
 Compression=lzma2/max
 SolidCompression=yes
 ; Nothing is closed and nobody is asked to close programs. A running Smart Connector (the MCP server Claude or Codex
-; started, which has no window, or an open Smart Connector window) keeps bin\SmartConnector.exe in use; [Code] moves
-; that file aside instead, and the program deletes the old copy the next time it starts.
+; started, which has no window, or an open Smart Connector window) keeps bin\SmartConnector.exe in use; the code below
+; moves that file aside instead, and the program deletes the old copy the next time it starts.
 CloseApplications=no
 RestartApplications=no
 
