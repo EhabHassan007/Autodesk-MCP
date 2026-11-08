@@ -63,7 +63,7 @@ namespace SmartConnector
             // The setup .exe only installs files, so setup itself never starts PowerShell. On the first open the setup
             // window runs instead (choose apps, team details); it opens this app again when it finishes.
             string setupPending = Path.Combine(Paths.Root, "setup", "setup-pending.txt");
-            if (!smokeTest && File.Exists(setupPending) && File.Exists(Path.Combine(Paths.Root, "installer", "Setup-BimCad.ps1")))
+            if (!smokeTest && File.Exists(setupPending))
                 return SetupCommand.Run(false);
 
             // One window per user: a second start asks the running window to show the requested section.

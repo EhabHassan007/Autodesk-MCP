@@ -748,9 +748,9 @@ namespace SmartConnector
             string packageRoot = Paths.Root;
             try
             {
-                string setup = Path.Combine(packageRoot, "installer", "BIM-CAD-Setup.ps1");
                 string coreSetup = Path.Combine(packageRoot, "installer", "Setup-BimCad.ps1");
-                if (!File.Exists(setup) || !File.Exists(coreSetup) || !Directory.Exists(Path.Combine(packageRoot, ".agents", "skills")))
+                // The program itself is the setup; the PowerShell scripts exist only in a copy taken from the repository.
+                if (!Directory.Exists(Path.Combine(packageRoot, ".agents", "skills")) || !File.Exists(Path.Combine(packageRoot, "VERSION")))
                     throw new InvalidOperationException("The Smart Connector installation payload is invalid.");
                 string payloadInstaller = Path.Combine(packageRoot, "installer");
                 string version = File.ReadAllText(Path.Combine(packageRoot, "VERSION")).Trim();

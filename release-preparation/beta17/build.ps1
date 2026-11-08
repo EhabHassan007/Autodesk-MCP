@@ -79,9 +79,19 @@ function New-SetupExe([string]$PayloadPath, [string]$Name) {
     try {
         Expand-Archive -LiteralPath $PayloadPath -DestinationPath $staging
         $payloadDir = Join-Path $staging 'Autodesk-MCP-Payload'
-        if (-not (Test-Path -LiteralPath (Join-Path $payloadDir 'installer\Setup-BimCad.ps1') -PathType Leaf)) { throw 'The payload has no Autodesk-MCP-Payload folder.' }
+        if (-not (Test-Path -LiteralPath (Join-Path $payloadDir 'VERSION') -PathType Leaf)) { throw 'The payload has no Autodesk-MCP-Payload folder.' }
+        # The setup .exe installs the compiled program and its data, never a script: every window, the install engine,
+        # Skills Sync and the MCP server are inside bin\SmartConnector.exe. The scripts stay in the repository and in
+        # the stored payload as the reference for the tests and the fallback for a copy taken from the repository.
+        if (-not (Test-Path -LiteralPath (Join-Path $payloadDir 'bin\SmartConnector.exe') -PathType Leaf)) { throw 'The payload has no bin\SmartConnector.exe.' }
+        $scriptTypes = '.ps1', '.psm1', '.psd1', '.cmd', '.bat', '.vbs', '.js', '.wsf'
+        # The approved skill library (.agents) is content the team curates, and some skills carry their own helper
+        # scripts; those are left as they are.
+        $library = (Join-Path $payloadDir '.agents') + '\'
+        Get-ChildItem -LiteralPath $payloadDir -Recurse -File -Force | Where-Object { ($scriptTypes -contains $_.Extension.ToLowerInvariant()) -and -not $_.FullName.StartsWith($library, [StringComparison]::OrdinalIgnoreCase) } | Remove-Item -Force
+        Get-ChildItem -LiteralPath $payloadDir -Recurse -Directory -Force | Sort-Object { $_.FullName.Length } -Descending | Where-Object { -not (Get-ChildItem -LiteralPath $_.FullName -Force) } | Remove-Item -Force
         & $compiler /Qp "/DAppVersion=$version" "/DNumericVersion=$numeric" "/DPayloadDir=$payloadDir" `
-            "/DInstallScript=$(Join-Path $s 'Support\Install-Autodesk-MCP-Connector.ps1')" "/DIconFile=$(Join-Path $r 'assets\logo.ico')" `
+            "/DIconFile=$(Join-Path $r 'assets\logo.ico')" `
             "/O$b" "/F$Name" (Join-Path $b 'setup\SmartAutodeskConnector.iss')
         if ($LASTEXITCODE -ne 0) { throw "Inno Setup could not build $Name.exe (exit $LASTEXITCODE)." }
     }
