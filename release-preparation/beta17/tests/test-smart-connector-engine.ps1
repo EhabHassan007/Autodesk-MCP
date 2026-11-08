@@ -684,7 +684,17 @@ class StubCompiler {
     $oldBuilds = Join-Path $revitCopy 'src\revit\bin\2024'
     New-Item -ItemType Directory -Force $oldBuilds | Out-Null
     Set-Content (Join-Path $oldBuilds 'BimCadMcp.Revit.aaaaaaaaaaaa.dll') 'old build' -Encoding ASCII
-    $run = Invoke-Engine -State $s -Program (Join-Path $revitCopy 'bin\SmartConnector.exe') -Arguments @('--action', 'Install', '--repository-path', $revitCopy, '--skills', 'Off', '--ai-clients', 'Codex', '--product', 'Revit') -ExtraEnv @{ WINDIR = $fakeWindows }
+    # Before the install: does the program see the stand-in Revit, with and without the stand-in Windows folder?
+    # (When it does not, say which, so the cause is clear.)
+    $revitProgram = Join-Path $revitCopy 'bin\SmartConnector.exe'
+    $seen = '^\[\d\d:\d\d:\d\d\] Revit 2024 installation detected\.$'
+    $plainProbe = Invoke-Engine -State $s -Program $revitProgram -Arguments @('--action', 'Status', '--product', 'Revit')
+    $fakeProbe = Invoke-Engine -State $s -Program $revitProgram -Arguments @('--action', 'Status', '--product', 'Revit') -ExtraEnv @{ WINDIR = $fakeWindows }
+    if (-not ((Has-Line $plainProbe $seen) -and (Has-Line $fakeProbe $seen))) {
+        $files = (Get-ChildItem -LiteralPath $s.Programs -Recurse -File | ForEach-Object { $_.FullName }) -join '; '
+        throw ('The stand-in Revit was not detected. Programs folder: ' + $s.Programs + ' holds: ' + $files + '. Detected without WINDIR override: ' + (Has-Line $plainProbe $seen) + '; with it: ' + (Has-Line $fakeProbe $seen) + '. Output with the override: ' + (Show-Run $fakeProbe))
+    }
+    $run = Invoke-Engine -State $s -Program $revitProgram -Arguments @('--action', 'Install', '--repository-path', $revitCopy, '--skills', 'Off', '--ai-clients', 'Codex', '--product', 'Revit') -ExtraEnv @{ WINDIR = $fakeWindows }
     Assert ($run.Code -eq 0) ('Revit Install failed: ' + (Show-Run $run))
     Assert ((Has-Line $run '^\[RESULT\] revit=ok restart Revit to load it$') -and (Has-Line $run 'Building the Revit 2024 add-in against the installed Revit API\.\.\.')) ('Revit step: ' + (Show-Run $run))
     $built = 'stand-in assembly for 15 arguments'

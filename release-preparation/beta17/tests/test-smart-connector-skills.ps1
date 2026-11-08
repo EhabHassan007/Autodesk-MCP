@@ -256,7 +256,9 @@ public static class SkillStandIn
     New-Item -ItemType Directory (Join-Path $lib '3ds-max') -Force | Out-Null; '# 3ds Max' | Set-Content (Join-Path $lib '3ds-max\README.md')
     New-Item -ItemType Directory (Join-Path $lib 'not-a-category\x') -Force | Out-Null
     $run = Invoke-Skills @('library', '--root', $lib)
-    $found = @($run.Out | ConvertFrom-Json | ForEach-Object { $_.category + ':' + $_.name } | Sort-Object)
+    # Windows PowerShell 5.1 hands a JSON array on as one object, so loop over its items instead of piping it.
+    $discovered = $run.Out | ConvertFrom-Json
+    $found = @(foreach ($item in $discovered) { $item.category + ':' + $item.name }) | Sort-Object
     Assert (($found -join ',') -eq ':legacy-c,linkedin-marketing:linkedin-b,revit:revit-a') ('Discovery wrong: ' + ($found -join ','))
     $repo = Join-Path $s 'repo'
     Copy-Item $lib (Join-Path $repo '.agents\skills') -Recurse -Force
