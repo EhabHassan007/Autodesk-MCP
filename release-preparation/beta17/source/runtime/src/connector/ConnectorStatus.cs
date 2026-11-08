@@ -301,7 +301,8 @@ namespace SmartConnector
             object skillSettings = PsJson.Read(Path.Combine(SkillState, "settings.json"));
             Snapshot s = new Snapshot();
             try { s.Version = File.Exists(versionPath) ? File.ReadAllText(versionPath).Trim() : ""; } catch (Exception) { }
-            s.Installed = File.Exists(Path.Combine(Install, "installer", "Setup-BimCad.ps1"));
+            // The compiled program (a release install carries no scripts) or, for a copy from the repository, the setup script.
+            s.Installed = File.Exists(Path.Combine(Install, "bin", "SmartConnector.exe")) || File.Exists(Path.Combine(Install, "installer", "Setup-BimCad.ps1"));
             s.RevitInstalled = File.Exists(Path.Combine(Env.ProgramFiles, "Autodesk", "Revit 2024", "RevitAPI.dll"));
             s.RevitRunning = ProcessRunning("Revit");
             s.RevitAddin = File.Exists(RevitManifest);

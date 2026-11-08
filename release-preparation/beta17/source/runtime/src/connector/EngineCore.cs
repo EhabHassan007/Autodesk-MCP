@@ -209,9 +209,8 @@ namespace SmartConnector
                     case "Collect":
                         {
                             string root = GetRepository();
-                            string collector = Path.Combine(root, "scripts", "collect-skills-for-review.ps1");
                             Step("Collecting local user skills for review without uploading them...");
-                            InvokePowerShellScript(collector, "-RepositoryRoot", root);
+                            InvokeOwn("skills", "collect", "--repository-root", root);
                             return 0;
                         }
                     case "CheckUpdate":
@@ -248,11 +247,8 @@ namespace SmartConnector
 
         private void TeamStatus()
         {
-            string root;
-            if (Directory.Exists(Path.Combine(_o.RepositoryPath, ".agents", "skills"))) root = Path.GetFullPath(_o.RepositoryPath);
-            else root = GetRepository();
-            string submitter = Path.Combine(root, "scripts", "submit-team-knowledge.ps1");
-            if (!File.Exists(submitter)) throw new EngineException("Team submitter is missing: " + submitter);
+            // The connector files must be there (installed from the release when they are not).
+            if (!Directory.Exists(Path.Combine(_o.RepositoryPath, ".agents", "skills"))) GetRepository();
             string git = FindCommand("git");
             if (git == null && _o.InstallGitIfMissing) git = InstallGitForWindows();
             if (git != null)
@@ -670,13 +666,10 @@ namespace SmartConnector
         private External Invoke(string file, params string[] arguments) { return Invoke(file, arguments, false, false, null); }
         private External InvokeAllowFailure(string file, params string[] arguments) { return Invoke(file, arguments, true, false, null); }
 
-        // powershell.exe -File <script> ...: the scripts that stay PowerShell (Skills Sync and the other skill scripts).
-        private void InvokePowerShellScript(string script, params string[] arguments)
+        // This program's own commands (`skills ...`) as a child process, with the same output handling as any other step.
+        private void InvokeOwn(params string[] arguments)
         {
-            List<string> all = new List<string> { "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script };
-            all.AddRange(arguments);
-            string shell = File.Exists(Launch.PowerShell) ? Launch.PowerShell : "powershell.exe";
-            Invoke(shell, all.ToArray(), false, false, null);
+            Invoke(System.Reflection.Assembly.GetEntryAssembly().Location, arguments, false, false, null);
         }
 
         private string InstallGitForWindows()
@@ -715,16 +708,14 @@ namespace SmartConnector
             return git;
         }
 
-        // Install-Skills: the skill scripts stay PowerShell (they belong to Skills Sync).
+        // Install-Skills: the skill installer is this program's `skills codex-sync` command.
         private void InstallSkills(string root)
         {
-            string syncScript = Path.Combine(root, "scripts", "sync-codex-skills.ps1");
-            if (!File.Exists(syncScript)) throw new EngineException("Skill installer is missing: " + syncScript);
             Step("Installing all saved skills for Codex...");
-            InvokePowerShellScript(syncScript, "-Action", "Install");
+            InvokeOwn("skills", "codex-sync", "--action", "Install", "--repository-root", root);
             string claudeSkills = Path.Combine(Env.Home, ".claude", "skills");
             Step("Installing the same saved skills for Claude Code...");
-            InvokePowerShellScript(syncScript, "-Action", "Install", "-Destination", claudeSkills);
+            InvokeOwn("skills", "codex-sync", "--action", "Install", "--repository-root", root, "--destination", claudeSkills);
         }
     }
 }

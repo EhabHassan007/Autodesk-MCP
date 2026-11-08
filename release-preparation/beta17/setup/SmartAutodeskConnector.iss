@@ -3,7 +3,7 @@
 ; script. The first time Smart Connector is opened from the Start menu, it shows the setup window (which AI apps and
 ; Autodesk programs to connect, team details) and finishes setup. Updates arrive through latest.json and the release ZIP.
 #ifndef AppVersion
-  #error Define AppVersion, NumericVersion, PayloadDir, InstallScript and IconFile (build.ps1 does this).
+  #error Define AppVersion, NumericVersion, PayloadDir and IconFile (build.ps1 does this).
 #endif
 #define InstallRoot "{localappdata}\BIM-CAD-MCP"
 
@@ -45,7 +45,6 @@ Type: filesandordirs; Name: "{localappdata}\SmartConnectorSetup"
 
 [Files]
 Source: "{#PayloadDir}\*"; DestDir: "{#InstallRoot}"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "{#InstallScript}"; DestDir: "{#InstallRoot}\setup"; Flags: ignoreversion
 ; An administrator's enrollment file beside this setup .exe; setup imports it, encrypts it and deletes the copy.
 Source: "{src}\enrollment.json"; DestDir: "{#InstallRoot}"; Flags: external skipifsourcedoesntexist ignoreversion
 Source: "{src}\skill-service-device.json"; DestDir: "{#InstallRoot}"; Flags: external skipifsourcedoesntexist ignoreversion

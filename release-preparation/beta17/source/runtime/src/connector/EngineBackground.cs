@@ -179,7 +179,7 @@ namespace SmartConnector
         private static int RemoveRetiredFiles(string installRoot)
         {
             int removed = 0;
-            if (String.IsNullOrEmpty(installRoot) || !File.Exists(Path.Combine(installRoot, "installer", "Setup-BimCad.ps1"))) return removed;
+            if (String.IsNullOrEmpty(installRoot) || !(File.Exists(Path.Combine(installRoot, "bin", "SmartConnector.exe")) || File.Exists(Path.Combine(installRoot, "installer", "Setup-BimCad.ps1")))) return removed;
             foreach (string relative in RetiredFiles)
             {
                 string path = Path.Combine(installRoot, relative.Replace('\\', Path.DirectorySeparatorChar));

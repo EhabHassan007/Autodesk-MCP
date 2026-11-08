@@ -35,6 +35,49 @@ jobs:
           if ($exe[0].Length -lt 100KB) { throw 'The setup exe is unexpectedly small.' }
           "$($exe[0].Name): $([int]($exe[0].Length / 1KB)) KB"
 
+      # Install the setup exe the way a person would (silently), look at what it put on the PC, and run the installed
+      # program: its windows, the version and the install engine. The setup exe must install no script of its own.
+      - name: Install the setup exe and check what it installed
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Get-ChildItem release-preparation\beta17 -Filter 'Smart-Connector-Setup-*.exe' | Select-Object -First 1
+          $install = Start-Process -FilePath $exe.FullName -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "The setup exe exited with $($install.ExitCode)." }
+          $root = Join-Path $env:LOCALAPPDATA 'BIM-CAD-MCP'
+          $program = Join-Path $root 'bin\SmartConnector.exe'
+          if (-not (Test-Path -LiteralPath $program -PathType Leaf)) { throw 'bin\SmartConnector.exe was not installed.' }
+          if (-not (Test-Path -LiteralPath (Join-Path $root 'setup\setup-pending.txt'))) { throw 'The first-open marker was not written.' }
+          if (-not (Test-Path -LiteralPath (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Smart Connector.lnk'))) { throw 'The Start menu entry was not created.' }
+          $types = '.ps1', '.psm1', '.psd1', '.cmd', '.bat', '.vbs', '.js', '.wsf'
+          $library = (Join-Path $root '.agents') + '\'
+          function Get-Scripts { @(Get-ChildItem -LiteralPath $root -Recurse -File -Force | Where-Object { $types -contains $_.Extension.ToLowerInvariant() }) }
+          $stray = @(Get-Scripts | Where-Object { -not $_.FullName.StartsWith($library, [StringComparison]::OrdinalIgnoreCase) })
+          if ($stray.Count) { throw ('The setup exe installed scripts: ' + (($stray | ForEach-Object { $_.FullName.Substring($root.Length + 1) }) -join ', ')) }
+          $inLibrary = @(Get-Scripts | Where-Object { $_.FullName.StartsWith($library, [StringComparison]::OrdinalIgnoreCase) })
+          "Installed $(@(Get-ChildItem -LiteralPath $root -Recurse -File -Force).Count) files. Scripts outside the skill library: 0. Scripts inside the skill library (skill helper files): $($inLibrary.Count)."
+          function Invoke-Program([string]$Arguments) {
+            $out = Join-Path $env:RUNNER_TEMP ('program-' + [guid]::NewGuid().ToString('N') + '.txt')
+            $process = Start-Process -FilePath $program -ArgumentList $Arguments -Wait -PassThru -RedirectStandardOutput $out -WorkingDirectory $env:LOCALAPPDATA
+            [pscustomobject]@{ Code = $process.ExitCode; Text = [string](Get-Content -LiteralPath $out -Raw) }
+          }
+          $version = (Get-Content -LiteralPath (Join-Path $root 'VERSION') -Raw).Trim()
+          $run = Invoke-Program '--version'
+          if ($run.Code -ne 0 -or $run.Text.Trim() -ne $version) { throw "--version printed '$($run.Text)' (exit $($run.Code)); expected $version." }
+          foreach ($arguments in 'app --smoke-test', 'setup --smoke-test') {
+            $run = Invoke-Program $arguments
+            if ($run.Code -ne 0) { throw "'$arguments' exited with $($run.Code). $($run.Text)" }
+          }
+          $run = Invoke-Program 'engine --action Status --product Revit'
+          if ($run.Code -ne 0 -or $run.Text -notmatch 'Smart Connector - Status') { throw "engine Status failed (exit $($run.Code)): $($run.Text)" }
+          # The install engine, from the installed files only: the same step the first open runs.
+          $run = Invoke-Program ('engine --action Install --repository-path "{0}" --skills Off --ai-clients Codex --product Revit' -f $root)
+          if ($run.Code -ne 0) { throw "engine Install failed (exit $($run.Code)): $($run.Text)" }
+          if (Test-Path -LiteralPath (Join-Path $root 'setup\setup-pending.txt')) { throw 'Install did not clear the first-open marker.' }
+          $stray = @(Get-Scripts | Where-Object { -not $_.FullName.StartsWith($library, [StringComparison]::OrdinalIgnoreCase) })
+          if ($stray.Count) { throw ('Install left scripts behind: ' + (($stray | ForEach-Object { $_.FullName.Substring($root.Length + 1) }) -join ', ')) }
+          'The installed program ran its windows, reported its version and completed the install engine without any script.'
+
       - uses: actions/upload-artifact@v4
         with:
           name: smart-autodesk-connector-setup
