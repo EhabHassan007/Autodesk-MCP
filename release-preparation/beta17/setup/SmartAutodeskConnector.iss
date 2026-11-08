@@ -68,7 +68,9 @@ procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep <> ssPostInstall then
     exit;
-  { Smart Connector reads this on its first open and shows the setup window; setup removes it when done. }
+  { Smart Connector reads this on its first open and shows the setup window; setup removes it when done. The folder
+    is made here: no file of the payload lives in it any more, so nothing else creates it. }
+  ForceDirectories(ExpandConstant('{#InstallRoot}\setup'));
   SaveStringToFile(ExpandConstant('{#InstallRoot}\setup\setup-pending.txt'),
     'Open Smart Connector from the Start menu to finish setup.', False);
 end;
