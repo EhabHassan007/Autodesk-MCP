@@ -33,7 +33,10 @@ try {
     #     so no script runs from it and nothing bypasses the script policy.
     $iss = Get-Content (Join-Path $runtime '../../setup/SmartAutodeskConnector.iss') -Raw
     $code = $iss.Substring($iss.IndexOf('[Code]'))
-    Assert ($code -notmatch 'Exec|ShellExec|powershell' -and $iss -notmatch '(?m)^\[Run\]') 'The setup .exe still starts a program'
+    # The only thing setup may start is the installed program (its Setup window), never in a silent install.
+    $runSection = if ($iss -match '(?ms)^\[Run\]\s*(.*?)(?=^\[|\z)') { $Matches[1] } else { '' }
+    $runLines = @($runSection -split "`r?`n" | Where-Object { $_.Trim() -and -not $_.Trim().StartsWith(';') })
+    Assert ($code -notmatch 'Exec|ShellExec|powershell' -and $runLines.Count -eq 1 -and $runLines[0].Contains('Filename: "{#InstallRoot}\bin\SmartConnector.exe"') -and $runLines[0] -match 'skipifsilent' -and $runLines[0] -notmatch 'powershell|\.ps1|\.cmd') 'The setup .exe starts something other than the installed program, or starts it in a silent install'
     $icons = $iss.Substring($iss.IndexOf('[Icons]'), $iss.IndexOf('[Code]') - $iss.IndexOf('[Icons]'))
     Assert ($icons.Contains('Filename: "{#InstallRoot}\bin\SmartConnector.exe"; Parameters: "app"') -and $icons -notmatch 'powershell|\.ps1|runminimized' -and $iss -notmatch 'ExecutionPolicy Bypass') 'The Start menu entry does not open the installed program, or bypasses the script policy'
     Assert ($iss -match 'recursesubdirs' -and $iss -notmatch 'Payload\.zip' -and $code -match 'setup-pending\.txt') 'Setup does not install the files itself or does not mark setup as pending'

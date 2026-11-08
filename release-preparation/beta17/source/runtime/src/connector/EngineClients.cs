@@ -242,8 +242,11 @@ namespace SmartConnector
             {
                 if (launchPath != null)
                 {
+                    // Through the Windows shell, so Claude inherits none of this program's handles: started directly, it
+                    // kept the setup window's output pipe open and setup waited until Claude was closed.
                     ProcessStartInfo info = new ProcessStartInfo(launchPath);
-                    info.UseShellExecute = false;
+                    info.UseShellExecute = true;
+                    info.WorkingDirectory = Paths.LocalAppData;
                     Process.Start(info).Dispose();
                     Step("Claude Desktop restarted successfully.");
                     return;

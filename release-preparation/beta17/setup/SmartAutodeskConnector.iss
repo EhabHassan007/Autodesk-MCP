@@ -22,7 +22,8 @@ CreateAppDir=no
 Uninstallable=no
 DisableWelcomePage=yes
 DisableReadyPage=yes
-DisableFinishedPage=no
+; Only the progress bar of this .exe shows; the Smart Connector Setup window it opens is the setup the person goes through.
+DisableFinishedPage=yes
 ShowLanguageDialog=no
 Compression=lzma2/max
 SolidCompression=yes
@@ -33,8 +34,8 @@ RestartApplications=no
 
 [Messages]
 FinishedHeadingLabel=Smart Connector is installed
-FinishedLabelNoIcons=To finish, open Smart Connector from the Start menu. It asks which AI apps (Claude, Codex) and which Autodesk programs (Revit, AutoCAD) to connect.
-FinishedLabel=To finish, open Smart Connector from the Start menu. It asks which AI apps (Claude, Codex) and which Autodesk programs (Revit, AutoCAD) to connect.
+FinishedLabelNoIcons=Smart Connector opens when you click Finish and shows the setup window: the terms of use, which AI apps (Claude, Codex) and Autodesk programs (Revit, AutoCAD) to connect, and joining the team. If you untick it, open Smart Connector from the Start menu to finish.
+FinishedLabel=Smart Connector opens when you click Finish and shows the setup window: the terms of use, which AI apps (Claude, Codex) and Autodesk programs (Revit, AutoCAD) to connect, and joining the team. If you untick it, open Smart Connector from the Start menu to finish.
 
 [InstallDelete]
 ; The shipped skill library is replaced, not merged: older versions kept skills flat, and merging would leave every
@@ -55,6 +56,11 @@ Source: "{src}\skill-service-device.json"; DestDir: "{#InstallRoot}"; Flags: ext
 Name: "{userprograms}\Smart Connector"; Filename: "{#InstallRoot}\bin\SmartConnector.exe"; Parameters: "app"; \
   WorkingDir: "{localappdata}"; IconFilename: "{#InstallRoot}\assets\logo.ico"; \
   Comment: "Smart Connector for Autodesk Revit and AutoCAD"
+
+[Run]
+; Once the files are copied, the Smart Connector Setup window opens: the terms of use, the AI apps, the Revit add-in, the
+; AutoCAD panel and the team. It is the installed program, not a script, and it does not open in a silent install.
+Filename: "{#InstallRoot}\bin\SmartConnector.exe"; Parameters: "app"; WorkingDir: "{localappdata}"; Flags: nowait skipifsilent
 
 [Code]
 function InitializeSetup(): Boolean;
