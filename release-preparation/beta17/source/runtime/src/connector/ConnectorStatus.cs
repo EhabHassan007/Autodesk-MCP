@@ -22,7 +22,9 @@ namespace SmartConnector
         }
         internal static string AppData { get { return Get("APPDATA", Environment.SpecialFolder.ApplicationData); } }
         internal static string Home { get { return Get("USERPROFILE", Environment.SpecialFolder.UserProfile); } }
-        internal static string ProgramFiles { get { return Get("ProgramFiles", Environment.SpecialFolder.ProgramFiles); } }
+        // Set only by the engine's hidden --program-files option (tests); otherwise the environment is used.
+        internal static string ProgramFilesOverride;
+        internal static string ProgramFiles { get { return String.IsNullOrEmpty(ProgramFilesOverride) ? Get("ProgramFiles", Environment.SpecialFolder.ProgramFiles) : ProgramFilesOverride; } }
         internal static string Windows { get { return Get("SystemRoot", Environment.SpecialFolder.Windows); } }
         internal static string Variable(string name) { return Environment.GetEnvironmentVariable(name) ?? ""; }
     }

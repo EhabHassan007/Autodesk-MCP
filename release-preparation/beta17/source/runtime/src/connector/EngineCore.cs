@@ -51,7 +51,7 @@ namespace SmartConnector
         internal string[] TestAutoCadReleases;
         internal string AutoCadRegistryRoot = @"Software\Autodesk\AutoCAD";
 
-        private static readonly string[] ValueOptions = { "action", "product", "repository-url", "release-manifest-url", "repository-path", "enrollment-path", "join-name", "join-email", "terms-version", "ai-clients", "skills", "auto-updates", "test-autocad-releases", "autocad-registry-root" };
+        private static readonly string[] ValueOptions = { "action", "product", "repository-url", "release-manifest-url", "repository-path", "enrollment-path", "join-name", "join-email", "terms-version", "ai-clients", "skills", "auto-updates", "test-autocad-releases", "autocad-registry-root", "program-files" };
         private static readonly string[] FlagOptions = { "skip-repository-update", "install-git-if-missing", "install-claude-desktop-if-missing", "library-only" };
 
         private static string Choose(string parameter, string value, string[] allowed, bool allowEmpty)
@@ -104,6 +104,8 @@ namespace SmartConnector
                     case "auto-updates": options.AutoUpdates = Choose("AutoUpdates", value, new[] { "On", "Off" }, true); break;
                     case "test-autocad-releases": options.TestAutoCadReleases = value.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries); break;
                     case "autocad-registry-root": options.AutoCadRegistryRoot = value; break;
+                    // For the automated tests: Windows does not let a test change %ProgramFiles% for a child process.
+                    case "program-files": Env.ProgramFilesOverride = value; break;
                 }
             }
             return options;

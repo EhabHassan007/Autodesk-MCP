@@ -42,6 +42,9 @@ function Invoke-Engine {
     param([string[]]$Arguments, [hashtable]$State, [string]$Path = $script:fakeBin, [hashtable]$ExtraEnv = @{}, [int]$TimeoutSeconds = 240, [string]$Program = $script:exe)
     # Unless a test says which AutoCAD releases exist, none do (HKLM cannot be faked, and a real AutoCAD must never be touched).
     if ($Arguments -notcontains '--test-autocad-releases') { $Arguments = @($Arguments) + @('--test-autocad-releases', '') }
+    # Windows does not let a test change %ProgramFiles% for a child process (cmd.exe still sees the real one), so the
+    # engine takes the folder as a hidden option as well.
+    if ($Arguments -notcontains '--program-files') { $Arguments = @($Arguments) + @('--program-files', $State.Programs) }
     $line = (@('engine') + $Arguments | ForEach-Object { Quote-Argument $_ }) -join ' '
     $info = New-Object Diagnostics.ProcessStartInfo($Program, $line)
     $info.UseShellExecute = $false; $info.CreateNoWindow = $true

@@ -297,6 +297,9 @@ public static class SkillStandIn
     $preview = ($result.details -split "`r?`n", 2)[1] | ConvertFrom-Json
     $names = @($preview.skills)
     Assert ($names -notcontains 'linkedin-profile-optimizer' -and $names -notcontains 'personal-notes' -and $names -contains 'revit-demo') ('Central exclusion failed: ' + ($names -join ','))
+    # The script reads the exclusion list from its own state folder, so give it the same list.
+    New-Item -ItemType Directory -Force (Join-Path $s 'state-ps') | Out-Null
+    Copy-Item (Join-Path $state 'excluded-skills.txt') (Join-Path $s 'state-ps\excluded-skills.txt') -Force
     $sameScript = Invoke-Script (Join-Path $scripts 'weekly-skill-collection.ps1') @('-Action', 'Preview', '-RepositoryRoot', $repo, '-StateRoot', (Join-Path $s 'state-ps'), '-AdditionalSkillRoots', $extra)
     $scriptNames = @(((Get-JsonText ((Read-Json (Join-Path $s 'state-ps\last-result.json')).details -split "`r?`n", 2)[1]) | ConvertFrom-Json).skills | Sort-Object)
     Assert ((@($names | Sort-Object) -join ',') -eq ($scriptNames -join ',') -and $scriptNames.Count -gt 0) ('Preview differs from the script: ' + ($names -join ',') + ' / ' + ($scriptNames -join ','))
