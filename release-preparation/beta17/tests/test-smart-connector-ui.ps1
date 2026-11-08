@@ -30,7 +30,10 @@ Assert ($revit.Contains('Path.Combine(root, "bin", "SmartConnector.exe")') -and 
 Assert ($lisp.Contains('"app --section Overview"') -and $lisp.Contains('"action --action SkillsSync"') -and $lisp.Contains('"\\bin\\SmartConnector.exe"')) 'AutoCAD does not open the installed program'
 Assert ($cmd.Contains('"%~dp0..\bin\SmartConnector.exe" app') -and $cmd.Contains('SmartConnectorApp.ps1')) 'The start command does not prefer the program, or lost the PowerShell fallback'
 Assert ($wizard.Contains("'bin\SmartConnector.exe'") -and $appPs.Contains("-ArgumentList 'setup'") -and $core.Contains("`$shortcut.Arguments = 'app'")) 'Setup, the first open or the Start menu repair does not prefer the program'
-Assert ($revit.Contains('-Action InstallUpdate') -and $lisp.Contains('"-Action InstallUpdate"')) 'The update window must stay PowerShell: it replaces the folder the program runs from'
+# The update window is the installed program's own (action --action InstallUpdate); the PowerShell window is only the fallback for an install without the program.
+Assert ($revit.Contains('"action --action InstallUpdate"') -and $lisp.Contains('"action --action InstallUpdate"')) 'Revit and AutoCAD do not open the installed program for the update window'
+Assert ($revit.Contains('-Action InstallUpdate') -and $lisp.Contains('"-Action InstallUpdate"')) 'The PowerShell update window fallback is gone'
+Assert ($revit.Contains('"engine --action "') -and $revit.Contains('Path.Combine(root, "bin", "SmartConnector.exe")')) 'Revit does not run the install engine of the installed program'
 Assert ($main.Contains('args[0] == "mcp"') -and $main.Contains('command == "app" || command == "setup" || command == "action" || command == "settings"')) 'Program.Main lost a command'
 'PASS: Start menu, Revit, AutoCAD, the start command, setup and the first open prefer the installed program'
 
@@ -192,7 +195,19 @@ try {
     foreach ($output in $status, '[10:00:00] AutoCAD is running, but no drawing is open.', '') {
         Assert-SameOutcome 'Status' $output (Get-ConnectionStatusOutcome $output)
     }
-    'PASS: Skills Sync, Check Updates and Connection Status outcomes match ConnectorActions.ps1'
+    # The update window: installed, deferred, up to date and failed.
+    foreach ($case in @(
+            @('[10:00:00] [UPDATE_INSTALLED] Smart Connector 1.1.0 is installed.', '', 0),
+            @('[10:00:00] [UPDATE_DEFERRED] Revit is open. Close it, and the update window installs the update.', '', 0),
+            @('[10:00:00] No newer release was installed. Existing client registrations were preserved.', '', 0),
+            @('', 'Download failed.', 1))) {
+        $expected = Get-InstallUpdateOutcome $case[0] $case[1] $case[2]
+        $run = Invoke-Program ('action --outcome InstallUpdate --error "{0}" --exit-code {1}' -f $case[1], $case[2]) $case[0]
+        Assert ($run.Code -eq 0) ('action --outcome InstallUpdate failed: ' + $run.Err)
+        $mine = $run.Out | ConvertFrom-Json
+        foreach ($key in 'State', 'Title', 'Kind', 'Body') { Assert ([string]$mine.$key -eq [string]$expected.$key) ("InstallUpdate outcome {0} is '{1}', ConnectorActions.ps1 says '{2}'" -f $key, $mine.$key, $expected.$key) }
+    }
+    'PASS: Skills Sync, Check Updates, Connection Status and Update outcomes match ConnectorActions.ps1'
 }
 finally {
     if ($mutex) { try { $mutex.ReleaseMutex() } catch { }; $mutex.Dispose() }
