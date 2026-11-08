@@ -22,14 +22,17 @@ CreateAppDir=no
 Uninstallable=no
 DisableWelcomePage=yes
 DisableReadyPage=yes
+; The Start menu entry has a fixed place; there is nothing to choose.
+DisableProgramGroupPage=yes
 ; Only the progress bar of this .exe shows; the Smart Connector Setup window it opens is the setup the person goes through.
 DisableFinishedPage=yes
 ShowLanguageDialog=no
 Compression=lzma2/max
 SolidCompression=yes
-; An AI app may be running bin\SmartConnector.exe, which locks the file. Setup offers to close it; the AI app starts
-; it again when it next opens, so setup does not restart it itself.
-CloseApplications=yes
+; Nothing is closed and nobody is asked to close programs. A running Smart Connector (the MCP server Claude or Codex
+; started, which has no window, or an open Smart Connector window) keeps bin\SmartConnector.exe in use; [Code] moves
+; that file aside instead, and the program deletes the old copy the next time it starts.
+CloseApplications=no
 RestartApplications=no
 
 [Messages]
@@ -70,8 +73,36 @@ begin
     MsgBox('Smart Connector needs 64-bit Windows.', mbError, MB_OK);
 end;
 
+{ Windows lets a file that is in use be renamed. The running copy keeps working from the renamed file; the new one is
+  installed under the usual name. Smart Connector deletes SmartConnector.exe.old (or .old1 ... .old9) when it starts. }
+procedure MoveRunningProgramAside;
+var
+  ExePath, Target: String;
+  I: Integer;
+begin
+  ExePath := ExpandConstant('{#InstallRoot}\bin\SmartConnector.exe');
+  if not FileExists(ExePath) then
+    exit;
+  for I := 0 to 9 do
+  begin
+    if I = 0 then
+      Target := ExePath + '.old'
+    else
+      Target := ExePath + '.old' + IntToStr(I);
+    if FileExists(Target) then
+      DeleteFile(Target);
+    if (not FileExists(Target)) and RenameFile(ExePath, Target) then
+      exit;
+  end;
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
+  if CurStep = ssInstall then
+  begin
+    MoveRunningProgramAside;
+    exit;
+  end;
   if CurStep <> ssPostInstall then
     exit;
   { Smart Connector reads this on its first open and shows the setup window; setup removes it when done. The folder
