@@ -33,8 +33,8 @@ RestartApplications=no
 
 [Messages]
 FinishedHeadingLabel=Smart Connector is installed
-FinishedLabelNoIcons=To finish, open Smart Connector from the Start menu. It asks which AI apps (Claude, Codex) and which Autodesk programs (Revit, AutoCAD) to connect.
-FinishedLabel=To finish, open Smart Connector from the Start menu. It asks which AI apps (Claude, Codex) and which Autodesk programs (Revit, AutoCAD) to connect.
+FinishedLabelNoIcons=Smart Connector opens when you click Finish and shows the setup window: the terms of use, which AI apps (Claude, Codex) and Autodesk programs (Revit, AutoCAD) to connect, and joining the team. If you untick it, open Smart Connector from the Start menu to finish.
+FinishedLabel=Smart Connector opens when you click Finish and shows the setup window: the terms of use, which AI apps (Claude, Codex) and Autodesk programs (Revit, AutoCAD) to connect, and joining the team. If you untick it, open Smart Connector from the Start menu to finish.
 
 [InstallDelete]
 ; The shipped skill library is replaced, not merged: older versions kept skills flat, and merging would leave every
@@ -55,6 +55,12 @@ Source: "{src}\skill-service-device.json"; DestDir: "{#InstallRoot}"; Flags: ext
 Name: "{userprograms}\Smart Connector"; Filename: "{#InstallRoot}\bin\SmartConnector.exe"; Parameters: "app"; \
   WorkingDir: "{localappdata}"; IconFilename: "{#InstallRoot}\assets\logo.ico"; \
   Comment: "Smart Connector for Autodesk Revit and AutoCAD"
+
+[Run]
+; The last page offers to open Smart Connector (ticked), because its first open finishes setup: the terms, the AI apps,
+; the Revit add-in, the AutoCAD panel and the team. It runs only when the person clicks Finish with the box ticked,
+; never in a silent install, and it is the installed program, not a script.
+Filename: "{#InstallRoot}\bin\SmartConnector.exe"; Parameters: "app"; WorkingDir: "{localappdata}"; Description: "Open Smart Connector to finish setup"; Flags: postinstall nowait skipifsilent
 
 [Code]
 function InitializeSetup(): Boolean;

@@ -33,6 +33,8 @@ namespace SmartConnector
         {
             // Files an update renamed aside while they were in use (this program's own earlier copy) go now. Best effort.
             EngineCleanup.DeleteLeftovers();
+            // Claude Code, Codex and Node.js installed since Windows started are not on the inherited PATH.
+            CommandPath.Refresh();
             if (args.Length == 1 && args[0] == "mcp") return McpServer.Run();
             if (args.Length == 1 && args[0] == "--version") { AttachConsole(); Console.WriteLine(Paths.Version); return 0; }
             { int skillsCode; if (SkillsCommands.TryRun(args, out skillsCode)) return skillsCode; }

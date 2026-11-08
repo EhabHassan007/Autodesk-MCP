@@ -29,6 +29,52 @@ namespace SmartConnector
         internal static string Variable(string name) { return Environment.GetEnvironmentVariable(name) ?? ""; }
     }
 
+    // A program started from the Start menu, Revit, AutoCAD or the setup .exe inherits the PATH Windows had when the
+    // session began, so a tool installed since (Claude Code, Codex, Node.js for their npm launchers) is not found and
+    // shows as "Not installed". Add the current user and machine PATH from the registry and the folders those
+    // installers use, after the inherited entries, so they keep their order. Children of this program inherit it.
+    internal static class CommandPath
+    {
+        internal static void Refresh()
+        {
+            try
+            {
+                List<string> parts = new List<string>();
+                HashSet<string> seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                Action<string> add = delegate(string list)
+                {
+                    foreach (string raw in (list ?? "").Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries))
+                    {
+                        string entry = raw.Trim().Trim('"');
+                        if (entry.Length == 0) continue;
+                        if (seen.Add(entry.TrimEnd('\\'))) parts.Add(entry);
+                    }
+                };
+                add(Environment.GetEnvironmentVariable("PATH"));
+                add(ReadPath(Registry.CurrentUser, "Environment"));
+                add(ReadPath(Registry.LocalMachine, @"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"));
+                string[] known =
+                {
+                    Path.Combine(Env.Home, ".local", "bin"),                                   // Claude Code native installer
+                    Path.Combine(Env.AppData, "npm"),                                          // npm install -g (claude, codex)
+                    Path.Combine(Paths.LocalAppData, "Microsoft", "WinGet", "Links"),          // winget
+                    Path.Combine(Paths.LocalAppData, "Microsoft", "WindowsApps"),              // Store apps
+                    Path.Combine(Paths.LocalAppData, "pnpm"), Path.Combine(Env.Home, ".bun", "bin"), Path.Combine(Env.Home, "scoop", "shims"),
+                    Path.Combine(Env.ProgramFiles, "nodejs")
+                };
+                foreach (string folder in known) if (Directory.Exists(folder)) add(folder);
+                Environment.SetEnvironmentVariable("PATH", String.Join(";", parts.ToArray()));
+            }
+            catch (Exception) { }
+        }
+
+        private static string ReadPath(RegistryKey hive, string subKey)
+        {
+            try { using (RegistryKey key = hive.OpenSubKey(subKey)) { return key == null ? "" : Convert.ToString(key.GetValue("Path", "")); } }
+            catch (Exception) { return ""; }
+        }
+    }
+
     // PowerShell's reading of ConvertFrom-Json values: property names match without regard to case, and [bool],
     // [int], [string] and -ne $false convert as PowerShell does.
     internal static class PsJson
