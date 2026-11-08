@@ -22,7 +22,8 @@ CreateAppDir=no
 Uninstallable=no
 DisableWelcomePage=yes
 DisableReadyPage=yes
-DisableFinishedPage=no
+; Only the progress bar of this .exe shows; the Smart Connector Setup window it opens is the setup the person goes through.
+DisableFinishedPage=yes
 ShowLanguageDialog=no
 Compression=lzma2/max
 SolidCompression=yes
@@ -57,10 +58,9 @@ Name: "{userprograms}\Smart Connector"; Filename: "{#InstallRoot}\bin\SmartConne
   Comment: "Smart Connector for Autodesk Revit and AutoCAD"
 
 [Run]
-; The last page offers to open Smart Connector (ticked), because its first open finishes setup: the terms, the AI apps,
-; the Revit add-in, the AutoCAD panel and the team. It runs only when the person clicks Finish with the box ticked,
-; never in a silent install, and it is the installed program, not a script.
-Filename: "{#InstallRoot}\bin\SmartConnector.exe"; Parameters: "app"; WorkingDir: "{localappdata}"; Description: "Open Smart Connector to finish setup"; Flags: postinstall nowait skipifsilent
+; Once the files are copied, the Smart Connector Setup window opens: the terms of use, the AI apps, the Revit add-in, the
+; AutoCAD panel and the team. It is the installed program, not a script, and it does not open in a silent install.
+Filename: "{#InstallRoot}\bin\SmartConnector.exe"; Parameters: "app"; WorkingDir: "{localappdata}"; Flags: nowait skipifsilent
 
 [Code]
 function InitializeSetup(): Boolean;
