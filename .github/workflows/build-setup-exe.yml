@@ -76,6 +76,23 @@ jobs:
           if (Test-Path -LiteralPath (Join-Path $root 'setup\setup-pending.txt')) { throw 'Install did not clear the first-open marker.' }
           $stray = @(Get-Scripts | Where-Object { -not $_.FullName.StartsWith($library, [StringComparison]::OrdinalIgnoreCase) })
           if ($stray.Count) { throw ('Install left scripts behind: ' + (($stray | ForEach-Object { $_.FullName.Substring($root.Length + 1) }) -join ', ')) }
+          # Install again while Smart Connector runs, as the MCP server Claude starts does: setup must move the program
+          # aside (no closing programs, no error), and the next start of Smart Connector deletes the old copy.
+          $bin = Split-Path -Parent $program
+          $serverInfo = New-Object Diagnostics.ProcessStartInfo($program, 'mcp')
+          $serverInfo.UseShellExecute = $false; $serverInfo.RedirectStandardInput = $true; $serverInfo.RedirectStandardOutput = $true
+          $server = [Diagnostics.Process]::Start($serverInfo)
+          try {
+            $again = Start-Process -FilePath $exe.FullName -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait -PassThru
+            if ($again.ExitCode -ne 0) { throw "Installing over a running Smart Connector exited with $($again.ExitCode)." }
+            if (-not (Test-Path -LiteralPath $program -PathType Leaf)) { throw 'The program is missing after installing over a running copy.' }
+            if (-not @(Get-ChildItem -LiteralPath $bin -Filter 'SmartConnector.exe.old*').Count) { throw 'The running program was not moved aside.' }
+          }
+          finally { try { $server.StandardInput.Close(); if (-not $server.WaitForExit(5000)) { $server.Kill() } } catch { } }
+          $run = Invoke-Program '--version'
+          if ($run.Code -ne 0) { throw "The newly installed program did not start (exit $($run.Code))." }
+          $left = @(Get-ChildItem -LiteralPath $bin -Filter 'SmartConnector.exe.old*')
+          if ($left.Count) { throw ('The old copy was not deleted at the next start: ' + (($left | ForEach-Object Name) -join ', ')) }
           'The installed program ran its windows, reported its version and completed the install engine without any script.'
 
       - uses: actions/upload-artifact@v4
