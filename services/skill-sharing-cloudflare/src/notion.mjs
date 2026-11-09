@@ -7,32 +7,37 @@ const TEXT_MAX = 2000;   // Notion's limit for one text value.
 const BUDGET = 48;       // Workers Free allows 50 subrequests per invocation; keep a margin.
 const isoDay = seconds => new Date(seconds*1000).toISOString().slice(0,10);
 const isoTime = seconds => seconds ? new Date(seconds*1000).toISOString() : null;
-const text = v => String(v ?? '').trim().slice(0,TEXT_MAX).trim();
+export const text = v => String(v ?? '').trim().slice(0,TEXT_MAX).trim();
 
-class NotionError extends Error {
+export class NotionError extends Error {
   constructor(status) { super('Notion HTTP '+status); this.status = status; }
 }
 
 // Write format for each property type.
-function toProp(type, v) {
+export function toProp(type, v) {
   if (type === 'title' || type === 'rich_text') { const s = text(v); return {[type]:s ? [{text:{content:s}}] : []}; }
   if (type === 'email') return {email:text(v) || null};
-  if (type === 'select') return {select:{name:v}};
+  if (type === 'select') return {select:v ? {name:v} : null};
+  if (type === 'checkbox') return {checkbox:Boolean(v)};
+  if (type === 'url') return {url:text(v) || null};
   if (type === 'date') return {date:v ? {start:v} : null};
   return {number:v};
 }
 // Plain value read back from a Notion property.
-function fromProp(type, p) {
+export function fromProp(type, p) {
   if (!p) return null;
   if (type === 'title' || type === 'rich_text') return (p[type] || []).map(t=>t.plain_text ?? t.text?.content ?? '').join('');
   if (type === 'email') return p.email;
   if (type === 'select') return p.select?.name;
+  if (type === 'checkbox') return p.checkbox;
+  if (type === 'url') return p.url;
   if (type === 'date') return p.date?.start;
   return p.number;
 }
 // Comparable form: trimmed text, lowercase email, dates exact or to the minute (UTC), numbers.
-function norm(type, v) {
-  if (type === 'title' || type === 'rich_text' || type === 'select') return text(v);
+export function norm(type, v) {
+  if (type === 'title' || type === 'rich_text' || type === 'select' || type === 'url') return text(v);
+  if (type === 'checkbox') return Boolean(v);
   if (type === 'email') return text(v).toLowerCase();
   if (type === 'date') {
     if (!v) return '';
@@ -100,10 +105,9 @@ function plan(schema, keyProp, desired, pages, zeroed) {
   return {writes,unchanged};
 }
 
-export async function syncToNotion(env, {fetcher = (...args) => fetch(...args), maxWrites = 40, sleep = ms => new Promise(r=>setTimeout(r,ms))} = {}) {
-  const at = Math.floor(Date.now()/1000);
-  if (!env.NOTION_TOKEN || !env.NOTION_MEMBERS_SOURCE || !env.NOTION_USAGE_SOURCE) return {skipped:'not configured',at};
-  const summary = {members:{created:0,updated:0,unchanged:0},usage:{created:0,updated:0,unchanged:0},pending:0,at};
+// One Notion API client: bearer token, API version, a single wait on 429, and a call counter for the subrequest budget.
+export const BUDGET_CALLS = BUDGET;
+export function notionClient(env, {fetcher = (...args) => fetch(...args), sleep = ms => new Promise(r=>setTimeout(r,ms))} = {}) {
   const headers = {Authorization:`Bearer ${env.NOTION_TOKEN}`,'Notion-Version':'2025-09-03','Content-Type':'application/json'};
   let calls = 0;
   const call = async (method, path, body) => {
@@ -129,6 +133,15 @@ export async function syncToNotion(env, {fetcher = (...args) => fetch(...args), 
     } while (cursor);
     return pages;
   };
+  return {call,readAll,get calls() { return calls; }};
+}
+
+export async function syncToNotion(env, {fetcher = (...args) => fetch(...args), maxWrites = 40, sleep = ms => new Promise(r=>setTimeout(r,ms))} = {}) {
+  const at = Math.floor(Date.now()/1000);
+  if (!env.NOTION_TOKEN || !env.NOTION_MEMBERS_SOURCE || !env.NOTION_USAGE_SOURCE) return {skipped:'not configured',at};
+  const summary = {members:{created:0,updated:0,unchanged:0},usage:{created:0,updated:0,unchanged:0},pending:0,at};
+  const client = notionClient(env,{fetcher,sleep});
+  const {call,readAll} = client;
   let queue = [];
   try {
     const desired = await desiredRows(env.DB,at);
@@ -140,7 +153,7 @@ export async function syncToNotion(env, {fetcher = (...args) => fetch(...args), 
     queue = [...members.writes.map(w=>({...w,part:'members',source:env.NOTION_MEMBERS_SOURCE})),
       ...usage.writes.map(w=>({...w,part:'usage',source:env.NOTION_USAGE_SOURCE}))];
     let writes = 0;
-    while (queue.length && writes < maxWrites && calls < BUDGET) {
+    while (queue.length && writes < maxWrites && client.calls < BUDGET) {
       const w = queue[0];
       if (w.page) await call('PATCH',`/pages/${encodeURIComponent(w.page)}`,{properties:w.properties});
       else await call('POST','/pages',{parent:{type:'data_source_id',data_source_id:w.source},properties:w.properties});
