@@ -24,4 +24,4 @@ Lean core: Smart Connector now runs nothing in the background. This removes the 
 - ChatGPT Desktop: on a PC with ChatGPT Desktop (or the Codex app) but without the Codex command-line tool, setup now connects Smart Connector through Codex's settings file (%USERPROFILE%\.codex\config.toml), which ChatGPT Desktop reads. Other servers and settings in that file are kept. The setup window lists it as "Codex / ChatGPT Desktop". Restart ChatGPT Desktop after setup. Community reports say the tools may show only in ChatGPT Desktop's Codex mode on Windows, not in normal chats.
 - The Revit add-in is now compiled in the automated tests with the same Windows compiler the PCs use, against the Revit 2024 API reference assemblies.
 
-SHA-256: 9DDA5A322BE60773338E0F8762CD1AC4BD58BE1B495F2708F61F6DFFE38C6EE0
+SHA-256: C29ED431EAE69AE2547C52F56456B6ED59A378663DC04440839ABF0701A2CC75

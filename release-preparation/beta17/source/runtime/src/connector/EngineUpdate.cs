@@ -242,6 +242,7 @@ namespace SmartConnector
             }
 
             _updateDownloaded = false;
+            _payloadScriptFree = false;
             PublicRelease release = GetPublicReleaseManifest();
             if (_o.Action == "Update")
             {
@@ -338,6 +339,7 @@ namespace SmartConnector
 
                 Directory.CreateDirectory(Path.GetDirectoryName(EngineText.Trimmed(_o.RepositoryPath)));
                 Directory.CreateDirectory(_o.RepositoryPath);
+                _payloadScriptFree = IsScriptFreePayload(downloadedRoot);
                 StopSmartConnectorServers();
                 // The preserved folders (skill-review, team-candidates, team-collection, backups) are never touched: only
                 // the files of the release are replaced, so there is nothing to move aside and back.
@@ -358,6 +360,63 @@ namespace SmartConnector
             {
                 try { if (Directory.Exists(temporaryRoot)) Directory.Delete(temporaryRoot, true); } catch (Exception) { }
             }
+        }
+
+        // ---------- scripts left by older versions ----------
+
+        private static readonly string[] ScriptExtensions = { ".ps1", ".psm1", ".psd1", ".cmd", ".bat", ".vbs", ".js", ".wsf" };
+
+        private static bool IsScript(string path)
+        {
+            return ScriptExtensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase);
+        }
+
+        // A release that carries the compiled program and no script outside the skill library (some skills bring their
+        // own helper scripts, which belong to the library and stay).
+        private static bool IsScriptFreePayload(string payloadRoot)
+        {
+            if (!File.Exists(Path.Combine(payloadRoot, "bin", "SmartConnector.exe"))) return false;
+            string library = Path.Combine(payloadRoot, ".agents") + Path.DirectorySeparatorChar;
+            foreach (string file in Directory.GetFiles(payloadRoot, "*", SearchOption.AllDirectories))
+                if (IsScript(file) && !file.StartsWith(library, StringComparison.OrdinalIgnoreCase)) return false;
+            return true;
+        }
+
+        // Deletes the scripts an older version installed: the files of the program's own folders and the ones in the
+        // install folder itself. The skill library, the Revit build output and the preserved team folders are not touched.
+        // A script that cannot be deleted now is renamed aside and removed at the next start, like a program in use.
+        private void RemoveLegacyScripts(string root)
+        {
+            if (!File.Exists(Path.Combine(root, "bin", "SmartConnector.exe"))) return;
+            List<string> files = new List<string>(Directory.GetFiles(root, "*", SearchOption.TopDirectoryOnly));
+            foreach (string top in PackageEntries)
+            {
+                if (String.Equals(top, ".agents", StringComparison.OrdinalIgnoreCase)) continue;
+                string folder = Path.Combine(root, top);
+                if (Directory.Exists(folder)) files.AddRange(Directory.GetFiles(folder, "*", SearchOption.AllDirectories));
+            }
+            int removed = 0;
+            foreach (string file in files)
+            {
+                if (!IsScript(file)) continue;
+                string relative = file.Substring(EngineText.Trimmed(root).Length).TrimStart('\\', '/');
+                if (IsKeptDuringPrune(relative)) continue;
+                try { File.Delete(file); removed++; }
+                catch (Exception)
+                {
+                    try { MoveAside(file); removed++; } catch (Exception) { }
+                }
+            }
+            // Empty folders the scripts leave behind.
+            foreach (string top in PackageEntries)
+            {
+                string folder = Path.Combine(root, top);
+                if (!Directory.Exists(folder) || String.Equals(top, ".agents", StringComparison.OrdinalIgnoreCase)) continue;
+                foreach (string directory in Directory.GetDirectories(folder, "*", SearchOption.AllDirectories).OrderByDescending(d => d.Length))
+                    try { if (Directory.GetFileSystemEntries(directory).Length == 0) Directory.Delete(directory); } catch (Exception) { }
+                try { if (Directory.GetFileSystemEntries(folder).Length == 0) Directory.Delete(folder); } catch (Exception) { }
+            }
+            if (removed > 0) Step("Removed " + removed + " script file(s) left by an older version; Smart Connector now runs as a program.");
         }
 
         // ---------- stopping the programs that hold the install folder ----------

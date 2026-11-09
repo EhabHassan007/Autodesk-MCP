@@ -39,7 +39,7 @@ namespace SmartConnector
 
         internal string Action = "Status", Product = "All";
         internal string RepositoryUrl = "https://github.com/EhabHassan007/Autodesk-MCP.git";
-        internal string ReleaseManifestUrl = "https://github.com/EhabHassan007/Autodesk-MCP-Releases/releases/latest/download/latest.json";
+        internal string ReleaseManifestUrl = "https://github.com/EhabHassan007/Autodesk-MCP-Releases/releases/latest/download/smart-connector.json";
         internal string RepositoryPath = Path.Combine(Paths.LocalAppData, "BIM-CAD-MCP");
         internal bool ProductGiven, SkipRepositoryUpdate, InstallGitIfMissing, InstallClaudeDesktopIfMissing;
         // Typed in the team join dialog, or given by the administrator's enrollment file.
@@ -126,6 +126,8 @@ namespace SmartConnector
         private string _currentInstallStep = "";
         private readonly List<string> _failedInstallSteps = new List<string>();
         private bool _updateDownloaded;
+        // True when the release just installed carried no script of its own (outside the skill library).
+        private bool _payloadScriptFree;
 
         private InstallEngine(EngineOptions options, TextWriter output, TextWriter error)
         {
@@ -387,6 +389,8 @@ namespace SmartConnector
             if (WantsProduct("AutoCAD")) InstallAutoCadBundleStep(root);
             RegisterDetectedAiClients(root, choices.AiClients);
             RemoveBackgroundTasks(root, true);
+            // Connections now start SmartConnector.exe, so the scripts an older version left behind are not needed.
+            if (_payloadScriptFree) RemoveLegacyScripts(root);
             string sourceFile = Path.Combine(root, ".bim-cad-source.json");
             string sha = "";
             if (File.Exists(sourceFile))
