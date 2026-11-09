@@ -1,7 +1,6 @@
 ---
 name: revit-view-filter-transfer
 description: Build or use a Revit add-in that copies selected view-filter definitions from the active project to another open project without activating or saving the destination.
-category: revit
 ---
 
 # Revit view-filter transfer
