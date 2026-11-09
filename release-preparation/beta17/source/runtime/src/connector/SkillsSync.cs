@@ -357,7 +357,7 @@ namespace SmartConnector
     // person starts; nothing is scheduled.
     internal static class UsageSender
     {
-        private sealed class Event { internal string Kind, Name, Day; internal long Count; }
+        private sealed class Event { internal string Kind, Name, Day; internal long Count, Errors; }
 
         private static string UsagePath(string state) { return Path.Combine(state, "usage.jsonl"); }
         private static string PendingPath(string state) { return Path.Combine(state, "usage-pending.jsonl"); }
@@ -402,6 +402,17 @@ namespace SmartConnector
                         count = (long)Math.Round(number, MidpointRounding.ToEven);
                     }
                     if (count < 1) continue;
+                    // A line from the connector marks a failed call with "failed": true; a saved total carries "errors".
+                    long errors = 0;
+                    if (PsJson.Has(entry, "errors"))
+                    {
+                        double failedCount;
+                        object rawErrors = PsJson.Value(entry, "errors");
+                        if (rawErrors != null && Double.TryParse(Convert.ToString(rawErrors, CultureInfo.InvariantCulture), NumberStyles.Float, CultureInfo.InvariantCulture, out failedCount))
+                            errors = Math.Max(0, (long)Math.Round(failedCount, MidpointRounding.ToEven));
+                    }
+                    else if (PsJson.Has(entry, "failed") && String.Equals(Convert.ToString(PsJson.Value(entry, "failed"), CultureInfo.InvariantCulture), "True", StringComparison.OrdinalIgnoreCase)) errors = count;
+                    errors = Math.Min(errors, count);
                     string key = kind + "|" + name + "|" + day;
                     Event total;
                     if (!totals.TryGetValue(key, out total))
@@ -410,6 +421,7 @@ namespace SmartConnector
                         totals[key] = total; order.Add(key);
                     }
                     total.Count = Math.Min(10000, total.Count + count);
+                    total.Errors = Math.Min(total.Count, total.Errors + errors);
                 }
             }
             return order.Select(key => totals[key]).ToList();
@@ -417,7 +429,10 @@ namespace SmartConnector
 
         private static object ToObject(Event e)
         {
-            return Json.Object("kind", e.Kind, "name", e.Name, "day", e.Day, "count", (int)e.Count);
+            // "errors" is sent only when something failed, so a day with no failure looks exactly as before.
+            Dictionary<string, object> entry = Json.Object("kind", e.Kind, "name", e.Name, "day", e.Day, "count", (int)e.Count);
+            if (e.Errors > 0) entry["errors"] = (int)e.Errors;
+            return entry;
         }
 
         private static void SavePending(string state, List<Event> events)

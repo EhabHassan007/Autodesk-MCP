@@ -194,7 +194,7 @@ export async function handle(request, env, backend) {
       const devices = (await env.DB.prepare(`SELECT id,label,active,source,person_name,email,pc_name,windows_user,connector_version,
         terms_version,created_at,enroll_ip,last_seen,last_ip FROM devices ORDER BY last_seen DESC`).all()).results;
       const usage = (await env.DB.prepare(`SELECT device,kind,name,
-        SUM(CASE WHEN day>=? THEN count ELSE 0 END) AS last7,SUM(count) AS last30,MAX(day) AS last_day
+        SUM(CASE WHEN day>=? THEN count ELSE 0 END) AS last7,SUM(count) AS last30,SUM(errors) AS errors30,MAX(day) AS last_day
         FROM usage WHERE day>=? GROUP BY device,kind,name ORDER BY last30 DESC`).bind(isoDay(today-6*DAY),isoDay(today-29*DAY)).all()).results;
       const submissions = (await env.DB.prepare('SELECT device,digest,at,skills,status FROM submission_log ORDER BY at DESC LIMIT 200').all()).results
         .map(row => ({...row,skills:JSON.parse(row.skills)}));
@@ -242,8 +242,8 @@ export async function handle(request, env, backend) {
       let events;
       try { events = validateUsage(await readJSON(request),isoDay(now())); }
       catch (error) { throw error instanceof HTTPError ? error : new HTTPError(422,error.message); }
-      await env.DB.batch(events.map(e => env.DB.prepare(`INSERT INTO usage(device,kind,name,day,count) VALUES(?,?,?,?,?)
-        ON CONFLICT(device,kind,name,day) DO UPDATE SET count=usage.count+excluded.count`).bind(id,e.kind,e.name,e.day,e.count)));
+      await env.DB.batch(events.map(e => env.DB.prepare(`INSERT INTO usage(device,kind,name,day,count,errors) VALUES(?,?,?,?,?,?)
+        ON CONFLICT(device,kind,name,day) DO UPDATE SET count=usage.count+excluded.count,errors=usage.errors+excluded.errors`).bind(id,e.kind,e.name,e.day,e.count,e.errors)));
       return json({accepted:events.length});
     }
     if (path === '/admin/status' && request.method === 'GET') {

@@ -63,12 +63,15 @@ export function validateUsage(data, today) {
   const earliest = new Date(Date.parse(today) - 60 * 86400000).toISOString().slice(0, 10);
   const tomorrow = new Date(Date.parse(today) + 86400000).toISOString().slice(0, 10);
   return data.events.map(event => {
-    if (!exactKeys(event, ['kind', 'name', 'day', 'count'])) throw new Error('Invalid usage event.');
+    // "errors" (how many of the calls failed) is optional, so clients that do not send it keep working.
+    if (!(exactKeys(event, ['kind', 'name', 'day', 'count']) || exactKeys(event, ['kind', 'name', 'day', 'count', 'errors']))) throw new Error('Invalid usage event.');
     const {kind, name, day, count} = event;
+    const errors = event.errors ?? 0;
     if (!['skill', 'tool'].includes(kind) || typeof name !== 'string' || !/^[A-Za-z0-9_.:-]{1,100}$/.test(name)) throw new Error('Invalid usage event.');
     if (typeof day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(day) || Number.isNaN(Date.parse(day)) || day < earliest || day > tomorrow) throw new Error('Usage day out of range.');
     if (!Number.isInteger(count) || count < 1 || count > 10000) throw new Error('Invalid usage count.');
-    return {kind, name, day, count};
+    if (!Number.isInteger(errors) || errors < 0 || errors > count) throw new Error('Invalid usage error count.');
+    return {kind, name, day, count, errors};
   });
 }
 

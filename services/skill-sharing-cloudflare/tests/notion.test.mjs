@@ -28,7 +28,7 @@ function setup(t, extra = {}) {
   const addDevice = (id, o = {}) => sqlite.prepare(`INSERT INTO devices(id,hash,label,active,source,person_name,email,pc_name,windows_user,connector_version,terms_version,created_at,last_seen)
     VALUES(?,?,?,?,'join',?,?,?,?,?,?,?,?)`).run(id,'hash-'+id,o.label ?? 'Label '+id,o.active ?? 1,o.person_name ?? null,o.email ?? null,o.pc_name ?? null,
     o.windows_user ?? null,o.connector_version ?? null,o.terms_version ?? null,o.created_at ?? 0,o.last_seen ?? 0);
-  const use = (device, kind, name, d, count) => sqlite.prepare('INSERT INTO usage VALUES(?,?,?,?,?)').run(device,kind,name,d,count);
+  const use = (device, kind, name, d, count, errors = 0) => sqlite.prepare('INSERT INTO usage(device,kind,name,day,count,errors) VALUES(?,?,?,?,?,?)').run(device,kind,name,d,count,errors);
   return {sqlite,env,addDevice,use};
 }
 
@@ -94,7 +94,7 @@ function team(s) {
   s.use('d1','skill','acad-layers',day(1),4);
   s.use('d1','skill','sheet-index',day(2),1);
   s.use('d1','skill','tiny',day(2),1);
-  s.use('d1','tool','get_elements',day(0),9);
+  s.use('d1','tool','get_elements',day(0),9,3);   // 3 of the 9 calls failed
   s.use('d2','skill','revit-check',day(29),3);
   s.use('d2','skill','old-skill',day(30),8);
 }
@@ -121,14 +121,16 @@ test('first run creates member and usage rows with exact property shapes; second
     Name:{title:[{text:{content:'Ahmed Ali'}}]},Email:{email:'Ahmed.Ali@Example.com'},PC:{rich_text:[{text:{content:'DESK-07'}}]},
     'Windows user':{rich_text:[{text:{content:'ahmed'}}]},Version:{rich_text:[{text:{content:'1.0.0-beta.18'}}]},Status:{select:{name:'Active'}},
     Joined:{date:{start:'2026-10-30T08:15:42.000Z'}},'Last seen':{date:{start:'2026-10-30T09:15:42.000Z'}},
-    'Skill uses (30 days)':{number:13},'Tool uses (30 days)':{number:9},'Top skills':{rich_text:[{text:{content:'revit-check (7), acad-layers (4), sheet-index (1)'}}]},
+    'Skill uses (30 days)':{number:13},'Tool uses (30 days)':{number:9},'Errors (30 days)':{number:3},'Top skills':{rich_text:[{text:{content:'revit-check (7), acad-layers (4), sheet-index (1)'}}]},
     'Terms version':{rich_text:[{text:{content:'2026-10-30'}}]},'Device ID':{rich_text:[{text:{content:'d1'}}]}}});
   assert.deepEqual(created('d2').properties,{Name:{title:[{text:{content:'Office PC'}}]},Email:{email:null},PC:{rich_text:[]},'Windows user':{rich_text:[]},
     Version:{rich_text:[]},Status:{select:{name:'Blocked'}},Joined:{date:null},'Last seen':{date:null},'Skill uses (30 days)':{number:3},
-    'Tool uses (30 days)':{number:0},'Top skills':{rich_text:[{text:{content:'revit-check (3)'}}]},'Terms version':{rich_text:[]},'Device ID':{rich_text:[{text:{content:'d2'}}]}});
+    'Tool uses (30 days)':{number:0},'Errors (30 days)':{number:0},'Top skills':{rich_text:[{text:{content:'revit-check (3)'}}]},'Terms version':{rich_text:[]},'Device ID':{rich_text:[{text:{content:'d2'}}]}});
   assert.deepEqual(created('skill:revit-check'),{parent:{type:'data_source_id',data_source_id:USAGE},properties:{Name:{title:[{text:{content:'revit-check'}}]},
-    Kind:{select:{name:'Skill'}},'Uses (30 days)':{number:10},'People (30 days)':{number:2},'Last used':{date:{start:day(0)}},Key:{rich_text:[{text:{content:'skill:revit-check'}}]}}});
+    Kind:{select:{name:'Skill'}},'Uses (30 days)':{number:10},'Errors (30 days)':{number:0},'Error rate':{number:0},'People (30 days)':{number:2},'Last used':{date:{start:day(0)}},Key:{rich_text:[{text:{content:'skill:revit-check'}}]}}});
   assert.equal(notion.value(USAGE,'tool:get_elements','Kind'),'Tool');
+  assert.equal(notion.value(USAGE,'tool:get_elements','Errors (30 days)'),3);
+  assert.equal(notion.value(USAGE,'tool:get_elements','Error rate'),0.3333,'3 of 9 calls failed');
   assert.equal(notion.value(USAGE,'skill:old-skill','Name'),undefined,'usage older than 30 days is not created');
   notion.reset();
   const again = await syncToNotion(s.env,{fetcher:notion.fetcher});

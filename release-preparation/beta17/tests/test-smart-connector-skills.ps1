@@ -464,6 +464,16 @@ public static class SkillStandIn
     Assert (-not (Test-Path $usage) -and -not (Test-Path $pending) -and @(Get-ChildItem $stateDir -Filter 'usage-taking-*').Count -eq 0) 'Sent lines were not removed'
     $run = Invoke-Skills @('usage', '--state-root', $stateDir)
     Assert ($run.Out.Trim() -eq 'No new usage to report.' -and @(Get-Requests | Where-Object { $_.Path -eq '/v1/usage' }).Count -eq 1) 'Empty run sent a request'
+    # Failed calls are counted, never described: a line with "failed" adds to "errors", which is sent only when above zero and never exceeds the count.
+    function Get-FailedLine([string]$Kind, [string]$Name, [string]$Day) { '{"kind":"' + $Kind + '","name":"' + $Name + '","day":"' + $Day + '","failed":true}' }
+    Add-Usage @((Get-UsageLine 'tool' 'set_wall' $today), (Get-UsageLine 'tool' 'set_wall' $today), (Get-FailedLine 'tool' 'set_wall' $today), (Get-FailedLine 'skill' 'broken-skill' $today), (Get-UsageLine 'tool' 'steady_tool' $today))
+    $run = Invoke-Skills @('usage', '--state-root', $stateDir)
+    Assert ($run.Code -eq 0 -and $run.Out.Trim() -eq 'Reported 3 usage record(s).') ("Failed-call result: $($run.Out) $($run.Err)")
+    $failBody = (@(Get-Requests | Where-Object { $_.Path -eq '/v1/usage' })[-1].Body | ConvertFrom-Json)
+    $wall = @($failBody.events | Where-Object { $_.name -eq 'set_wall' })[0]; $broken = @($failBody.events | Where-Object { $_.name -eq 'broken-skill' })[0]; $steady = @($failBody.events | Where-Object { $_.name -eq 'steady_tool' })[0]
+    Assert ($wall.count -eq 3 -and $wall.errors -eq 1 -and $broken.kind -eq 'skill' -and $broken.count -eq 1 -and $broken.errors -eq 1) ('Failed calls not counted: ' + ($failBody | ConvertTo-Json -Compress))
+    Assert ($steady.count -eq 1 -and -not ($steady.PSObject.Properties.Name -contains 'errors')) 'A day with no failure must look as before (no errors field)'
+    Assert (-not (($failBody | ConvertTo-Json -Compress) -match 'failed')) 'The word failed must not be sent, only the count'
     # A failed upload keeps the counts and merges them with new uses on the next run.
     Add-Usage @((Get-UsageLine 'tool' 'list_layers' $today))
     [SkillStandIn]::FailUsage = $true

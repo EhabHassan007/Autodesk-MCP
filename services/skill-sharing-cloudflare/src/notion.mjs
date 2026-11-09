@@ -49,32 +49,33 @@ export function norm(type, v) {
 }
 
 const MEMBER = {Name:'title',Email:'email',PC:'rich_text','Windows user':'rich_text',Version:'rich_text',Status:'select',Joined:'date',
-  'Last seen':'date','Skill uses (30 days)':'number','Tool uses (30 days)':'number','Top skills':'rich_text','Terms version':'rich_text','Device ID':'rich_text'};
-const USAGE = {Name:'title',Kind:'select','Uses (30 days)':'number','People (30 days)':'number','Last used':'date',Key:'rich_text'};
+  'Last seen':'date','Skill uses (30 days)':'number','Tool uses (30 days)':'number','Errors (30 days)':'number','Top skills':'rich_text','Terms version':'rich_text','Device ID':'rich_text'};
+const USAGE = {Name:'title',Kind:'select','Uses (30 days)':'number','Errors (30 days)':'number','Error rate':'number','People (30 days)':'number','Last used':'date',Key:'rich_text'};
 
 async function desiredRows(db, today) {
   const since = isoDay(today-29*DAY);
   const devices = (await db.prepare(`SELECT id,label,active,person_name,email,pc_name,windows_user,connector_version,terms_version,created_at,last_seen
     FROM devices ORDER BY created_at,id`).all()).results;
-  const perDevice = (await db.prepare(`SELECT device,kind,name,SUM(count) AS uses FROM usage WHERE day>=?
+  const perDevice = (await db.prepare(`SELECT device,kind,name,SUM(count) AS uses,SUM(errors) AS errors FROM usage WHERE day>=?
     GROUP BY device,kind,name ORDER BY uses DESC,name`).bind(since).all()).results;
-  const perName = (await db.prepare(`SELECT kind,name,SUM(count) AS uses,COUNT(DISTINCT device) AS people,MAX(day) AS last_day FROM usage
+  const perName = (await db.prepare(`SELECT kind,name,SUM(count) AS uses,SUM(errors) AS errors,COUNT(DISTINCT device) AS people,MAX(day) AS last_day FROM usage
     WHERE day>=? AND kind IN ('skill','tool') GROUP BY kind,name ORDER BY kind,name`).bind(since).all()).results;
   const stats = {};
   for (const r of perDevice) {
-    const s = stats[r.device] ??= {skill:0,tool:0,top:[]};
+    const s = stats[r.device] ??= {skill:0,tool:0,errors:0,top:[]};
     if (r.kind in s) s[r.kind] += r.uses;
+    s.errors += r.errors;
     if (r.kind === 'skill' && s.top.length < 3) s.top.push(`${r.name} (${r.uses})`);
   }
   const members = devices.map(d => {
-    const s = stats[d.id] ?? {skill:0,tool:0,top:[]};
+    const s = stats[d.id] ?? {skill:0,tool:0,errors:0,top:[]};
     return {key:d.id,values:{Name:d.person_name || d.label,Email:d.email,PC:d.pc_name,'Windows user':d.windows_user,Version:d.connector_version,
       Status:d.active === 1 ? 'Active' : 'Blocked',Joined:isoTime(d.created_at),'Last seen':isoTime(d.last_seen),
-      'Skill uses (30 days)':s.skill,'Tool uses (30 days)':s.tool,'Top skills':s.top.join(', '),'Terms version':d.terms_version,'Device ID':d.id}};
+      'Skill uses (30 days)':s.skill,'Tool uses (30 days)':s.tool,'Errors (30 days)':s.errors,'Top skills':s.top.join(', '),'Terms version':d.terms_version,'Device ID':d.id}};
   });
   const usage = perName.map(r => {
     const key = `${r.kind}:${r.name}`;
-    return {key,values:{Name:r.name,Kind:r.kind === 'tool' ? 'Tool' : 'Skill','Uses (30 days)':r.uses,'People (30 days)':r.people,'Last used':r.last_day,Key:key}};
+    return {key,values:{Name:r.name,Kind:r.kind === 'tool' ? 'Tool' : 'Skill','Uses (30 days)':r.uses,'Errors (30 days)':r.errors,'Error rate':r.uses ? Math.round(r.errors/r.uses*10000)/10000 : 0,'People (30 days)':r.people,'Last used':r.last_day,Key:key}};
   });
   return {members,usage};
 }
@@ -147,7 +148,7 @@ export async function syncToNotion(env, {fetcher = (...args) => fetch(...args), 
     const desired = await desiredRows(env.DB,at);
     const members = plan(MEMBER,'Device ID',desired.members,await readAll(env.NOTION_MEMBERS_SOURCE));
     const usage = plan(USAGE,'Key',desired.usage,await readAll(env.NOTION_USAGE_SOURCE),
-      {test:key => /^(skill|tool):/.test(key),values:{'Uses (30 days)':0,'People (30 days)':0}});
+      {test:key => /^(skill|tool):/.test(key),values:{'Uses (30 days)':0,'Errors (30 days)':0,'Error rate':0,'People (30 days)':0}});
     summary.members.unchanged = members.unchanged;
     summary.usage.unchanged = usage.unchanged;
     queue = [...members.writes.map(w=>({...w,part:'members',source:env.NOTION_MEMBERS_SOURCE})),

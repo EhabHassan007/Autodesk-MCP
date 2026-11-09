@@ -351,6 +351,10 @@ namespace SmartConnector
             catch (Exception exception)
             {
                 Exception shown = exception is System.Reflection.TargetInvocationException && exception.InnerException != null ? exception.InnerException : exception;
+                // A failed call of a real tool is counted too (a count only, never the message), so the administrator can see
+                // which tools fail. A tool name that does not exist, or a mistyped skill name, is not recorded: it would only
+                // add junk rows to the dashboard.
+                if (AutoCadNames.Contains(name) || RevitNames.Contains(name) || name == "connection_status") Usage.Record("tool", name, true);
                 return Json.Object("content", new object[] { Json.Object("type", "text", "text", shown.Message) }, "isError", true);
             }
         }
@@ -388,13 +392,16 @@ namespace SmartConnector
     // Only computers joined to the team skill service record. Failures never affect the tool call.
     internal static class Usage
     {
-        internal static void Record(string kind, string name)
+        // failed: the call raised an error. Only that fact is recorded (never the message, which can hold project names).
+        internal static void Record(string kind, string name, bool failed = false)
         {
             try
             {
                 if (!System.Text.RegularExpressions.Regex.IsMatch(name ?? "", "^[A-Za-z0-9_.:-]{1,100}$")) return;
                 if (!File.Exists(Path.Combine(Paths.SkillState, "service.json"))) return;
-                string line = Json.Serializer.Serialize(Json.Object("kind", kind, "name", name, "day", DateTime.Now.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture))) + "\n";
+                Dictionary<string, object> entry = Json.Object("kind", kind, "name", name, "day", DateTime.Now.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture));
+                if (failed) entry["failed"] = true;
+                string line = Json.Serializer.Serialize(entry) + "\n";
                 string path = Path.Combine(Paths.SkillState, "usage.jsonl");
                 // Several Codex/Claude windows can append at once; retry briefly if the file is busy.
                 for (int attempt = 0; attempt < 3; attempt++)

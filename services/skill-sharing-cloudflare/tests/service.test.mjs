@@ -337,12 +337,19 @@ test('usage is validated, aggregated per day, and has its own budget',async t=>{
   assert.equal(r.status,200);assert.equal((await r.json()).accepted,2);
   await s.request('/v1/usage','POST',d.device_token,{events:[{kind:'skill',name:'revit-read-write',day:today,count:4}]});
   assert.equal(s.sqlite.prepare("SELECT count FROM usage WHERE kind='skill'").get().count,7);
+  // Failed calls: "errors" is optional, adds up per day, and can never exceed the count.
+  await s.request('/v1/usage','POST',d.device_token,{events:[{kind:'tool',name:'list_levels',day:today,count:3,errors:1}]});
+  await s.request('/v1/usage','POST',d.device_token,{events:[{kind:'tool',name:'list_levels',day:today,count:2,errors:2}]});
+  assert.deepEqual({...s.sqlite.prepare("SELECT count,errors FROM usage WHERE name='list_levels'").get()},{count:7,errors:3});
+  assert.equal(s.sqlite.prepare("SELECT errors FROM usage WHERE kind='skill'").get().errors,0,'clients that send no errors keep 0');
+  for (const bad of [{...events[0],errors:4},{...events[0],errors:-1},{...events[0],errors:1.5},{...events[0],errors:'1'}])
+    assert.equal((await s.request('/v1/usage','POST',d.device_token,{events:[bad]})).status,422);
   for (const bad of [{events:[]},{events:[{...events[0],kind:'file'}]},{events:[{...events[0],name:'C:\\drawings\\x.dwg'}]},{events:[{...events[0],day:'2000-01-01'}]},
     {events:[{...events[0],count:0}]},{events:[{...events[0],args:'secret'}]},{events:Array(501).fill(events[0])}])
     assert.equal((await s.request('/v1/usage','POST',d.device_token,bad)).status,422);
   assert.equal((await s.request('/v1/usage','POST','not-a-device-token',{events})).status,401);
-  // 9 calls so far (2 accepted, 7 rejected) count toward 30 an hour, separate from the 20/hour library budget.
-  for (let i=0;i<21;i++) assert.equal((await s.request('/v1/usage','POST',d.device_token,{events})).status,200);
+  // 15 calls so far (4 accepted, 11 rejected) count toward 30 an hour, separate from the 20/hour library budget.
+  for (let i=0;i<15;i++) assert.equal((await s.request('/v1/usage','POST',d.device_token,{events})).status,200);
   assert.equal((await s.request('/v1/library','GET',d.device_token)).status,200);
   assert.equal((await s.request('/v1/usage','POST',d.device_token,{events})).status,429);
 });
@@ -351,7 +358,7 @@ test('admin overview lists people, usage, submissions; block and unblock work',a
   const s=setup(t),d=await joinAs(s),old=await s.enroll();
   const today=new Date().toISOString().slice(0,10);
   await s.request('/v1/usage','POST',d.device_token,{events:[{kind:'skill',name:'revit-read-write',day:today,count:5}]});
-  s.sqlite.prepare("INSERT INTO usage VALUES(?,?,?,?,?)").run(d.device_id,'skill','ancient-skill','2000-01-01',9);
+  s.sqlite.prepare("INSERT INTO usage(device,kind,name,day,count,errors) VALUES(?,?,?,?,?,0)").run(d.device_id,'skill','ancient-skill','2000-01-01',9);
   assert.equal((await s.request('/v1/submissions','POST',d.device_token,body)).status,200);
   assert.equal((await s.request('/admin/api/overview','GET',d.device_token)).status,403);
   assert.equal((await s.request('/admin/api/overview','GET',join)).status,403);

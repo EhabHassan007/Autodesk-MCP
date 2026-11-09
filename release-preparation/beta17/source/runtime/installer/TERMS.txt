@@ -15,7 +15,7 @@ When this computer joins the team service, the following is sent to your company
  - the computer name and your Windows user name
  - the internet (IP) address the service sees, and when this computer last connected
  - the connector version
- - which connector skills and tools are used, as names and daily counts only
+ - which connector skills and tools are used, as names and daily counts only, plus how many of those calls failed (a number; the error message is never sent)
  - the skills you save that are submitted for review
 The tool does NOT send your drawings, models, file names or paths, the text of your chats, or anything you type into Revit, AutoCAD, Codex or Claude. The administrator can view this information on a private dashboard and can block a computer. The dashboard is kept in the company's Notion workspace, where it is updated every hour; only the people who administer Smart Connector have access to it. Usage records are deleted from the team service after 180 days, and the dashboard shows the last 30 days.
 

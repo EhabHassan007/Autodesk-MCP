@@ -97,6 +97,17 @@ try {
     $usage = Get-Content (Join-Path $env:LOCALAPPDATA 'AutodeskMcpSkillCollection\usage.jsonl') -Raw
     Assert ($usage -match ('"kind":"skill","name":"' + [regex]::Escape($first.name) + '"') -or $usage -match ('"name":"' + [regex]::Escape($first.name) + '"')) "Skill use was not recorded: $usage"
     'PASS: workflow skills match the bridge, invalid names and paths are refused, use is recorded on team PCs'
+    # A failed call of a real tool is recorded as such (no message); a tool name that does not exist is not recorded at all.
+    $usagePath = Join-Path $env:LOCALAPPDATA 'AutodeskMcpSkillCollection\usage.jsonl'
+    $before = @(Get-Content $usagePath).Count
+    $failedCall = Invoke-Tool 'drawing_info' @{}
+    $unknownCall = Invoke-Tool 'no_such_tool' @{}
+    Assert ($failedCall.isError -and $unknownCall.isError) 'The calls should fail'
+    $added = @(Get-Content $usagePath | Select-Object -Skip $before)
+    Assert ($added.Count -eq 1 -and $added[0] -match '"kind":"tool","name":"drawing_info"' -and $added[0] -match '"failed":true') ('A failed tool call was not recorded as failed: ' + ($added -join ' | '))
+    Assert (-not ($added[0] -match 'AutoCAD instance')) 'The error message must not be recorded'
+    'PASS: a failed call of a real tool is recorded as failed without its message; an unknown tool name is not recorded'
+
 
     # 5. Argument checks and messages, before AutoCAD or Revit is contacted.
     $checks = @(

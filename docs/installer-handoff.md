@@ -162,6 +162,11 @@ Keep these out of user documentation.
   Insights page; set Decision there and the service applies it within the hour (second cron, `47 * * * *`), only if the
   editor is in `NOTION_REVIEWERS`. Setup steps are in `services/skill-sharing-cloudflare/README.md`. Unverified against
   the real Notion API and GitHub until deployed.
+- **Failed-call counts (built on `skill-errors`, not deployed or released).** The connector counts failed Revit/AutoCAD
+  tool calls (a number per tool and day, never the message) and sends it with usage; the service stores `errors`
+  (migration `0007_usage_errors.sql`) and Notion shows `Errors (30 days)` and `Error rate`. A skill's own success or
+  failure is not observable: a skill is instructions the AI reads. Deploy the service BEFORE any release that sends
+  `errors` (the old service rejects the new field). The terms of use sentence on usage changed (still DRAFT).
 - Ship the Revit add-in prebuilt instead of compiling on each PC (removes the last compile-on-PC step).
 - Publish: nothing is published to the public `Autodesk-MCP-Releases` repo; it needs the owner's approval each time.
 
