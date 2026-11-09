@@ -3,6 +3,7 @@ import { GitHub, safeGitHubDetail } from './github.mjs';
 import { bytes, canonical, CATEGORIES, hash, MAX_BODY, SKILL_NAME, validateProfile, validateSkills, validateUsage, VERSION } from './validation.mjs';
 import { groupReviews, reviewSummary, undecided } from './review.mjs';
 import { DASHBOARD_CSS, DASHBOARD_HTML, DASHBOARD_JS } from './dashboard.mjs';
+import { lastSync, saveSync, syncToNotion } from './notion.mjs';
 
 class HTTPError extends Error {
   constructor(status, message) { super(message); this.status = status; }
@@ -158,7 +159,14 @@ export async function handle(request, env, backend) {
         FROM usage WHERE day>=? GROUP BY device,kind,name ORDER BY last30 DESC`).bind(isoDay(today-6*DAY),isoDay(today-29*DAY)).all()).results;
       const submissions = (await env.DB.prepare('SELECT device,digest,at,skills,status FROM submission_log ORDER BY at DESC LIMIT 200').all()).results
         .map(row => ({...row,skills:JSON.parse(row.skills)}));
-      return json({generated_at:today,devices,usage,submissions});
+      // Before migration 0005 is applied the table is missing; the overview still loads.
+      const notion_sync = await lastSync(env.DB).catch(()=>null);
+      return json({generated_at:today,devices,usage,submissions,notion_sync});
+    }
+    if (path === '/admin/api/notion-sync' && request.method === 'POST') {
+      await admin(request,env);
+      const summary = await saveSync(env.DB,await syncToNotion(env));
+      return json(summary,summary.error ? 502 : 200);
     }
     if (path === '/v1/enroll' && request.method === 'POST') {
       const ip = clientIP(request) || 'unknown';
@@ -303,4 +311,8 @@ export async function handle(request, env, backend) {
     return json({detail:error instanceof HTTPError ? error.message : 'Service unavailable. Retry later.'},error instanceof HTTPError ? error.status : 503);
   }
 }
-export default {fetch(request,env) { return handle(request,env); }};
+export default {
+  fetch(request,env) { return handle(request,env); },
+  // Hourly cron (wrangler.jsonc): copy the team summaries to Notion and keep the result for the dashboard.
+  scheduled(event,env,ctx) { ctx.waitUntil(syncToNotion(env).then(summary=>saveSync(env.DB,summary))); }
+};
