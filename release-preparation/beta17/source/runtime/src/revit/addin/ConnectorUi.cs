@@ -42,13 +42,21 @@ namespace BimCadMcp.Revit
             string directory = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
             for (int index = 0; index < 8 && !String.IsNullOrWhiteSpace(directory); index++)
             {
-                if (File.Exists(Path.Combine(directory, "installer", "Setup-BimCad.ps1"))) return directory;
+                if (IsInstallRoot(directory)) return directory;
                 DirectoryInfo parent = Directory.GetParent(directory);
                 directory = parent == null ? null : parent.FullName;
             }
             string defaultRoot = Path.Combine(LocalAppData, "BIM-CAD-MCP");
-            if (File.Exists(Path.Combine(defaultRoot, "installer", "Setup-BimCad.ps1"))) return defaultRoot;
+            if (IsInstallRoot(defaultRoot)) return defaultRoot;
             throw new DirectoryNotFoundException("The Smart Connector installation folder could not be found. Run the installer again.");
+        }
+
+        // An install from the setup .exe carries the compiled program and no script; a copy taken from the repository has
+        // the scripts and no program. Either marks the installation folder.
+        private static bool IsInstallRoot(string directory)
+        {
+            return File.Exists(Path.Combine(directory, "bin", "SmartConnector.exe"))
+                || File.Exists(Path.Combine(directory, "installer", "Setup-BimCad.ps1"));
         }
 
         // Scripts copied to the state folder keep working while an update replaces the install folder.
