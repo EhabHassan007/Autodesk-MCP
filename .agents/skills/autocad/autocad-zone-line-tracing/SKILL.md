@@ -1,5 +1,6 @@
 ---
 name: autocad-zone-line-tracing
+category: autocad
 description: Draw and check zone / area outlines in AutoCAD that sit exactly on the plan's own linework (walls, ceiling outlines, track edges) with true arcs, shared edges between neighbouring zones, and no gaps or overlaps. Use when a user marks zones on a plan (sketch, screenshot, or their own polylines) and wants clean closed polylines per zone, or wants their zone polylines checked.
 ---
 

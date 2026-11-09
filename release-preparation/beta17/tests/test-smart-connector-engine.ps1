@@ -356,7 +356,7 @@ exit /b 0
     # ---------- 4. Public release update ----------
     # A release: the installed files with a newer VERSION, a changed README, a new file, a file gone, and a different program.
     $releaseRoot = Join-Path $t 'release'
-    function New-Release([string]$Name, [string]$ReleaseVersion, [switch]$WrongChecksum, [switch]$Collide) {
+    function New-Release([string]$Name, [string]$ReleaseVersion, [switch]$WrongChecksum, [switch]$Collide, [switch]$ScriptFree) {
         $folder = Join-Path $releaseRoot $Name
         $stage = Join-Path $folder 'stage\Autodesk-MCP-Payload'
         New-Item -ItemType Directory -Force $stage | Out-Null
@@ -368,6 +368,12 @@ exit /b 0
         Remove-Item (Join-Path $stage '.agents\skills\uncategorized\squeeze') -Recurse -Force
         # A different program: the same one with one more byte, so the running exe has to be replaced.
         $stream = [IO.File]::Open((Join-Path $stage 'bin\SmartConnector.exe'), 'Append'); $stream.WriteByte(0); $stream.Close()
+        if ($ScriptFree) {
+            # What the script-free release ships: no script outside the skill library (its helper scripts stay).
+            $library = (Join-Path $stage '.agents') + '\'
+            Get-ChildItem -LiteralPath $stage -Recurse -File -Force | Where-Object { ('.ps1', '.psm1', '.psd1', '.cmd', '.bat', '.vbs', '.js', '.wsf' -contains $_.Extension.ToLowerInvariant()) -and -not $_.FullName.StartsWith($library, [StringComparison]::OrdinalIgnoreCase) } | Remove-Item -Force
+            Get-ChildItem -LiteralPath $stage -Recurse -Directory -Force | Sort-Object { $_.FullName.Length } -Descending | Where-Object { -not (Get-ChildItem -LiteralPath $_.FullName -Force) } | Remove-Item -Force
+        }
         if ($Collide) { New-Item -ItemType Directory -Force (Join-Path $stage 'zzz') | Out-Null; [IO.File]::WriteAllText((Join-Path $stage 'zzz\child.txt'), 'x') }
         $payload = Join-Path $folder 'Autodesk-MCP-Payload.zip'
         New-TestZip (Split-Path $stage -Parent) $payload ''
@@ -470,6 +476,19 @@ exit /b 0
     $run = Invoke-Engine -State $s -Program $installedExe -Arguments @('--action', 'CheckUpdate', '--repository-path', $installed, '--release-manifest-url', 'http://example.invalid/latest.json')
     Assert ($run.Code -eq 1 -and $run.Err -match 'must use HTTPS') ('A manifest that is not HTTPS must be refused: ' + (Show-Run $run))
     'PASS: CheckUpdate reads the manifest, records the available version, reports older releases and refuses a manifest that is not HTTPS'
+    # Until a release carries smart-connector.json the usual address answers 404: latest.json of the same channel is read instead.
+    # An address given on purpose is never replaced.
+    if ($http) {
+        $channel = Join-Path $serve 'releases\latest\download'
+        New-Item -ItemType Directory -Force $channel | Out-Null
+        Copy-Item (Join-Path $good.Folder 'latest.json') (Join-Path $channel 'latest.json')
+        $run = Invoke-Engine -State $s -Program $installedExe -Arguments @('--action', 'CheckUpdate', '--repository-path', $installed, '--release-manifest-url', "$http/releases/latest/download/smart-connector.json")
+        Assert ($run.Code -eq 0 -and (Has-Line $run '\[UPDATE_AVAILABLE\] Version 9\.9\.0 is available\.')) ('CheckUpdate without smart-connector.json did not use latest.json: ' + (Show-Run $run))
+        $run = Invoke-Engine -State $s -Program $installedExe -Arguments @('--action', 'CheckUpdate', '--repository-path', $installed, '--release-manifest-url', "$http/missing/my-manifest.json")
+        Assert ($run.Code -eq 1 -and $run.Err -match 'Could not read the public release channel') ('A manifest address given on purpose was replaced: ' + (Show-Run $run))
+        'PASS: without smart-connector.json the updater reads latest.json; a chosen address is not replaced'
+    }
+
 
     # Update: wrong checksum changes nothing.
     $s = New-State 'update-wrong'
@@ -575,6 +594,40 @@ exit /b 0
     Assert (@(Get-ChildItem -LiteralPath (Join-Path $installed 'bin') -Filter '*.old*').Count -eq 0) 'The renamed program was not deleted at the next start'
     Assert (-not (Test-Path $recorded)) 'The list of files to delete was not cleared'
     'PASS: update from a local release: files replaced in place (running program included), MCP servers of this install stopped, preserved folders kept, skill library replaced, old files deleted at the next start'
+
+    # A release without scripts (smart-connector.json channel): the scripts an older version left are removed after the update,
+    # the skill library's own helper scripts, the program and the team's folders stay. $installed is at 9.9.0 here and still has scripts.
+    $scriptTypes = '.ps1', '.psm1', '.psd1', '.cmd', '.bat', '.vbs', '.js', '.wsf'
+    function Get-OutsideLibraryScripts([string]$Folder) {
+        $library = (Join-Path $Folder '.agents') + '\'
+        @(Get-ChildItem -LiteralPath $Folder -Recurse -File -Force | Where-Object { ($scriptTypes -contains $_.Extension.ToLowerInvariant()) -and -not $_.FullName.StartsWith($library, [StringComparison]::OrdinalIgnoreCase) -and $_.FullName -notlike '*\src\revit\bin\*' })
+    }
+    $installedExe = Join-Path $installed 'bin\SmartConnector.exe'
+    Assert ((Get-OutsideLibraryScripts $installed).Count -gt 0) 'The test install should still hold scripts before the script-free update'
+    $libraryScripts = @(Get-ChildItem -LiteralPath (Join-Path $installed '.agents') -Recurse -File -Force | Where-Object { $scriptTypes -contains $_.Extension.ToLowerInvariant() }).Count
+    $free = New-Release 'free' '9.9.1' -ScriptFree
+    Copy-Item $free.Zip $serve
+    Assert ((Get-OutsideLibraryScripts (Join-Path $free.Folder 'stage\Autodesk-MCP-Payload')).Count -eq 0) 'The test release for the script-free update holds a script'
+    $freeManifest = ([Uri](Write-Manifest $free $null 'smart-connector-file.json')).AbsoluteUri
+    $s = New-State 'update-free'
+    $run = Invoke-Engine -State $s -Program $installedExe -Arguments @('--action', 'Update', '--repository-path', $installed, '--release-manifest-url', $freeManifest, '--skills', 'Off', '--ai-clients', 'Codex,ClaudeCode')
+    Assert ($run.Code -eq 0 -and (Has-Line $run '\[UPDATE_INSTALLED\] Smart Connector 9\.9\.1 is installed\.')) ('Script-free update: ' + (Show-Run $run))
+    $left = @(Get-OutsideLibraryScripts $installed)
+    Assert ($left.Count -eq 0) ('Scripts were left after a script-free update: ' + (($left | ForEach-Object { $_.FullName }) -join ', '))
+    Assert (Has-Line $run 'script file\(s\) left by an older version') ('The update did not say it removed scripts: ' + (Show-Run $run))
+    Assert (-not (Test-Path (Join-Path $installed 'scripts'))) 'The empty scripts folder was left behind'
+    $libraryAfter = @(Get-ChildItem -LiteralPath (Join-Path $installed '.agents') -Recurse -File -Force | Where-Object { $scriptTypes -contains $_.Extension.ToLowerInvariant() }).Count
+    Assert ($libraryAfter -eq $libraryScripts) "The skill library's own scripts changed ($libraryScripts before, $libraryAfter after)"
+    foreach ($folder in 'skill-review', 'team-candidates', 'team-collection', 'backups') { Assert ((Get-Content (Join-Path $installed "$folder\preserve.txt") -Raw).Trim() -eq $folder) "$folder was lost in the script-free update" }
+    Assert ((Get-Content (Join-Path $installed 'VERSION') -Raw).Trim() -eq '9.9.1') 'The script-free release was not installed'
+    # The AI apps were pointed at the program, so nothing needs the removed scripts. The program still works and counts as installed.
+    Assert ((Get-Content (Join-Path $s.Fake 'codex.log') -Raw).Replace('"', '').Contains("mcp add autodesk -- $installedExe mcp")) 'Codex was not pointed at the program in the script-free update'
+    $run = Invoke-Engine -State $s -Program $installedExe -Arguments @('--action', 'Status', '--product', 'Revit', '--repository-path', $installed)
+    Assert ($run.Code -eq 0) ('The program does not run after the script-free update: ' + (Show-Run $run))
+    # A second check sees nothing newer.
+    $run = Invoke-Engine -State $s -Program $installedExe -Arguments @('--action', 'CheckUpdate', '--repository-path', $installed, '--release-manifest-url', $freeManifest)
+    Assert ($run.Code -eq 0 -and (Has-Line $run '\[UP_TO_DATE\]')) ('CheckUpdate after the script-free update: ' + (Show-Run $run))
+    'PASS: a script-free release removes the scripts older versions left; skill-library scripts, the program and the team folders stay'
 
     # Installing a package into a permanent folder (the ZIP installer): the program is not copied anywhere else to run.
     $s = New-State 'package'
