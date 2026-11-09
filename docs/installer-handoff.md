@@ -143,7 +143,10 @@ Keep these out of user documentation.
    `npm run deploy`, then `POST /admin/api/notion-sync`. Notion page:
    https://app.notion.com/p/4125a80a6f4f812484d3e86894e3e30b (data sources: members
    `c05261ca-cde9-4efd-bc8c-73be82269d46`, usage `369aab91-4554-42c4-9754-401299888a3f`).
-3. Review the terms of use 2026-11-08 with legal/HR (still DRAFT).
+3. Skill review in Notion (after merging): `npx wrangler secret put NOTION_REVIEWERS` (your Notion user ID),
+   `npm run migrate:remote`, `npm run deploy`, `POST /admin/api/notion-review`. Database:
+   https://app.notion.com/p/d07fb77d43684507b3f1b70a50eccb58 (data source `ca563d75-3682-47a0-a994-d574182fb2b3`).
+4. Review the terms of use 2026-11-08 with legal/HR (still DRAFT).
 
 
 **Decisions waiting for the owner**
@@ -155,8 +158,10 @@ Keep these out of user documentation.
   files** (both ZIPs and both manifests) to the same release; `scripts/publish-public-release.ps1` is the older flow
   and only attaches the full ZIP and `latest.json`. Windows CI is green on the branch; not yet tried against a real release.
   Remaining: make the full ZIP script-free once no PC is on the old updater, and a script-free ZIP installer route.
-- **Skill review in Notion** (approve/reject + category in a Notion database, applied by the service hourly), so the
-  Cloudflare admin page is never needed.
+- **Skill review in Notion (built on `skill-review-notion`, not deployed).** A "Skill review" database on the Team
+  Insights page; set Decision there and the service applies it within the hour (second cron, `47 * * * *`), only if the
+  editor is in `NOTION_REVIEWERS`. Setup steps are in `services/skill-sharing-cloudflare/README.md`. Unverified against
+  the real Notion API and GitHub until deployed.
 - Ship the Revit add-in prebuilt instead of compiling on each PC (removes the last compile-on-PC step).
 - Publish: nothing is published to the public `Autodesk-MCP-Releases` repo; it needs the owner's approval each time.
 

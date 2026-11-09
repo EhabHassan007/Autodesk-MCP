@@ -4,6 +4,7 @@ import { bytes, canonical, CATEGORIES, hash, MAX_BODY, SKILL_NAME, validateProfi
 import { groupReviews, reviewSummary, undecided } from './review.mjs';
 import { DASHBOARD_CSS, DASHBOARD_HTML, DASHBOARD_JS } from './dashboard.mjs';
 import { lastSync, saveSync, syncToNotion } from './notion.mjs';
+import { lastReviewSync, saveReviewSync, syncReviews } from './notion-review.mjs';
 
 class HTTPError extends Error {
   constructor(status, message) { super(message); this.status = status; }
@@ -74,6 +75,7 @@ async function readJSON(request) {
   catch { throw new HTTPError(422,'Invalid JSON body.'); }
 }
 
+const REVIEW_CRON = '47 * * * *';   // Must match wrangler.jsonc.
 // Decided uploads ("pr/skill") and rejected content ("skill/key"), so neither comes back for review.
 async function reviewState(db) {
   const rows = (await db.prepare('SELECT pr,skill,decision,content_key FROM review_decisions').all()).results;
@@ -107,6 +109,43 @@ let cachedGitHub, cachedEnv;
 function github(env) {
   if (cachedEnv !== env) { cachedGitHub = new GitHub(env); cachedEnv = env; }
   return cachedGitHub;
+}
+
+// The one place a reviewed skill is approved or rejected, for the dashboard and for Notion alike.
+// The decision applies only to the exact upload and approved copy that were reviewed. Throws HTTPError.
+export async function applyDecision(env, gh, data) {
+  const {pr,skill,decision,head_sha,key,approved_key,category} = data ?? {};
+  if (!Number.isInteger(pr) || pr < 1 || typeof skill !== 'string' || !SKILL_NAME.test(skill) || !['approve','reject'].includes(decision)
+    || ![head_sha,key,approved_key].every(v=>typeof v === 'string' && v.length <= 100)) throw new HTTPError(422,'Invalid review decision.');
+  if (decision === 'approve' && (!CATEGORIES.has(category) || category === 'uncategorized')) throw new HTTPError(422,'Choose the category this skill belongs to.');
+  let current;
+  try { current = await gh.reviewOne(pr); }
+  catch (error) { throw new HTTPError(502,safeGitHubDetail(error)); }
+  const item = current?.items.find(i=>i.name === skill);
+  if (!item || item.head_sha !== head_sha || item.key !== key || item.approved_key !== approved_key)
+    throw new HTTPError(409,'This upload or the approved copy changed, or it was already handled. Refresh and review it again.');
+  if (decision === 'approve' && item.checks.blocked.length) throw new HTTPError(422,'This upload fails a required check and cannot be approved.');
+  if (decision === 'approve' && item.checks.flags.length && data.accept_flags !== true) throw new HTTPError(422,'Confirm that you checked the flagged lines before approving.');
+  const claimed = await env.DB.prepare(`INSERT INTO review_decisions(pr,skill,head_sha,content_key,decision,category,at) VALUES(?,?,?,?,?,?,?)
+    ON CONFLICT(pr,skill) DO NOTHING RETURNING pr`).bind(pr,skill,head_sha,key,decision,decision === 'approve' ? category : null,now()).first();
+  if (!claimed) throw new HTTPError(409,'This upload was already decided.');
+  let commit = null;
+  if (decision === 'approve') {
+    try { commit = await gh.approveSkill(item,category); }
+    catch (error) {
+      await env.DB.prepare('DELETE FROM review_decisions WHERE pr=? AND skill=?').bind(pr,skill).run();
+      throw new HTTPError(502,safeGitHubDetail(error));
+    }
+    await env.DB.prepare('UPDATE review_decisions SET commit_sha=? WHERE pr=? AND skill=?').bind(commit,pr,skill).run();
+  }
+  let closed = false;
+  try { closed = await closeWhenDecided(env.DB,gh,pr,current.items); } catch { /* The decision stands; the PR can be closed from the dashboard. */ }
+  return {pr,skill,decision,commit,closed};
+}
+
+// Notion "Skill review": apply the owner's decisions, then list what waits for review. Same checks as the dashboard.
+export async function runReviewSync(env, {gh, ...options} = {}) {
+  return saveReviewSync(env.DB,await syncReviews(env,{gh:gh || github(env),decide:applyDecision,state:reviewState,sendersFor,...options}));
 }
 
 export async function handle(request, env, backend) {
@@ -161,7 +200,13 @@ export async function handle(request, env, backend) {
         .map(row => ({...row,skills:JSON.parse(row.skills)}));
       // Before migration 0005 is applied the table is missing; the overview still loads.
       const notion_sync = await lastSync(env.DB).catch(()=>null);
-      return json({generated_at:today,devices,usage,submissions,notion_sync});
+      const notion_review_sync = await lastReviewSync(env.DB).catch(()=>null);
+      return json({generated_at:today,devices,usage,submissions,notion_sync,notion_review_sync});
+    }
+    if (path === '/admin/api/notion-review' && request.method === 'POST') {
+      await admin(request,env);
+      const summary = await runReviewSync(env,{gh:backend});
+      return json(summary,summary.error ? 502 : 200);
     }
     if (path === '/admin/api/notion-sync' && request.method === 'POST') {
       await admin(request,env);
@@ -262,36 +307,7 @@ export async function handle(request, env, backend) {
     }
     if (path === '/admin/api/reviews/decide' && request.method === 'POST') {
       await admin(request,env);
-      const data = await readJSON(request);
-      const {pr,skill,decision,head_sha,key,approved_key,category} = data ?? {};
-      if (!Number.isInteger(pr) || pr < 1 || typeof skill !== 'string' || !SKILL_NAME.test(skill) || !['approve','reject'].includes(decision)
-        || ![head_sha,key,approved_key].every(v=>typeof v === 'string' && v.length <= 100)) throw new HTTPError(422,'Invalid review decision.');
-      if (decision === 'approve' && (!CATEGORIES.has(category) || category === 'uncategorized')) throw new HTTPError(422,'Choose the category this skill belongs to.');
-      const gh = backend || github(env);
-      let current;
-      try { current = await gh.reviewOne(pr); }
-      catch (error) { throw new HTTPError(502,safeGitHubDetail(error)); }
-      // The decision applies only to the exact upload and approved copy the owner looked at.
-      const item = current?.items.find(i=>i.name === skill);
-      if (!item || item.head_sha !== head_sha || item.key !== key || item.approved_key !== approved_key)
-        throw new HTTPError(409,'This upload or the approved copy changed, or it was already handled. Refresh and review it again.');
-      if (decision === 'approve' && item.checks.blocked.length) throw new HTTPError(422,'This upload fails a required check and cannot be approved.');
-      if (decision === 'approve' && item.checks.flags.length && data.accept_flags !== true) throw new HTTPError(422,'Confirm that you checked the flagged lines before approving.');
-      const claimed = await env.DB.prepare(`INSERT INTO review_decisions(pr,skill,head_sha,content_key,decision,category,at) VALUES(?,?,?,?,?,?,?)
-        ON CONFLICT(pr,skill) DO NOTHING RETURNING pr`).bind(pr,skill,head_sha,key,decision,decision === 'approve' ? category : null,now()).first();
-      if (!claimed) throw new HTTPError(409,'This upload was already decided.');
-      let commit = null;
-      if (decision === 'approve') {
-        try { commit = await gh.approveSkill(item,category); }
-        catch (error) {
-          await env.DB.prepare('DELETE FROM review_decisions WHERE pr=? AND skill=?').bind(pr,skill).run();
-          throw new HTTPError(502,safeGitHubDetail(error));
-        }
-        await env.DB.prepare('UPDATE review_decisions SET commit_sha=? WHERE pr=? AND skill=?').bind(commit,pr,skill).run();
-      }
-      let closed = false;
-      try { closed = await closeWhenDecided(env.DB,gh,pr,current.items); } catch { /* The decision stands; the PR can be closed from the dashboard. */ }
-      return json({pr,skill,decision,commit,closed});
+      return json(await applyDecision(env,backend || github(env),await readJSON(request)));
     }
     if (path === '/admin/api/reviews/close' && request.method === 'POST') {
       await admin(request,env);
@@ -314,5 +330,9 @@ export async function handle(request, env, backend) {
 export default {
   fetch(request,env) { return handle(request,env); },
   // Hourly cron (wrangler.jsonc): copy the team summaries to Notion and keep the result for the dashboard.
-  scheduled(event,env,ctx) { ctx.waitUntil(syncToNotion(env).then(summary=>saveSync(env.DB,summary))); }
+  // A second cron (minute 47) handles skill review, so each run has its own subrequest budget.
+  scheduled(event,env,ctx) {
+    if (event.cron === REVIEW_CRON) ctx.waitUntil(runReviewSync(env));
+    else ctx.waitUntil(syncToNotion(env).then(summary=>saveSync(env.DB,summary)));
+  }
 };

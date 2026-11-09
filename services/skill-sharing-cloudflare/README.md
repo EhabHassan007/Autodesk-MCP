@@ -87,6 +87,24 @@ Owner setup:
 4. Run `npm run migrate:remote`, then `npm run deploy`. Deploying also registers the hourly cron.
 5. Run `POST /admin/api/notion-sync` once with the admin token, or wait for the next hour, and check the summary. A first run on a larger team may show `pending` above 0; the next runs catch up.
 
+## Skill review in Notion
+
+Migration `0006_notion_review.sql` adds `notion_review` (what each Notion row is about) and `notion_review_sync` (the last run). The dashboard's **Skill review** tab keeps working as before; this adds the same review as a Notion database, "Skill review" on the "Smart Connector – Team Insights" page (data source `NOTION_REVIEW_SOURCE`, `ca563d75-3682-47a0-a994-d574182fb2b3`).
+
+- **What you see.** One row per skill waiting for review: name, description, sender (team name, never the email), upload time, new/changed/moved, the files, a link to *Files changed* on GitHub, `Blocked` (a required check failed) and `Flags` (where a heuristic check found something: the place only, never the text, because a flagged line may be a secret).
+- **How you decide.** Set **Decision** to Approve or Reject. For Approve, check **Category** (pre-filled from the upload) and, when the row shows Flags, tick **Flagged lines checked**. Within the hour the service applies it and writes **Status** (Approved, Rejected, Not applied, Changed) and **Result**. Approving still writes exactly one skill to `main` and closes the intake PR without merging, through the same function the dashboard uses (`applyDecision`).
+- **Who may decide.** Notion lets everyone with edit access change a row, so the service applies a decision only when the person who last edited the row is listed in `NOTION_REVIEWERS` (comma-separated Notion user IDs). With no list, nothing is applied, and the row's Result prints the editor's ID so it can be added. Anyone else's change is cleared and reported as Not applied.
+- **What a decision applies to.** The values the service stored in D1 when it wrote the row (PR, skill, head commit, content keys), not what the page says now, so editing Name or Reference changes nothing. The live upload is re-read and compared exactly as in the dashboard: if the upload or the approved copy changed, the decision is refused (Status Changed) and the row is refreshed for a new look. Blocked uploads cannot be approved. Flagged ones need the tick.
+- **Schedule and limits.** A second cron, `47 * * * *`, so this run has its own 50-subrequest budget (the members/usage cron is `17 * * * *`). A run applies at most 2 decisions (about 15 GitHub requests each), reads the queue only if budget remains (4 pull requests at most), and writes at most 15 rows. The rest carries over to the next hour. `POST /admin/api/notion-review` (admin token) runs it now. A GitHub outage leaves the decision in place to retry; a Notion error reports only its HTTP status.
+- **Rows.** Rows of decided or vanished uploads are marked Closed, not deleted. A row you delete is made again while the upload still waits.
+
+Owner setup (after the Notion dashboard steps above, so the integration already has access to the page):
+
+1. In Notion, open the "Smart Connector – Team Insights" page and make sure the integration is connected (••• → Connections). It reaches the new database through the page.
+2. `npx wrangler secret put NOTION_REVIEWERS` and enter your own Notion user ID. To find it: set Decision on any row first; the service answers in Result with "Add your Notion user ID (…)" and that value is what to enter. Several reviewers: comma-separated.
+3. `npm run migrate:remote`, then `npm run deploy` (registers the second cron).
+4. Run `POST /admin/api/notion-review` once. Rows appear for uploads that wait.
+
 ## Connect team PCs
 
 On Windows, use `tools/New-DeviceEnrollment.ps1`; it needs no Python and defaults to the deployed URL. Each PC/user gets a unique revocable device token:
