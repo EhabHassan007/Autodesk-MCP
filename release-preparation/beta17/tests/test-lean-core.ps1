@@ -74,6 +74,8 @@ try {
     }
     Assert ($app.Contains('OpenCheck.Start(application);') -and $cs -notmatch 'EnsureAgentRunning') 'Revit still starts the agent instead of the open check'
     Assert ($cs.Contains('-Action InstallUpdate') -and $lisp.Contains('-Action InstallUpdate')) 'Update now does not open the update window'
+    # The setup .exe installs no script, so the Revit add-in must find its install folder by the compiled program too.
+    Assert ($cs -match 'Path\.Combine\(directory, "bin", "SmartConnector\.exe"\)') 'The Revit add-in finds its install folder only by Setup-BimCad.ps1, which the setup .exe does not install'
     'PASS: Revit, AutoCAD and the app use the same day stamps and open the update window'
 
     $env:LOCALAPPDATA = Join-Path $t 'local'; $env:APPDATA = Join-Path $t 'roaming'

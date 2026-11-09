@@ -1,6 +1,8 @@
 # Installer handoff: moving Smart Connector from PowerShell to a compiled program
 
-Status as of 2026-11-09. Work continues on branch `smart-connector-next` (from `main-70886s`). Merged up to PR #54; PR #55 (Notion sync) is open.
+Status as of 2026-11-09. `main` holds everything up to PR #56, including the Notion sync (#55). Work continues on branch
+`smart-connector-next`; the script-free update channel is PR #57. Stages 1, A, B and C are merged, and the setup .exe
+ships without scripts (PR #51).
 
 **Headline:** the script-free setup .exe was rated **Clean** by OpenTIP on 2026-11-08 (0 detections, 1 low suspicious activity), against 1 detection and 6 suspicious for 1.1.0 with scripts. The PowerShell content was the trigger.
 
@@ -28,11 +30,14 @@ Two routes that do not depend on code remain the only guaranteed fix, and both b
 | #45 | Setup .exe runs no program or script. It installs files and a Start menu entry; the first open of Smart Connector finishes setup (`setup\setup-pending.txt` marker). |
 | #46 | Stage 1: `SmartConnector.exe mcp`, the compiled MCP server, replaces the three PowerShell bridges. |
 | #47 | Stage A: the Smart Connector app, setup window, Skills Sync / Check Updates / Status windows, Settings and team join dialog are C#. |
-| #48–#50 | Stage B: install engine (`engine`). Stage C: Skills Sync and usage scripts (`skills`). Windows test fixes (PS 5.1 quirks, `--program-files` test option because Windows ignores a ProgramFiles override for child processes). |
-| #51 | Setup .exe installs no script: build strips `.ps1/.cmd/...` outside `.agents`; product checks for `bin\SmartConnector.exe`, not scripts; CI installs the setup silently and runs it. OpenTIP: Clean. |
-| #53 | One installer (setup .exe opens the Setup window itself), team email + typed team code in normal setup, skills and update checks always on, PATH refresh so Claude Code/Codex are found, Claude Desktop hang fix, Revit ribbon icons drawn at slot size (CI checks sizes). |
-| #54 | No Start-menu folder page, no closing programs (running exe renamed to `.old`, deleted at next start; CI installs over a running copy), ChatGPT Desktop connected through `%USERPROFILE%\.codex\config.toml`, terms of use 2026-11-08. |
-| #55 (open) | Hourly Notion sync of the dashboard from the Cloudflare service (Team members, Skills and tools usage). |
+| #48 | Stage B: install engine (`engine`). Stage C: Skills Sync and usage scripts (`skills`). This document. |
+| #49, #50 | CI fixes for the new tests (PowerShell 5.1 pipeline and `Copy-Item` quirks, 260-character paths); hidden `--program-files` option for the engine test. |
+| #51 | The setup .exe installs no script: `build.ps1` strips every `.ps1/.cmd/.bat/.vbs/.js/.wsf` outside `.agents` before compiling it. Skill steps run as the program's own commands. CI installs the built .exe and checks that no script lands. |
+| #53 | Setup .exe opens the Setup window itself after copying (never in a silent install); team join on every PC not enrolled; Claude Code and Codex found via a refreshed PATH; Claude Desktop restarted through the shell (setup no longer hangs); Revit ribbon icons drawn at button size. |
+| #54 | Setup .exe: no Start menu folder page, `CloseApplications=no`, a running `SmartConnector.exe` is renamed to `.old` before copying (CI covers it). ChatGPT Desktop connected through `%USERPROFILE%\.codex\config.toml` when the `codex` CLI is missing. Terms of use 2026-11-08 (Notion dashboard, update prompt, team code). |
+| #56 | Revit add-in found no install folder on a setup-.exe install (it looked for `installer\Setup-BimCad.ps1`); now also accepts `bin\SmartConnector.exe`. This update of the document. |
+| #55 | Hourly Notion sync of the dashboard from the Cloudflare service (Team members, Skills and tools usage). Merged; needs the owner's Notion setup below. |
+| #57 (open) | Script-free update channel: the compiled updater reads `smart-connector.json`; `build.ps1` writes both channels; scripts left by older versions are removed after a script-free update. |
 
 ## What the compiled program does
 
@@ -59,8 +64,10 @@ when it does not. That fallback serves an install taken straight from the reposi
   downgrade), stops only the other Smart Connector processes of this install, replaces files in place, and renames
   a locked file to `<name>.old`. Any Smart Connector command deletes `*.old` leftovers at start. A failed update
   puts everything back. It never copies the program to a temp folder to run from there (a pattern scanners flag).
-- **The setup .exe still runs nothing.** It copies files and creates the Start menu entry. Everything else happens
-  when the user opens Smart Connector.
+- **The setup .exe installs no script and starts only the installed program.** It copies the payload (scripts
+  removed at build time) after renaming a running `bin\SmartConnector.exe` to `.old`, creates the Start menu entry,
+  writes `setup\setup-pending.txt`, and then opens `SmartConnector.exe app` (skipped in a silent install).
+  Everything else happens inside that program.
 - **Self-repair of a missing Skills Sync helper script** has no meaning for a compiled program and was dropped; a
   failed sync still records a reason.
 - **A usage line with a non-numeric count** is dropped (the script failed every run on it).
@@ -76,17 +83,18 @@ to another computer:
 - `SMARTCONNECTOR_TEST_ALLOW_LOCAL_URLS=1` allows `file:` and loopback `http` for the release manifest, the download
   and the team join service.
 - `engine --test-autocad-releases` and `--autocad-registry-root` fake AutoCAD detection and point the registry work
-  at a throwaway tree.
+  at a throwaway tree; `engine --program-files` points Revit detection at a stand-in folder (Windows will not let a
+  test change `%ProgramFiles%` for a child process).
 Keep these out of user documentation.
 
 ## Build and verify
 
 - `release-preparation/beta17/build.ps1` (Windows; add `-Team` for the private team installer, never upload that):
   compiles the program, builds the release ZIP and the setup .exe (needs Inno Setup 6), writes `latest.json`.
-- `release-preparation/beta17/build.py` rebuilds only the **stored** payload
-  (`source/Support/Autodesk-MCP-Payload.zip`), which is source only and holds no binary. Whenever anything under
-  `source/runtime` changes, run it in the same PR (CI "Check stored installer is current" enforces this), then
-  revert line-ending churn: `git checkout -- release-preparation/beta17/source/runtime/.agents "release-preparation/beta17/source/Autodesk MCP Skills for Claude.zip"`.
+- `release-preparation/beta17/build.py` is the cloud-session equivalent for the **stored** payload
+  (`source/Support/Autodesk-MCP-Payload.zip`), which is source only and holds no binary. AGENTS.md names `build.ps1`;
+  either satisfies CI "Check stored installer is current" (it compares with CRLF normalised to LF). Whenever anything
+  under `source/runtime` changes, rebuild in the same PR, then revert line-ending churn: `git checkout -- release-preparation/beta17/source/runtime/.agents "release-preparation/beta17/source/Autodesk MCP Skills for Claude.zip"`.
 - The release payload (ZIP and setup .exe) adds `bin/SmartConnector.exe`; `tests/test-team-build.ps1` checks that
   the stored payload has none and the release payloads have exactly that one extra file.
 - Windows CI (`.github/workflows/connector-tests.yml`) runs every `tests/test-*.ps1`, compiles the Revit add-in
@@ -101,23 +109,42 @@ Keep these out of user documentation.
 
 ## What is not verified
 
-- On a real PC: live AutoCAD COM and the Revit pipe against a real add-in, DPI rendering, AutoCAD `AI`/`AICLEAR` after
-  the new setup, ChatGPT Desktop picking up `config.toml` (community reports: tools may show only in Codex mode on
-  Windows), Kaspersky on the company PCs (OpenTIP is not the company policy).
-- The real Notion API and the deployed hourly cron (PR #55 is tested against a stand-in).
-- OpenTIP has not yet seen the newest setup .exe, which now opens the installed program after copying.
+- Anything on a real PC: live AutoCAD COM, the Revit named pipe against a real add-in, WPF icon rendering at the
+  user's DPI, `startapp` with a path that contains spaces, Task Scheduler COM, DPAPI blob compatibility with
+  `ConvertFrom-SecureString`, renaming a running exe aside during an update.
+- Whether the company Kaspersky agrees with OpenTIP (rated Clean on 2026-11-08 for the script-free setup .exe; the
+  newest setup, which opens the installed program after copying, has not been uploaded yet). The full release ZIP
+  still carries every script.
+- The real Notion API and the deployed hourly cron (PR #55 is tested against a stand-in), and the script-free update
+  against a real published release.
+- CI covers installing the .exe and the program's own windows and engine, but not the Revit add-in on an installed
+  copy. The install-folder bug fixed after #54 slipped through for that reason: any code that locates the install by a
+  script (`Setup-BimCad.ps1`, `scripts\*.ps1`) breaks on a setup-.exe install. `ConnectorStatus.cs`,
+  `EngineBackground.cs` and `SkillsRetire.cs` already check for the program too; review any new check the same way.
 
 ## What remains
+
+**Stage D: remove PowerShell from what users receive.**
+1. Done for the setup .exe (#51): scripts are stripped at build time and CI checks the installed tree. The scripts
+   stay in `source/runtime` and in the stored payload as test reference and repository fallback.
+2. OpenTIP: the script-free setup .exe was rated Clean (see the headline). Upload the newest one again.
+3. Release ZIP: it still carries every script plus `source/Support/Install-Autodesk-MCP-Connector.ps1`
+   (`INSTALL Smart Connector.cmd`). Decide whether the ZIP stays as a documented IT fallback or is dropped from the
+   public release in favour of the .exe.
+4. Only if the repository fallback is no longer wanted: move the reference `.ps1` files to an unshipped folder (for
+   example `release-preparation/beta17/legacy/`), point the parity tests at it, and remove the PowerShell branches
+   from the launchers (`ConnectorUi.cs`, `SmartAutodeskConnector.lsp`, `ConnectorActions.cs`, the `.cmd` files).
 
 **Owner actions**
 1. Install the newest setup .exe on a PC (artifact of the latest "Build setup exe" run), check Revit's tab, AutoCAD's
    `AI`/`AICLEAR`, ChatGPT Desktop's Codex MCP list; upload the same file to OpenTIP.
-2. Notion sync (after merging #55): create an internal integration (notion.so/my-integrations), add it to the page
+2. Notion sync (#55 is merged): create an internal integration (notion.so/my-integrations), add it to the page
    "Smart Connector – Team Insights" (••• → Connections), `npx wrangler secret put NOTION_TOKEN`, `npm run migrate:remote`,
    `npm run deploy`, then `POST /admin/api/notion-sync`. Notion page:
    https://app.notion.com/p/4125a80a6f4f812484d3e86894e3e30b (data sources: members
    `c05261ca-cde9-4efd-bc8c-73be82269d46`, usage `369aab91-4554-42c4-9754-401299888a3f`).
 3. Review the terms of use 2026-11-08 with legal/HR (still DRAFT).
+
 
 **Decisions waiting for the owner**
 - **Update channel (built on `smart-connector-next`, not published).** The compiled program reads
@@ -126,17 +153,17 @@ Keep these out of user documentation.
   PowerShell updater) and `smart-connector.json` + `Smart-Connector-<v>.zip` (no script outside `.agents`). After a
   script-free update the engine deletes the scripts older versions left behind. **A publish must attach all four
   files** (both ZIPs and both manifests) to the same release; `scripts/publish-public-release.ps1` is the older flow
-  and only attaches the full ZIP and `latest.json`. Still unverified on Windows until CI runs on the branch.
+  and only attaches the full ZIP and `latest.json`. Windows CI is green on the branch; not yet tried against a real release.
   Remaining: make the full ZIP script-free once no PC is on the old updater, and a script-free ZIP installer route.
 - **Skill review in Notion** (approve/reject + category in a Notion database, applied by the service hourly), so the
   Cloudflare admin page is never needed.
 - Ship the Revit add-in prebuilt instead of compiling on each PC (removes the last compile-on-PC step).
 - Publish: nothing is published to the public `Autodesk-MCP-Releases` repo; it needs the owner's approval each time.
 
-**Engineering left**
-- Stage D proper: move the PowerShell scripts out of `source/runtime` into a non-shipped folder used by the parity
-  tests, and drop the PowerShell fallbacks.
-- The ZIP installer route (`INSTALL Smart Connector.cmd` / `Install-Autodesk-MCP-Connector.ps1`) is still PowerShell.
+Other outstanding owner actions: revoke any Cloudflare tunnels used by the removed remote gateway. The terms of use
+(2026-11-08) promise an hourly Notion dashboard showing the last 30 days; PR #55 builds it, but it only runs after the
+owner's Notion setup above, so do that before a release ships those terms. Section 4 of the terms still says skills
+"may be collected weekly", while collection now happens only when the user runs Skills Sync.
 
 Notion is the dashboard; Cloudflare stays the secure backend (per-PC tokens, GitHub App key, usage intake) on the
 Free plan. Notion cannot replace it safely: every PC would need one shared Notion key with access to everyone's data.

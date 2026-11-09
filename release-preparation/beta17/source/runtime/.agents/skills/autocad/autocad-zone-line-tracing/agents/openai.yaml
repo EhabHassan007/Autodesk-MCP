@@ -1,0 +1,4 @@
+interface:
+  display_name: "Zone outlines on plan linework"
+  short_description: "Exact zone polylines on plan lines, checked for gaps and overlaps"
+  default_prompt: "Use $autocad-zone-line-tracing to check my zone polylines against the plan linework and derive the remaining zones with shared edges."
