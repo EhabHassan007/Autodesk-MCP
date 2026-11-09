@@ -68,6 +68,25 @@ Skills Sync sends all of a person's saved skills in one `skill-intake/*` draft P
 - **Closing.** Once every skill in an intake PR is decided, the service comments a summary and closes the PR **without merging**. A PR with nothing left to decide can also be closed with **Close on GitHub**.
 - **What else stays the same.** Uploads still arrive as draft PRs, and nothing reaches `main` without the owner's click. The GitHub App keeps its existing `contents:write` and `pull_requests:write` permissions. Merging an intake PR on GitHub still works, but it is all-or-nothing.
 
+## Notion dashboard (hourly sync)
+
+Migration `0005_notion_sync.sql` adds the one-row `notion_sync` table. The Worker and D1 stay the secure backend and the source of truth; Notion is only a view. Edits made in Notion are overwritten on the next sync where they differ, and nothing in D1 changes.
+
+- **What is synced.** Two existing databases on the "Smart Connector – Team Insights" page. Their data source IDs are the `NOTION_MEMBERS_SOURCE` and `NOTION_USAGE_SOURCE` vars in `wrangler.jsonc`.
+  - **Team members**, one row per device, matched by `Device ID`: name, work email, PC, Windows user, connector version, Active/Blocked, joined, last seen, skill and tool uses in the last 30 days, top 3 skills and terms version.
+  - **Skills and tools usage**, one row per skill or tool, matched by `Key` (`skill:<name>` / `tool:<name>`): uses and distinct people in the last 30 days, and the last day used. A row with no use in 30 days is set to 0 uses and 0 people; its last-used day is kept. Rows are never deleted.
+- **Schedule.** Cron `17 * * * *` (minute 17 of every hour, UTC). `POST /admin/api/notion-sync` (admin token) runs it now and returns the summary `{members:{created,updated,unchanged}, usage:{…}, pending, at}`, or `error: "Notion HTTP <status>"` with HTTP 502. The last summary is also in `GET /admin/api/overview` as `notion_sync`.
+- **Free-plan limits.** Workers Free allows 50 subrequests per run. Each run reads both databases (one request per 100 rows), compares, and writes only rows that differ: at most 40 writes, and never more than 48 Notion requests in total. Team members go first. Anything left is reported as `pending` and is written on the next hourly run. Notion allows about 3 requests a second; on HTTP 429 the Worker waits for `Retry-After` (at most 5 s) once, and any other failure stops that run. Errors report only the HTTP status, never the token, request bodies or personal data. Note that `Last seen` changes whenever a PC calls the service, so a team much larger than 40 active devices fills the write cap with member updates and usage rows wait longer.
+- **Privacy.** Names and work emails, PC and Windows user names are copied to Notion. The company's terms/privacy notice for the connector must say so before this is turned on.
+
+Owner setup:
+
+1. At [notion.so/my-integrations](https://www.notion.so/my-integrations), create an **internal** integration for the workspace with the **Read content**, **Update content** and **Insert content** capabilities. No user-information capability is needed.
+2. Open the "Smart Connector – Team Insights" page in Notion, choose **••• → Connections**, and add the integration. This lets it reach both databases under that page.
+3. From this directory, run `npx wrangler secret put NOTION_TOKEN` and paste the integration's secret at the prompt. Never paste it into chat or commit it. Without `NOTION_TOKEN` the sync skips itself (`{skipped: "not configured"}`) and nothing else changes.
+4. Run `npm run migrate:remote`, then `npm run deploy`. Deploying also registers the hourly cron.
+5. Run `POST /admin/api/notion-sync` once with the admin token, or wait for the next hour, and check the summary. A first run on a larger team may show `pending` above 0; the next runs catch up.
+
 ## Connect team PCs
 
 On Windows, use `tools/New-DeviceEnrollment.ps1`; it needs no Python and defaults to the deployed URL. Each PC/user gets a unique revocable device token:
