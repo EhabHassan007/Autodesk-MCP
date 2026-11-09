@@ -35,8 +35,11 @@ function Add-Text($Zip, [string]$Name, [string]$Text) {
 }
 # $Program adds the compiled bin/SmartConnector.exe. The payload stored in the repository is built without it, so it
 # stays source only and no binary is committed; the release ZIP and the setup .exe carry it.
-function Add-Payload($Zip, [string]$JoinJson, [string]$Program) {
+# -ScriptFree leaves out every script outside the approved skill library (some skills carry their own helper scripts).
+$scriptTypes = '.ps1', '.psm1', '.psd1', '.cmd', '.bat', '.vbs', '.js', '.wsf'
+function Add-Payload($Zip, [string]$JoinJson, [string]$Program, [switch]$ScriptFree) {
     foreach ($f in Get-Files $r) {
+        if ($ScriptFree -and ($scriptTypes -contains [IO.Path]::GetExtension($f.Rel).ToLowerInvariant()) -and -not $f.Rel.StartsWith('.agents/')) { continue }
         # A stray join file in the source tree must never reach any payload.
         if ($f.Rel -eq 'installer/team-join.json') { throw 'Remove source/runtime/installer/team-join.json; the join code is added only by -Team.' }
         if ($f.Rel.StartsWith('bin/')) { throw "Remove source/runtime/$($f.Rel); bin/SmartConnector.exe is compiled by the build." }
@@ -84,7 +87,6 @@ function New-SetupExe([string]$PayloadPath, [string]$Name) {
         # Skills Sync and the MCP server are inside bin\SmartConnector.exe. The scripts stay in the repository and in
         # the stored payload as the reference for the tests and the fallback for a copy taken from the repository.
         if (-not (Test-Path -LiteralPath (Join-Path $payloadDir 'bin\SmartConnector.exe') -PathType Leaf)) { throw 'The payload has no bin\SmartConnector.exe.' }
-        $scriptTypes = '.ps1', '.psm1', '.psd1', '.cmd', '.bat', '.vbs', '.js', '.wsf'
         # The approved skill library (.agents) is content the team curates, and some skills carry their own helper
         # scripts; those are left as they are.
         $library = (Join-Path $payloadDir '.agents') + '\'
@@ -187,10 +189,25 @@ try {
     New-Zip (Join-Path $b $name) { param($z) Add-Release $z $releasePayload }
     $h = (Get-FileHash -LiteralPath (Join-Path $b $name) -Algorithm SHA256).Hash.ToUpperInvariant()
 
+    # 3b. The script-free release for the compiled updater (smart-connector.json): the program and its data, no script
+    #     outside the skill library. Older PCs keep reading latest.json and the full ZIP above, whose PowerShell
+    #     updater needs the scripts. The updater finds Autodesk-MCP-Payload.zip anywhere inside the outer ZIP.
+    $programPayload = Join-Path $work 'Autodesk-MCP-Payload-script-free.zip'
+    New-Zip $programPayload { param($z) Add-Payload $z $null $program -ScriptFree }
+    $programName = "Smart-Connector-$version.zip"
+    New-Zip (Join-Path $b $programName) {
+        param($z)
+        Add-File $z $programPayload "Smart-Connector-$version/Autodesk-MCP-Payload.zip"
+        Add-File $z (Join-Path $b 'RELEASE-NOTES.md') "Smart-Connector-$version/RELEASE-NOTES.md"
+    }
+    $programHash = (Get-FileHash -LiteralPath (Join-Path $b $programName) -Algorithm SHA256).Hash.ToUpperInvariant()
+
     # 4. latest.json and the SHA line in the release notes.
     $published = [DateTimeOffset]::UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss.ffffffzzz")
     $latest = "{`n  `"schema_version`": 1,`n  `"version`": `"$version`",`n  `"download_url`": `"https://github.com/EhabHassan007/Autodesk-MCP-Releases/releases/download/v$version/$name`",`n  `"sha256`": `"$h`",`n  `"published_at`": `"$published`"`n}`n"
     [IO.File]::WriteAllText((Join-Path $b 'latest.json'), $latest, $utf8)
+    $programManifest = "{`n  `"schema_version`": 1,`n  `"version`": `"$version`",`n  `"download_url`": `"https://github.com/EhabHassan007/Autodesk-MCP-Releases/releases/download/v$version/$programName`",`n  `"sha256`": `"$programHash`",`n  `"published_at`": `"$published`"`n}`n"
+    [IO.File]::WriteAllText((Join-Path $b 'smart-connector.json'), $programManifest, $utf8)
     $notesPath = Join-Path $b 'RELEASE-NOTES.md'
     $notes = ([IO.File]::ReadAllText($notesPath) -split "`nSHA-256:", 2)[0] + "`nSHA-256: $h`n"
     [IO.File]::WriteAllText($notesPath, $notes, $utf8)
@@ -198,7 +215,7 @@ try {
     # 5. Upload bundle and source/tests archive (local only, git-ignored).
     New-Zip (Join-Path $b 'beta17-github-upload.zip') {
         param($z)
-        foreach ($n in @($name, 'latest.json', 'RELEASE-NOTES.md')) { Add-File $z (Join-Path $b $n) $n }
+        foreach ($n in @($name, $programName, 'latest.json', 'smart-connector.json', 'RELEASE-NOTES.md')) { Add-File $z (Join-Path $b $n) $n }
     }
     New-Zip (Join-Path $b 'beta17-source-and-tests.zip') {
         param($z)
@@ -210,6 +227,7 @@ try {
         Add-File $z (Join-Path $b 'setup\build-connector-exe.ps1') 'setup/build-connector-exe.ps1'
     }
     "$name $h"
+    "$programName $programHash (script-free, read through smart-connector.json)"
     New-SetupExe $releasePayload "Smart-Connector-Setup-$version"
 
     # 6. Optional private team installer: same files, plus the join code inside its payload.

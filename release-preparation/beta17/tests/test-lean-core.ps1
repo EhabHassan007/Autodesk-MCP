@@ -8,6 +8,12 @@ $t = Join-Path ([IO.Path]::GetTempPath()) ('lean-core-' + [guid]::NewGuid().ToSt
 New-Item -ItemType Directory $t | Out-Null
 $saved = @{ local = $env:LOCALAPPDATA; roaming = $env:APPDATA }
 try {
+    # 0. The compiled updater reads its own manifest (the script-free release); latest.json stays for older PCs.
+    $engineCore = [IO.File]::ReadAllText((Join-Path $runtime 'src/connector/EngineCore.cs'))
+    Assert ($engineCore -match 'releases/latest/download/smart-connector\.json"') 'The compiled updater must read smart-connector.json'
+    Assert ($engineCore -notmatch 'releases/latest/download/latest\.json') 'The compiled updater still points at latest.json'
+    'PASS: the compiled updater reads smart-connector.json'
+
     # 1. Nothing in the shipped connector schedules, hides a long-running process or serves the network.
     $retire = Join-Path $runtime 'scripts/retire-background-tasks.ps1'
     # The places that may name tasks, the agent and the gateway are the cleanup of what earlier versions set up: the script

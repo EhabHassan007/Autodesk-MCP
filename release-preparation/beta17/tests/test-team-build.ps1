@@ -33,6 +33,23 @@ try{
  Assert ($publicEntries -contains 'Autodesk-MCP-Payload/bin/SmartConnector.exe') 'The release payload has no bin/SmartConnector.exe'
  Assert (-not ($storedEntries -like 'Autodesk-MCP-Payload/bin/*')) 'The stored payload contains a compiled program'
  Assert (@(Compare-Object $storedEntries $publicEntries).Count -eq 1) 'The release payload should differ from the stored payload only by bin/SmartConnector.exe'
+ # The script-free release the compiled updater reads (smart-connector.json): the program and no script outside the skill library.
+ $freeName="Smart-Connector-$v.zip";$free=Join-Path $copy $freeName
+ Assert (Test-Path $free) 'The script-free release ZIP was not built'
+ $manifest=Get-Content (Join-Path $copy 'smart-connector.json') -Raw|ConvertFrom-Json
+ Assert ($manifest.version -eq $v -and $manifest.download_url -eq "https://github.com/EhabHassan007/Autodesk-MCP-Releases/releases/download/v$v/$freeName" -and $manifest.sha256 -eq (Get-FileHash $free -Algorithm SHA256).Hash) 'smart-connector.json does not describe the script-free ZIP'
+ $latest=Get-Content (Join-Path $copy 'latest.json') -Raw|ConvertFrom-Json
+ Assert ($latest.download_url -like "*/Autodesk-MCP-Connector-$v.zip" -and $latest.sha256 -eq (Get-FileHash $public -Algorithm SHA256).Hash) 'latest.json (older PCs) must still describe the full release ZIP'
+ $freeEntries=Entries $free
+ Assert ($freeEntries -contains "Smart-Connector-$v/Autodesk-MCP-Payload.zip") 'The script-free ZIP has no payload'
+ Assert (-not ($freeEntries|Where-Object {$_ -match '\.(ps1|psm1|psd1|cmd|bat|vbs|js|wsf)$'})) 'The script-free ZIP holds a script'
+ $freePayload=Join-Path $t 'free-payload.zip';Read-Entry $free "Smart-Connector-$v/Autodesk-MCP-Payload.zip" $freePayload
+ $freePayloadEntries=Entries $freePayload
+ Assert ($freePayloadEntries -contains 'Autodesk-MCP-Payload/bin/SmartConnector.exe' -and $freePayloadEntries -contains 'Autodesk-MCP-Payload/VERSION') 'The script-free payload has no program or VERSION'
+ $scriptsOutside=@($freePayloadEntries|Where-Object {$_ -match '\.(ps1|psm1|psd1|cmd|bat|vbs|js|wsf)$' -and $_ -notlike 'Autodesk-MCP-Payload/.agents/*'})
+ Assert ($scriptsOutside.Count -eq 0) ('The script-free payload holds scripts: '+($scriptsOutside -join ', '))
+ Assert (-not ($freePayloadEntries -like '*team-join.json')) 'The script-free payload holds a join code'
+ Assert (@($freePayloadEntries|Where-Object {$_ -like 'Autodesk-MCP-Payload/.agents/skills/*'}).Count -eq @($publicEntries|Where-Object {$_ -like 'Autodesk-MCP-Payload/.agents/skills/*'}).Count) 'The skill library differs between the two releases'
  $joinFile=Join-Path $t 'team-join.json';Read-Entry $teamPayload 'Autodesk-MCP-Payload/installer/team-join.json' $joinFile
  $join=Get-Content $joinFile -Raw|ConvertFrom-Json
  Assert ($join.join_code -eq $code -and $join.service_url -eq 'https://autodesk-skill-service.autodesk-skills-ehabhassan007.workers.dev') 'Team join file is wrong'

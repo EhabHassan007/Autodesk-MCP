@@ -120,10 +120,14 @@ Keep these out of user documentation.
 3. Review the terms of use 2026-11-08 with legal/HR (still DRAFT).
 
 **Decisions waiting for the owner**
-- **Update channel.** PCs on older versions update with the old PowerShell updater, which needs the scripts in the
-  release ZIP; a script-free release would break them. Recommended: hand out 1.1.0 once as the setup .exe; from 1.1.0
-  the compiled program reads a new manifest (e.g. `smart-connector.json`) and installs script-free releases; leave
-  `latest.json` alone. Then make the release ZIP payload script-free and have setup delete scripts left by old versions.
+- **Update channel (built on `smart-connector-next`, not published).** The compiled program reads
+  `smart-connector.json` (falls back to `latest.json` while a release has none). `build.ps1` now writes both
+  channels: `latest.json` + `Autodesk-MCP-Connector-<v>.zip` (full ZIP, scripts included, for PCs on the old
+  PowerShell updater) and `smart-connector.json` + `Smart-Connector-<v>.zip` (no script outside `.agents`). After a
+  script-free update the engine deletes the scripts older versions left behind. **A publish must attach all four
+  files** (both ZIPs and both manifests) to the same release; `scripts/publish-public-release.ps1` is the older flow
+  and only attaches the full ZIP and `latest.json`. Still unverified on Windows until CI runs on the branch.
+  Remaining: make the full ZIP script-free once no PC is on the old updater, and a script-free ZIP installer route.
 - **Skill review in Notion** (approve/reject + category in a Notion database, applied by the service hourly), so the
   Cloudflare admin page is never needed.
 - Ship the Revit add-in prebuilt instead of compiling on each PC (removes the last compile-on-PC step).

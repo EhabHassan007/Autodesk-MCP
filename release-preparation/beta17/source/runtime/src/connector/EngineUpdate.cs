@@ -134,6 +134,15 @@ namespace SmartConnector
 
         // ---------- latest.json ----------
 
+        private const string ProgramManifestName = "/releases/latest/download/smart-connector.json";
+
+        // The older manifest of the same channel, only for the built-in address.
+        private static string LegacyManifestUrl(string url)
+        {
+            if (url == null || !url.EndsWith(ProgramManifestName, StringComparison.OrdinalIgnoreCase)) return null;
+            return url.Substring(0, url.Length - "smart-connector.json".Length) + "latest.json";
+        }
+
         private PublicRelease GetPublicReleaseManifest()
         {
             Step("Checking the Smart Connector release channel...");
@@ -144,7 +153,18 @@ namespace SmartConnector
             object manifest;
             try
             {
-                string content = Encoding.UTF8.GetString(EngineNet.Download(manifestUri)).TrimStart('﻿');
+                string content;
+                try { content = Encoding.UTF8.GetString(EngineNet.Download(manifestUri)).TrimStart('﻿'); }
+                catch (Exception)
+                {
+                    // Until a release carries smart-connector.json, the usual address is not there yet: the older latest.json
+                    // describes the same version. A manifest address that was given on purpose is never replaced.
+                    string legacy = LegacyManifestUrl(_o.ReleaseManifestUrl);
+                    if (legacy == null) throw;
+                    Uri legacyUri;
+                    if (!Uri.TryCreate(legacy, UriKind.Absolute, out legacyUri) || !EngineNet.IsSecure(legacyUri)) throw;
+                    content = Encoding.UTF8.GetString(EngineNet.Download(legacyUri)).TrimStart('﻿');
+                }
                 manifest = OJson.Parse(content);
             }
             catch (Exception exception) { throw new EngineException("Could not read the public release channel. " + exception.Message); }
