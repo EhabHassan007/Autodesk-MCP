@@ -26,4 +26,4 @@ Lean core: Smart Connector now runs nothing in the background. This removes the 
 - Update channel without scripts: the Smart Connector program now reads `smart-connector.json` (the script-free release ZIP, `Smart-Connector-<version>.zip`) instead of `latest.json`, which stays for PCs that still have the older PowerShell updater. Until a release carries `smart-connector.json`, the program falls back to `latest.json`. After an update from a script-free release, the scripts that older versions left in the install folder (outside the skill library) are deleted, because the AI apps, Revit and AutoCAD now start `bin\SmartConnector.exe`.
 - The Revit add-in is now compiled in the automated tests with the same Windows compiler the PCs use, against the Revit 2024 API reference assemblies.
 
-SHA-256: DAB415530FE47D69242FEADAA7F29EF7F8082DA67EF78B51B49FCAE04E16682C
+SHA-256: DB28FD1A306963E237DE5714187C7C2B4A32FC071DA1013E40764ECD3FDD0459
