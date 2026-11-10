@@ -14,6 +14,11 @@ try {
     Assert ($engineCore -notmatch 'releases/latest/download/latest\.json') 'The compiled updater still points at latest.json'
     'PASS: the compiled updater reads smart-connector.json'
 
+    # 0b. Setup pages keep text from covering other text: the window measures each page after it is filled.
+    $wizard = [IO.File]::ReadAllText((Join-Path $runtime 'src/connector/SetupWizard.cs'))
+    Assert ($wizard.Contains('Brand.ResolveOverlaps(_pages[index])') -and $wizard.Contains('Brand.ResolveOverlaps(_installing)')) 'Setup pages no longer resolve overlapping text'
+    'PASS: setup pages are checked for overlapping text'
+
     # 1. Nothing in the shipped connector schedules, hides a long-running process or serves the network.
     $retire = Join-Path $runtime 'scripts/retire-background-tasks.ps1'
     # The places that may name tasks, the agent and the gateway are the cleanup of what earlier versions set up: the script

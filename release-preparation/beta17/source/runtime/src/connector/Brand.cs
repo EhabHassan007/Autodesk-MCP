@@ -4,6 +4,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Text;
 using System.IO;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Windows.Forms;
 using Media = System.Windows.Media;
@@ -218,6 +219,43 @@ namespace SmartConnector
             if (width > 0) label.MaximumSize = new Size(width, 0);
             label.AutoSize = true;
             return label;
+        }
+
+        // Keeps text from covering other text. Pages are laid out with fixed positions, but how tall a block of text is depends on
+        // the font, the display scale and the language, so after a page is filled each visible control is checked against the
+        // ones above it that share some width. When it would overlap, it and everything level with or below it move down. A card
+        // grows to hold its own contents. Controls tagged "overlay" (the details log) are left where they are.
+        internal static void ResolveOverlaps(Control container)
+        {
+            if (container == null) return;
+            int gap = Round(4 * Scale()), padding = Round(10 * Scale());
+            foreach (Control child in container.Controls)
+            {
+                if (!(child is Card) || !child.Visible) continue;
+                ResolveOverlaps(child);
+                int bottom = 0;
+                foreach (Control inner in child.Controls) if (inner.Visible) bottom = Math.Max(bottom, inner.Bottom);
+                if (bottom + padding > child.Height) child.Height = bottom + padding;
+            }
+            List<Control> items = new List<Control>();
+            foreach (Control child in container.Controls)
+                if (child.Visible && child.Dock == DockStyle.None && !String.Equals(child.Tag as string, "overlay", StringComparison.Ordinal)) items.Add(child);
+            items = items.OrderBy(c => c.Top).ThenBy(c => c.Left).ToList();
+            for (int i = 0; i < items.Count; i++)
+            {
+                Control current = items[i];
+                int need = 0;
+                for (int j = 0; j < i; j++)
+                {
+                    Control above = items[j];
+                    if (above.Right <= current.Left + 1 || current.Right <= above.Left + 1) continue;   // side by side
+                    if (above.Top >= current.Top) continue;                                             // the same row
+                    need = Math.Max(need, above.Bottom + gap - current.Top);
+                }
+                if (need <= 0) continue;
+                int line = current.Top;
+                foreach (Control moved in items) if (moved.Top >= line) moved.Top += need;
+            }
         }
 
         // PowerShell's [int] cast rounds half to even; the layout arithmetic of Brand.ps1 relies on it.
