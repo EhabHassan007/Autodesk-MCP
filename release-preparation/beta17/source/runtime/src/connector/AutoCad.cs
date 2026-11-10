@@ -49,7 +49,7 @@ namespace SmartConnector
                         Json.Object("expected_drawing", target(), "name", str(), "action", Json.Object("type", "string", "enum", new object[] { "create", "color", "on", "frozen", "locked" }),
                             "color", Json.Object("type", "integer", "minimum", 1, "maximum", 255), "value", Json.Object("type", "boolean")),
                         new[] { "expected_drawing", "name", "action" }, false),
-                    Schema.Tool("apply_plan", "Create many objects in ONE undoable call from a plan (one round trip instead of hundreds). items are ordered steps {op, ...}: layer{name,color?,linetype?,lineweight?}, line{layer,start,end}, circle{layer,center,radius}, arc{layer,center,radius,start_angle,end_angle}, polyline{layer,points:[[x,y],...],closed?}, text{layer,point,text,height,rotation?,style?}, mtext{layer,point,width,text,height?,rotation?,style?; \\P = new line}, insert{layer,name,point,scale?,rotation?}. Points are [x,y] or [x,y,z] in WCS drawing units; angles are degrees counter-clockwise; lineweight is in hundredths of mm. A step may carry an id; its handle is returned. A layer must already exist (or be created by an earlier layer step) and be unlocked; blocks, linetypes and text styles must already be in the drawing. At most 500 steps. Run with dry_run=true first: it checks everything against the drawing and changes nothing. A failed run removes what it created. Does not save.",
+                    Schema.Tool("apply_plan", "Create many objects in ONE undoable call from a plan (one round trip instead of hundreds). items are ordered steps {op, ...}: layer{name,color?,linetype?,lineweight?}, line{layer,start,end}, circle{layer,center,radius}, arc{layer,center,radius,start_angle,end_angle}, polyline{layer,points:[[x,y],...],closed?}, text{layer,point,text,height,rotation?,style?}, mtext{layer,point,width,text,height?,rotation?,style?; \\P = new line}, insert{layer,name,point,scale?,rotation?}, hatch{layer,pattern,boundary,holes?,scale?,angle?,color?} (boundary and holes are ids of EARLIER closed polyline or circle steps, so give those steps an id), dim_aligned{layer,from,to,location,style?}, dim_rotated{layer,from,to,location,angle,style?} (location is a point the dimension line passes through; the value shown is the measured one). Points are [x,y] or [x,y,z] in WCS drawing units; angles are degrees counter-clockwise; lineweight is in hundredths of mm. A step may carry an id; its handle is returned. A layer must already exist (or be created by an earlier layer step) and be unlocked; blocks, linetypes, text styles and dimension styles must already be in the drawing. At most 500 steps. Run with dry_run=true first: it checks everything against the drawing and changes nothing. A failed run removes what it created. Does not save.",
                         Json.Object("expected_drawing", target(), "layout", str(), "dry_run", Json.Object("type", "boolean"),
                             "items", Json.Object("type", "array", "items", Json.Object("type", "object"), "minItems", 1, "maxItems", AutoCadPlan.MaxItems)),
                         new[] { "expected_drawing", "items" }, false),
@@ -271,6 +271,34 @@ namespace SmartConnector
             return names;
         }
 
+        // The boundary and holes are objects created by earlier steps. Pattern type 1 is acHatchPatternTypePreDefined:
+        // a pattern found by name (SOLID, ANSI31, or a custom pattern on the support path). The hatch is not associative.
+        // If a loop is refused, the half-built hatch is deleted before the error leaves.
+        private static dynamic CreateHatch(object spaceSource, PlanItem p, Dictionary<string, object> byId)
+        {
+            dynamic space = spaceSource;
+            dynamic hatch = space.AddHatch(1, p.Pattern, false);
+            try
+            {
+                hatch.AppendOuterLoop(new object[] { byId[p.Boundary] });
+                if (p.Holes != null)
+                    foreach (string hole in p.Holes) hatch.AppendInnerLoop(new object[] { byId[hole] });
+                if (!String.Equals(p.Pattern, "SOLID", StringComparison.OrdinalIgnoreCase))
+                {
+                    hatch.PatternScale = p.Scale;
+                    if (p.Rotation != 0) hatch.PatternAngle = p.Rotation * Math.PI / 180.0;
+                }
+                if (p.Color > 0) hatch.Color = p.Color;
+                hatch.Evaluate();
+            }
+            catch (Exception)
+            {
+                try { hatch.Delete(); } catch (Exception) { }
+                throw;
+            }
+            return hatch;
+        }
+
         private static dynamic CreateItem(object spaceSource, PlanItem p)
         {
             dynamic space = spaceSource;
@@ -302,13 +330,15 @@ namespace SmartConnector
                         return mtext;
                     }
                 case "insert": return space.InsertBlock(p.Point, p.BlockName, p.Scale, p.Scale, p.Scale, p.Rotation * toRadians);
+                case "dim_aligned": return space.AddDimAligned(p.Point, p.End, p.Location);
+                case "dim_rotated": return space.AddDimRotated(p.Point, p.End, p.Location, p.Rotation * toRadians);
             }
             throw new ToolException("Unsupported plan step: " + p.Op);
         }
 
         // Validates the whole plan against this drawing, then (unless dry_run) creates it in one Undo group. Anything
         // created is removed again if a step fails, and the object count is read back to confirm the result.
-        private static object ApplyPlan(object source, IDictionary<string, object> a)
+        internal static object ApplyPlan(object source, IDictionary<string, object> a)
         {
             dynamic doc = source;
             List<PlanItem> plan = AutoCadPlan.Parse(a["items"]);
@@ -321,11 +351,12 @@ namespace SmartConnector
             dynamic layerTable = doc.Layers;
             int layerCount = Convert.ToInt32(layerTable.Count);
             for (int i = 0; i < layerCount; i++) { dynamic item = layerTable.Item(i); layers[Convert.ToString(item.Name)] = (bool)item.Lock; }
-            bool needsLinetypes = plan.Any(p => p.Linetype != null), needsStyles = plan.Any(p => p.TextStyle != null), needsBlocks = plan.Any(p => p.Op == "insert");
+            bool needsLinetypes = plan.Any(p => p.Linetype != null), needsStyles = plan.Any(p => p.TextStyle != null), needsBlocks = plan.Any(p => p.Op == "insert"), needsDimStyles = plan.Any(p => p.DimStyle != null);
             HashSet<string> linetypes = needsLinetypes ? Names((object)doc.Linetypes) : new HashSet<string>();
             HashSet<string> styles = needsStyles ? Names((object)doc.TextStyles) : new HashSet<string>();
             HashSet<string> blocks = needsBlocks ? Names((object)doc.Blocks) : new HashSet<string>();
-            List<string> problems = AutoCadPlan.CheckReferences(plan, layers, linetypes, styles, blocks);
+            HashSet<string> dimStyles = needsDimStyles ? Names((object)doc.DimStyles) : new HashSet<string>();
+            List<string> problems = AutoCadPlan.CheckReferences(plan, layers, linetypes, styles, blocks, dimStyles);
             if (problems.Count > 0) throw new ToolException("The plan cannot be applied:\n" + String.Join("\n", problems.ToArray()));
 
             List<string> toCreate = AutoCadPlan.LayersToCreate(plan, layers.Keys);
@@ -339,6 +370,7 @@ namespace SmartConnector
             List<object> created = new List<object>();
             List<string> layersCreated = new List<string>();
             Dictionary<string, object> handles = new Dictionary<string, object>();
+            Dictionary<string, object> byId = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
             int objects = 0;
             doc.StartUndoMark();
             try
@@ -361,12 +393,13 @@ namespace SmartConnector
                             if (p.Lineweight >= 0) layer.Lineweight = p.Lineweight;
                             continue;
                         }
-                        dynamic entity = CreateItem((object)space, p);
+                        dynamic entity = p.Op == "hatch" ? CreateHatch((object)space, p, byId) : CreateItem((object)space, p);
                         created.Add((object)entity);
                         entity.Layer = p.Layer;
                         if (p.TextStyle != null) entity.StyleName = p.TextStyle;
+                        if (p.DimStyle != null) entity.StyleName = p.DimStyle;
                         objects++;
-                        if (p.Id != null) handles[p.Id] = Convert.ToString(entity.Handle);
+                        if (p.Id != null) { handles[p.Id] = Convert.ToString(entity.Handle); byId[p.Id] = (object)entity; }
                     }
                 }
                 catch (Exception)

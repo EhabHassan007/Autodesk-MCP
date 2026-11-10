@@ -113,6 +113,8 @@ try {
         @('apply_plan', @{ expected_drawing = 'a.dwg'; items = @() }, 'Too few entries: items'),
         @('apply_plan', @{ expected_drawing = 'a.dwg'; items = @(@{ op = 'spline' }) }, 'items`[0`]: op must be one of*'),
         @('apply_plan', @{ expected_drawing = 'a.dwg'; items = @(@{ op = 'circle'; layer = 'A'; center = @(0, 0); radius = 0 }) }, 'items`[0`]: ''radius'' must be greater than 0.'),
+        @('apply_plan', @{ expected_drawing = 'a.dwg'; items = @(@{ op = 'hatch'; layer = 'A'; pattern = 'SOLID'; boundary = 'x' }) }, 'items`[0`]: ''boundary'' must be the id of an earlier closed polyline or circle step*'),
+        @('apply_plan', @{ expected_drawing = 'a.dwg'; items = @(@{ op = 'dim_rotated'; layer = 'A'; from = @(0, 0); to = @(1, 0); location = @(0, 1) }) }, 'items`[0`]: missing ''angle''.'),
         @('apply_plan', @{ expected_drawing = 'a.dwg'; items = @(@{ op = 'layer'; name = 'A-DETL' }) }, 'No running full AutoCAD instance was found*'),
         @('execute_autocad', @{ expected_drawing = 'a.dwg'; execution_mode = 'read'; allow_model_changes = $false }, 'Missing argument: code'),
         @('execute_autocad', @{ expected_drawing = 'a.dwg'; execution_mode = 'edit'; allow_model_changes = $false; code = 'return "x";' }, 'Invalid choice: execution_mode'),
