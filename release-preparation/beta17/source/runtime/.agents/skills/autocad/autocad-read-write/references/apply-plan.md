@@ -2,6 +2,8 @@
 
 Use `apply_plan` when a task needs more than a handful of objects (details, layouts, repeated geometry). One call replaces hundreds of `create_entity` calls and one Undo reverses it.
 
+`apply_plan` is a tool of SmartConnector.exe only. The older PowerShell fallback bridge (`autocad-bridge.ps1`) does not have it; if it is not in the tool list, the exe is not the connection in use, so fall back to `create_entity`.
+
 ## Workflow
 
 1. `drawing_info` for `drawing_id`; `list_layers` to see which layers exist.

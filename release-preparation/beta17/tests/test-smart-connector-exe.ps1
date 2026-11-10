@@ -63,7 +63,11 @@ try {
     # 3. The same tools as the PowerShell bridge, in the same order, with the same arguments.
     . (Join-Path $runtime 'src\autodesk\autodesk-bridge.ps1') -LibraryOnly
     $expected = @(Get-AutodeskMcpTools)
-    $actual = @((Invoke-Mcp 'tools/list').result.tools)
+    $allTools = @((Invoke-Mcp 'tools/list').result.tools)
+    # Tools that only SmartConnector.exe has; the PowerShell fallback bridge does not. Every other tool must match exactly.
+    $exeOnlyTools = @('apply_plan')
+    Assert (@($allTools | Where-Object { $exeOnlyTools -contains $_.name }).Count -eq $exeOnlyTools.Count) ('An exe-only tool is missing from the tool list: ' + (($allTools | ForEach-Object name) -join ','))
+    $actual = @($allTools | Where-Object { $exeOnlyTools -notcontains $_.name })
     Assert ((($actual | ForEach-Object name) -join ',') -eq (($expected | ForEach-Object { $_['name'] }) -join ',')) ('Tool list differs: ' + (($actual | ForEach-Object name) -join ','))
     for ($i = 0; $i -lt $expected.Count; $i++) {
         $e = $expected[$i]; $a = $actual[$i]; $n = $e['name']
