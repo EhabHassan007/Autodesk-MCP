@@ -1,7 +1,7 @@
 ---
 name: detail-generator
 category: autocad
-description: Generate a draft construction detail in AutoCAD from a short brief, in millimetres: a vertical section through a reception counter (boards, plinth, Corian or stone top, optional raised bar, wheelchair-accessible variant) with hatches, dimensions, levels and notes. Use when asked to draw or revise a counter section, or to start a new joinery detail from parameters.
+description: Generate a draft construction detail in AutoCAD from a short brief, in millimetres: a vertical section through a reception counter (boards, plinth, Corian or stone top, optional raised bar, wheelchair-accessible variant) with hatches, dimensions, levels and notes, in model space or in a paper-space layout. Use when asked to draw or revise a counter section, or to start a new joinery detail from parameters.
 ---
 
 # Detail Generator
@@ -17,6 +17,20 @@ description: Generate a draft construction detail in AutoCAD from a short brief,
 5. Verify: `count_matches_plan` true, then read a sample back with `get_entity`. Tell the user the drawing is unsaved. One `UNDO` removes the whole detail. Save only when asked.
 
 Read [reception counter section](references/reception-counter-section.md) for the parameters, defaults, what is drawn and what is not.
+
+## Annotation: model space, paper space, or none
+
+`annotation` chooses where dimensions, notes, levels and titles go.
+
+| Value | What you get |
+|---|---|
+| `model` (default) | Everything in model space at the detail scale (text 2.5 x the scale denominator). |
+| `paper` | Geometry in model space; dimensions, notes, levels and titles in the layout named by `layout`, at **true paper size: notes and levels 2.5 mm, title 3.5 mm**. Dimensions measure paper distances and carry `linear_factor` = the scale denominator, so they read the model size. |
+| `none` | Geometry only (parts, hatches, floor line). |
+
+For `paper`, pass `view.paper_centre` (where the detail sits on the sheet, `[x, y]` in paper mm) and, with `apply`, `layout`. Optional `view.model_centre`; the default is the centre of the parts. The layout needs a **viewport at scale 1:scale whose view is centred on the model centre**. AutoCAD does not let this tool set the viewport's view centre, so the result states the centre (`viewport_setup`, `model_centre`), the parts' size on paper (`parts_size_paper_mm`) to size the viewport, and the extent the annotation occupies. Make the viewport first (or move it afterwards with a pan); the tool warns (`viewport_warning`) if the layout has no viewport at that scale, but it cannot check the centre. Office level blocks can be used with `level_block` (and `level_tag`, default `LEVEL`, `level_block_scale`).
+
+Both plans are checked against the drawing before anything is drawn. If the annotation fails after the geometry was drawn, the annotation is rolled back and the message says the geometry stays; undo once to remove it.
 
 ## Working from renders and plans
 
@@ -37,5 +51,5 @@ Where the pictures show something the template cannot draw yet, say so and offer
 - Top material follows the item: Corian (the default) for counters, stone for kitchens and F&B.
 - Do not copy dimensions or curves from one project's drawing into a default. The defaults come from conventions repeated across the office's kitchen and joinery sheets; anything specific to one counter is an option.
 - **Annotation follows the reference sheets.** When the drawing has them, dimensions use style `na1`, notes and levels use text style `EN-S`, and titles use `EN-SCB`; the result lists them under `reference_styles` and says in `style_notes` which are missing. Pass `dimension_style` or `text_style` to override, or `use_reference_styles` false to use the current styles. See the reference for the numbers behind these styles.
-- Dimension and text sizes depend on the style and the detail scale. The generator sets each dimension's scale to the detail scale, so a 3.5 mm style prints 3.5 mm at that scale; check the first dimension on screen, and if the size is wrong pass `dimension_scale` or fix the style.
+- Dimension and text sizes depend on the style and the detail scale. In model space the generator sets each dimension's scale to the detail scale, so a 3.5 mm style prints 3.5 mm at that scale; check the first dimension on screen, and if the size is wrong pass `dimension_scale` or fix the style. In paper space the style's own size applies (no scale is set unless `dimension_scale` is given).
 - If the plan is refused, the message names the step; fix the parameter and retry. A failed plan removes what it created.

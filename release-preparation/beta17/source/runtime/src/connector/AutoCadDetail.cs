@@ -12,6 +12,20 @@ namespace SmartConnector
         internal List<string> Warnings = new List<string>();
         internal Dictionary<string, object> Summary = new Dictionary<string, object>();
         internal int Scale = 10;
+        internal List<Dictionary<string, object>> PaperItems = new List<Dictionary<string, object>>();   // annotation for the layout (annotation = paper)
+        internal double HeightUnit = 10;        // model millimetres per millimetre of text height: the scale in model space, 1 in paper space
+        internal string Annotation = "model";   // model, paper or none
+    }
+
+    // Where the annotation goes. model: in model space at the detail scale (the original behaviour). paper: dimensions, notes, levels and titles
+    // in a layout at true paper size, around a viewport at 1:scale whose view is centred on the detail. none: geometry only.
+    internal sealed class DetailAnnotation
+    {
+        internal string Mode = "model";
+        internal double[] PaperCentre;          // paper position the detail's centre is shown at (centre of the viewport)
+        internal double[] ModelCentre;          // model point at that centre; null = the centre of the parts
+        internal string LevelBlock, LevelTag = "LEVEL";
+        internal double LevelBlockScale = 1;
     }
 
     // Detail Generator. A brief (a template name and a few parameters) becomes an apply_plan plan. No AutoCAD calls happen
@@ -81,6 +95,15 @@ namespace SmartConnector
         // Builds the plan. scale is the detail scale denominator (10 for 1:10); origin is where the floor line meets the staff face.
         internal static DetailResult Build(string template, IDictionary<string, object> input, int scale, double ox, double oy, string dimStyle, string textStyle, double dimScale)
         {
+            return Build(template, input, scale, ox, oy, dimStyle, textStyle, dimScale, null);
+        }
+
+        internal static DetailResult Build(string template, IDictionary<string, object> input, int scale, double ox, double oy, string dimStyle, string textStyle, double dimScale, DetailAnnotation place)
+        {
+            if (place == null) place = new DetailAnnotation();
+            if (place.Mode != "model" && place.Mode != "paper" && place.Mode != "none") throw new ToolException("annotation must be model, paper or none.");
+            if (place.Mode == "paper" && place.PaperCentre == null) throw new ToolException("annotation paper needs view.paper_centre: where the detail sits on the sheet, as [x, y] in paper millimetres.");
+            if (place.LevelBlock != null && place.Mode != "paper") throw new ToolException("level_block is used with annotation paper only.");
             if (template != ReceptionCounterSection) throw new ToolException("Unknown template: " + template + ". Available: " + ReceptionCounterSection + ".");
             if (scale < 1 || scale > 200) throw new ToolException("scale must be between 1 and 200.");
             if (input == null) input = new Dictionary<string, object>();
@@ -123,6 +146,8 @@ namespace SmartConnector
 
             DetailResult r = new DetailResult();
             r.Scale = scale;
+            r.Annotation = place.Mode;
+            r.HeightUnit = place.Mode == "paper" ? 1 : scale;
             double tf = topMaterial == "stone" ? StoneThickness : CorianThickness;     // finish thickness
             double ts = T;                                                              // substrate under the finish
             string subMaterial = topMaterial == "stone" ? "ply" : "mdf";
@@ -244,6 +269,13 @@ namespace SmartConnector
             Action<double, string> level = (y, label) =>
             {
                 items.Add(Json.Object("op", "line", "layer", LThin, "start", P(markX, y), "end", P(-30 * d, y)));
+                if (place.LevelBlock != null)
+                {
+                    // the office level block carries the text in an attribute; it stands where the drawn marker and text would be
+                    items.Add(Json.Object("op", "insert", "layer", LText, "name", place.LevelBlock, "point", P(markX, y), "scale", place.LevelBlockScale,
+                        "attributes", Json.Object(place.LevelTag, label)));
+                    return;
+                }
                 items.Add(Json.Object("op", "line", "layer", LThin, "start", P(markX, y), "end", P(markX - 2 * d, y + 3 * d)));
                 items.Add(Json.Object("op", "line", "layer", LThin, "start", P(markX - 2 * d, y + 3 * d), "end", P(markX + 2 * d, y + 3 * d)));
                 items.Add(Json.Object("op", "line", "layer", LThin, "start", P(markX + 2 * d, y + 3 * d), "end", P(markX, y)));
@@ -294,6 +326,53 @@ namespace SmartConnector
                 items.Add(req);
             }
 
+            // ---- where the annotation goes ----
+            if (place.Mode != "model")
+            {
+                double mcx = ox + (boards.Min(b => b.X0) + boards.Max(b => b.X1)) / 2.0, mcy = oy + (boards.Min(b => b.Y0) + boards.Max(b => b.Y1)) / 2.0;
+                if (place.ModelCentre != null) { mcx = place.ModelCentre[0]; mcy = place.ModelCentre[1]; }
+                List<Dictionary<string, object>> outItems = new List<Dictionary<string, object>>();
+                double minX = double.MaxValue, minY = double.MaxValue, maxX = double.MinValue, maxY = double.MinValue;
+                Func<object, object> map = pt =>
+                {
+                    object[] q = (object[])pt;
+                    double x = Math.Round(place.PaperCentre[0] + ((double)q[0] - mcx) / d, 3), y = Math.Round(place.PaperCentre[1] + ((double)q[1] - mcy) / d, 3);
+                    minX = Math.Min(minX, x); maxX = Math.Max(maxX, x); minY = Math.Min(minY, y); maxY = Math.Max(maxY, y);
+                    return new object[] { x, y };
+                };
+                foreach (Dictionary<string, object> item in items)
+                {
+                    string op = Json.GetString(item, "op"), lay = Json.GetString(item, "layer");
+                    bool annotation = op != "layer" && (lay == LDim || lay == LText || lay == LThin);
+                    if (!annotation) { outItems.Add(item); continue; }
+                    if (place.Mode == "none") continue;
+                    switch (op)
+                    {
+                        case "line": item["start"] = map(item["start"]); item["end"] = map(item["end"]); break;
+                        case "text": item["point"] = map(item["point"]); item["height"] = Math.Round((double)item["height"] / d, 3); break;
+                        case "insert": item["point"] = map(item["point"]); break;
+                        case "dim_rotated":
+                            item["from"] = map(item["from"]); item["to"] = map(item["to"]); item["location"] = map(item["location"]);
+                            if (dimScale > 0) item["scale"] = dimScale; else item.Remove("scale");   // the style's own paper size applies in paper space
+                            item["linear_factor"] = (double)d;                                      // measured paper length x scale = the model size
+                            break;
+                    }
+                    r.PaperItems.Add(item);
+                }
+                items.Clear();
+                items.AddRange(outItems);
+                r.Summary["model_centre"] = new object[] { Math.Round(mcx, 3), Math.Round(mcy, 3) };
+                if (place.Mode == "paper")
+                {
+                    r.Summary["paper_centre"] = new object[] { place.PaperCentre[0], place.PaperCentre[1] };
+                    r.Summary["parts_size_paper_mm"] = new object[] { Math.Round((boards.Max(b => b.X1) - boards.Min(b => b.X0)) / d, 1), Math.Round((boards.Max(b => b.Y1) - boards.Min(b => b.Y0)) / d, 1) };
+                    r.Summary["annotation_anchor_extent_paper"] = new object[] { Math.Round(minX, 1), Math.Round(minY, 1), Math.Round(maxX, 1), Math.Round(maxY, 1) };
+                    r.Summary["viewport_setup"] = "Viewport at scale 1:" + scale + " (CustomScale " + (1.0 / d).ToString("0.######", CultureInfo.InvariantCulture) + "), view centred on model point " + Mm(mcx) + ", " + Mm(mcy)
+                        + ". Annotation is placed assuming exactly that view; AutoCAD does not let this tool set the viewport's view centre.";
+                }
+            }
+            r.Summary["annotation"] = place.Mode;
+
             // ---- summary and a last check that the plan is one apply_plan accepts ----
             r.Summary["template"] = template;
             r.Summary["section"] = section;
@@ -304,9 +383,10 @@ namespace SmartConnector
             r.Summary["top_underside_above_floor"] = topUnder;
             if (accessible) { r.Summary["clear_height_under_top"] = topUnder; r.Summary["knee_clearance_depth"] = kneeD; r.Summary["code_reference"] = code; }
             r.Summary["parts"] = boards.Select(b => b.Id).ToArray();
-            r.Summary["steps"] = items.Count;
             r.Summary["units"] = "mm";
             AutoCadPlan.Parse(items.Cast<object>().ToArray());
+            if (r.PaperItems.Count > 0) AutoCadPlan.Parse(r.PaperItems.Cast<object>().ToArray());
+            r.Summary["steps"] = items.Count + r.PaperItems.Count;
             return r;
         }
     }

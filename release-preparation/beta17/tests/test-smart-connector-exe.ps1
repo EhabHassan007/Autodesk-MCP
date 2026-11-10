@@ -115,6 +115,8 @@ try {
         @('apply_plan', @{ expected_drawing = 'a.dwg'; items = @(@{ op = 'circle'; layer = 'A'; center = @(0, 0); radius = 0 }) }, 'items`[0`]: ''radius'' must be greater than 0.'),
         @('apply_plan', @{ expected_drawing = 'a.dwg'; items = @(@{ op = 'hatch'; layer = 'A'; pattern = 'SOLID'; boundary = 'x' }) }, 'items`[0`]: ''boundary'' must be the id of an earlier closed polyline or circle step*'),
         @('apply_plan', @{ expected_drawing = 'a.dwg'; items = @(@{ op = 'dim_rotated'; layer = 'A'; from = @(0, 0); to = @(1, 0); location = @(0, 1) }) }, 'items`[0`]: missing ''angle''.'),
+        @('apply_plan', @{ expected_drawing = 'a.dwg'; items = @(@{ op = 'insert'; layer = 'A'; name = 'LVL'; point = @(0, 0); attributes = @{ LEVEL = 5 } }) }, 'items`[0`]: attribute ''LEVEL'' must be a tag*'),
+        @('apply_plan', @{ expected_drawing = 'a.dwg'; items = @(@{ op = 'dim_rotated'; layer = 'A'; from = @(0, 0); to = @(1, 0); location = @(0, 1); angle = 0; linear_factor = 0 }) }, 'items`[0`]: ''linear_factor'' must be greater than 0.'),
         @('apply_plan', @{ expected_drawing = 'a.dwg'; items = @(@{ op = 'layer'; name = 'A-DETL' }) }, 'No running full AutoCAD instance was found*'),
         @('execute_autocad', @{ expected_drawing = 'a.dwg'; execution_mode = 'read'; allow_model_changes = $false }, 'Missing argument: code'),
         @('execute_autocad', @{ expected_drawing = 'a.dwg'; execution_mode = 'edit'; allow_model_changes = $false; code = 'return "x";' }, 'Invalid choice: execution_mode'),
@@ -128,6 +130,12 @@ try {
         @('generate_detail', @{ template = 'reception_counter_section'; params = @{ section = 'accessible' } }, 'The accessible section needs*'),
         @('generate_detail', @{ template = 'reception_counter_section'; apply = $true }, 'expected_drawing is required when apply is true.'),
         @('generate_detail', @{ template = 'reception_counter_section'; apply = $true; expected_drawing = 'a.dwg' }, 'No running full AutoCAD instance was found*'),
+        @('generate_detail', @{ template = 'reception_counter_section'; annotation = 'sheet' }, 'Invalid choice: annotation'),
+        @('generate_detail', @{ template = 'reception_counter_section'; annotation = 'paper' }, 'annotation paper needs view.paper_centre*'),
+        @('generate_detail', @{ template = 'reception_counter_section'; annotation = 'paper'; view = @{ zoom = 2 } }, 'Unknown view field: zoom*'),
+        @('generate_detail', @{ template = 'reception_counter_section'; annotation = 'paper'; view = @{ paper_centre = @(200, 150) }; apply = $true; expected_drawing = 'a.dwg' }, 'annotation paper needs layout*'),
+        @('generate_detail', @{ template = 'reception_counter_section'; layout = 'Layout1' }, 'layout is used with annotation paper only.'),
+        @('generate_detail', @{ template = 'reception_counter_section'; level_block = 'LVL' }, 'level_block is used with annotation paper only.'),
         @('get_element', @{ element_id = ' ' }, 'Empty argument: element_id'),
         @('drawing_info', @{}, 'No running full AutoCAD instance was found*'),
         @('connection_status', @{}, 'Smart Connector is running, but neither AutoCAD nor Revit is reachable.*'),
@@ -138,6 +146,10 @@ try {
         $result = Invoke-Tool $check[0] $check[1]
         Assert ($result.isError -and $result.content[0].text -like $check[2]) ("{0}: expected '{1}', got '{2}'" -f $check[0], $check[2], $result.content[0].text)
     }
+    $paper = Invoke-Tool 'generate_detail' @{ template = 'reception_counter_section'; annotation = 'paper'; view = @{ paper_centre = @(200, 150) }; return_plan = $true }
+    Assert (-not $paper.isError -and $paper.content[0].text -like '*"paper_items":[*' -and $paper.content[0].text -like '*linear_factor*' -and $paper.content[0].text -like '*viewport_setup*') 'generate_detail paper mode must return the geometry plan, the layout plan and the viewport set-up without AutoCAD'
+    $none = Invoke-Tool 'generate_detail' @{ template = 'reception_counter_section'; annotation = 'none'; return_plan = $true }
+    Assert (-not $none.isError -and $none.content[0].text -notlike '*dim_rotated*') 'generate_detail geometry-only mode must draw no dimensions'
     $gen = Invoke-Tool 'generate_detail' @{ template = 'reception_counter_section'; return_plan = $true }
     Assert (-not $gen.isError -and $gen.content[0].text -like '*"applied":false*' -and $gen.content[0].text -like '*SECTION X2 - RECEPTION COUNTER*') 'generate_detail must return a plan without contacting AutoCAD'
     'PASS: argument errors, AutoCAD and Revit not running, unknown tools, a generated plan without AutoCAD'

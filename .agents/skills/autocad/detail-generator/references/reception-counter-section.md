@@ -59,7 +59,7 @@ A lowered top over the full depth, with only a staff-side box under it and an op
 
 ## Not drawn yet
 
-Plans and elevations, drawers and shutters, hardware, the raised bar's own support, curved fronts, lighting recesses, block-based level markers and leaders (levels and leaders are plain lines and text), sheet layout and viewports.
+Plans and elevations, drawers and shutters, hardware, the raised bar's own support, curved fronts, lighting recesses, creating the layout, viewport and title block (the tool annotates a layout that exists and warns when its viewport scale does not match; it cannot set the viewport's view centre), leaders as blocks (levels can use an office block through `level_block`; leaders are plain lines and text).
 
 ## Where the defaults come from
 
@@ -68,5 +68,6 @@ Board thicknesses (18 mm MDF), the 600 depth, the 900 top, the 100 plinth set ba
 ## Verification status
 
 - The generator is covered by 71 mock checks: the geometry of each part, dimensions attached to real edges and showing the true distances, both top materials, the raised bar, the accessible section and its refusals, origin and scale handling, deterministic output, and a run through `apply_plan` against a stand-in AutoCAD (millimetre guard, existing layers left alone, a dimension scale on every dimension). The Windows test script covers the argument errors and a plan without AutoCAD.
+- Paper-space annotation, geometry-only mode, block attributes and the paper-space dimension factor are covered by 65 further mock checks (a dimension's paper length times its factor equals the model length for every dimension; rollback when a factor or an attribute is refused; a missing layout or block refuses the job before anything is drawn). They have **not** been run in a live AutoCAD: whether the layout dimensions read the model size, whether the viewport lines up with the annotation, and the block attribute fill all need a live check.
 - **Not yet run in a live AutoCAD.** Run a default section in a disposable millimetre drawing first: confirm the dry run, the real run, the look of the hatches and dimensions, the text and dimension sizes at the chosen scale, and that one `UNDO` removes it all. The dimension `scale` property (`ScaleFactor`) is also unconfirmed live; if AutoCAD refuses it the result carries a warning and the dimension style decides the size.
 - The accessible section has been checked only for internal consistency, not against any code.
