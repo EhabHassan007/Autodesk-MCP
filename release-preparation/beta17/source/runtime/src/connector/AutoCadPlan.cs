@@ -23,6 +23,7 @@ namespace SmartConnector
         internal string Boundary;              // hatch: id of an earlier closed polyline or circle step
         internal List<string> Holes;           // hatch: ids of earlier closed steps, each an inner loop
         internal double[] Location;            // dimensions: a point the dimension line passes through
+        internal double DimScale;              // dimensions: overall scale of sizes (DIMSCALE for this dimension); 0 = the style decides
     }
 
     // The pure part of apply_plan: it checks a plan before AutoCAD is contacted, and checks it against the drawing's
@@ -49,8 +50,8 @@ namespace SmartConnector
             { "mtext", new[] { "op", "id", "layer", "point", "width", "text", "height", "rotation", "style" } },
             { "insert", new[] { "op", "id", "layer", "name", "point", "scale", "rotation" } },
             { "hatch", new[] { "op", "id", "layer", "pattern", "boundary", "holes", "scale", "angle", "color" } },
-            { "dim_aligned", new[] { "op", "id", "layer", "from", "to", "location", "style" } },
-            { "dim_rotated", new[] { "op", "id", "layer", "from", "to", "location", "angle", "style" } }
+            { "dim_aligned", new[] { "op", "id", "layer", "from", "to", "location", "style", "scale" } },
+            { "dim_rotated", new[] { "op", "id", "layer", "from", "to", "location", "angle", "style", "scale" } }
         };
 
         private static ToolException Fail(int index, string message)
@@ -180,6 +181,7 @@ namespace SmartConnector
                         if (p.Point[0] == p.End[0] && p.Point[1] == p.End[1] && p.Point[2] == p.End[2]) throw Fail(i, "'from' and 'to' must differ.");
                         if (op == "dim_rotated") p.Rotation = Number(d, "angle", i);
                         if (d.ContainsKey("style")) p.DimStyle = NameField(d, "style", i, true);
+                        if (d.ContainsKey("scale")) p.DimScale = Positive(d, "scale", i);
                         break;
                 }
                 if (p.Id != null) ids[p.Id] = p;

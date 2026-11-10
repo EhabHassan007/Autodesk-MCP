@@ -65,7 +65,7 @@ try {
     $expected = @(Get-AutodeskMcpTools)
     $allTools = @((Invoke-Mcp 'tools/list').result.tools)
     # Tools that only SmartConnector.exe has; the PowerShell fallback bridge does not. Every other tool must match exactly.
-    $exeOnlyTools = @('apply_plan', 'execute_autocad')
+    $exeOnlyTools = @('apply_plan', 'execute_autocad', 'generate_detail')
     Assert (@($allTools | Where-Object { $exeOnlyTools -contains $_.name }).Count -eq $exeOnlyTools.Count) ('An exe-only tool is missing from the tool list: ' + (($allTools | ForEach-Object name) -join ','))
     $actual = @($allTools | Where-Object { $exeOnlyTools -notcontains $_.name })
     Assert ((($actual | ForEach-Object name) -join ',') -eq (($expected | ForEach-Object { $_['name'] }) -join ',')) ('Tool list differs: ' + (($actual | ForEach-Object name) -join ','))
@@ -122,6 +122,12 @@ try {
         @('execute_autocad', @{ expected_drawing = 'a.dwg'; execution_mode = 'read'; allow_model_changes = $true; code = 'return "x";' }, 'Read execution requires allow_model_changes=false.'),
         @('execute_autocad', @{ expected_drawing = 'a.dwg'; execution_mode = 'read'; allow_model_changes = $false; code = 'return 1 +;' }, 'C# compilation failed:*Line 1:*'),
         @('execute_autocad', @{ expected_drawing = 'a.dwg'; execution_mode = 'read'; allow_model_changes = $false; code = 'return doc.Name;' }, 'No running full AutoCAD instance was found*'),
+        @('generate_detail', @{}, 'Missing argument: template'),
+        @('generate_detail', @{ template = 'kitchen' }, 'Invalid choice: template'),
+        @('generate_detail', @{ template = 'reception_counter_section'; params = @{ height = 100 } }, 'params.height must be between 300 and 1500 mm.'),
+        @('generate_detail', @{ template = 'reception_counter_section'; params = @{ section = 'accessible' } }, 'The accessible section needs*'),
+        @('generate_detail', @{ template = 'reception_counter_section'; apply = $true }, 'expected_drawing is required when apply is true.'),
+        @('generate_detail', @{ template = 'reception_counter_section'; apply = $true; expected_drawing = 'a.dwg' }, 'No running full AutoCAD instance was found*'),
         @('get_element', @{ element_id = ' ' }, 'Empty argument: element_id'),
         @('drawing_info', @{}, 'No running full AutoCAD instance was found*'),
         @('connection_status', @{}, 'Smart Connector is running, but neither AutoCAD nor Revit is reachable.*'),
@@ -132,7 +138,9 @@ try {
         $result = Invoke-Tool $check[0] $check[1]
         Assert ($result.isError -and $result.content[0].text -like $check[2]) ("{0}: expected '{1}', got '{2}'" -f $check[0], $check[2], $result.content[0].text)
     }
-    'PASS: argument errors, AutoCAD and Revit not running, unknown tools'
+    $gen = Invoke-Tool 'generate_detail' @{ template = 'reception_counter_section'; return_plan = $true }
+    Assert (-not $gen.isError -and $gen.content[0].text -like '*"applied":false*' -and $gen.content[0].text -like '*SECTION X2 - RECEPTION COUNTER*') 'generate_detail must return a plan without contacting AutoCAD'
+    'PASS: argument errors, AutoCAD and Revit not running, unknown tools, a generated plan without AutoCAD'
 
     # 6. Revit add-in pipe: a stand-in add-in answers on the pipe name a single Revit 2024 session uses.
     $job = Start-Job -ScriptBlock {
