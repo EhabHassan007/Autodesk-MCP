@@ -121,7 +121,8 @@ function Get-AutoCadConnectionStatus([int]$TimeoutMilliseconds = 3000) {
         else { 'AutoCAD is not running.' }
     $status
 }
-function Drawing-Id($doc) { if ($doc.Path) { $doc.FullName } else { $doc.Name } }
+# A saved drawing is identified by its full path, an unsaved one by its name. The full name decides: a never-saved drawing in AutoCAD 2024 reports a non-empty Path but an empty FullName.
+function Drawing-Id($doc) { $full = [string]$doc.FullName; if ($full -match '^([A-Za-z]:[\\/]|\\\\)') { $full } else { $doc.Name } }
 function Assert-Target($doc,$expected) { if ((Drawing-Id $doc) -ine $expected) { throw 'Active drawing changed or expected_drawing is incorrect. Read drawing_info again.' } }
 # Every property read is a call into AutoCAD that waits for its main thread, so AutoCAD stalls while a
 # tool runs. Read only the properties an object type actually has (learned once per type), not all 16 on every object.

@@ -1,6 +1,6 @@
 # execute_autocad: the full AutoCAD API
 
-Use `execute_autocad` for work the narrow tools and `apply_plan` do not cover: hatches, dimensions, tables, block definitions, text and dimension styles, queries across many objects. It is the AutoCAD counterpart of Revit's `execute_csharp`. Prefer `apply_plan` for plain geometry and `create_entity` / `edit_entity` for one-off edits; they validate more.
+Use `execute_autocad` for work the narrow tools and `apply_plan` do not cover: tables, leaders, radial/diametric/angular dimensions, gradient hatches, block definitions, text and dimension styles, queries across many objects. Plain hatches and aligned/rotated dimensions belong in `apply_plan`. It is the AutoCAD counterpart of Revit's `execute_csharp`. Prefer `apply_plan` for plain geometry and `create_entity` / `edit_entity` for one-off edits; they validate more.
 
 `execute_autocad` is a tool of SmartConnector.exe only and is local: nothing exposes it remotely.
 

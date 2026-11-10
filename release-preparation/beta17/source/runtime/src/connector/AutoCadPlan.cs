@@ -16,9 +16,13 @@ namespace SmartConnector
         internal int Lineweight = -1;          // layer step only; -1 = leave as is
         internal double[] Point, End;
         internal double Radius, StartAngle, EndAngle, Height, Width, Rotation;
-        internal double Scale = 1;
+        internal double Scale = 1;             // insert scale, hatch pattern scale
         internal List<double[]> Vertices;
         internal bool Closed;
+        internal string Pattern, DimStyle;     // hatch pattern name; dimension style
+        internal string Boundary;              // hatch: id of an earlier closed polyline or circle step
+        internal List<string> Holes;           // hatch: ids of earlier closed steps, each an inner loop
+        internal double[] Location;            // dimensions: a point the dimension line passes through
     }
 
     // The pure part of apply_plan: it checks a plan before AutoCAD is contacted, and checks it against the drawing's
@@ -43,7 +47,10 @@ namespace SmartConnector
             { "polyline", new[] { "op", "id", "layer", "points", "closed" } },
             { "text", new[] { "op", "id", "layer", "point", "text", "height", "rotation", "style" } },
             { "mtext", new[] { "op", "id", "layer", "point", "width", "text", "height", "rotation", "style" } },
-            { "insert", new[] { "op", "id", "layer", "name", "point", "scale", "rotation" } }
+            { "insert", new[] { "op", "id", "layer", "name", "point", "scale", "rotation" } },
+            { "hatch", new[] { "op", "id", "layer", "pattern", "boundary", "holes", "scale", "angle", "color" } },
+            { "dim_aligned", new[] { "op", "id", "layer", "from", "to", "location", "style" } },
+            { "dim_rotated", new[] { "op", "id", "layer", "from", "to", "location", "angle", "style" } }
         };
 
         private static ToolException Fail(int index, string message)
@@ -60,7 +67,7 @@ namespace SmartConnector
             if (raw.Length > MaxItems) throw new ToolException("A plan has at most " + MaxItems + " steps; split it into several calls.");
 
             List<PlanItem> plan = new List<PlanItem>();
-            HashSet<string> ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            Dictionary<string, PlanItem> ids = new Dictionary<string, PlanItem>(StringComparer.OrdinalIgnoreCase);
             for (int i = 0; i < raw.Length; i++)
             {
                 IDictionary<string, object> d = raw[i] as IDictionary<string, object>;
@@ -75,7 +82,7 @@ namespace SmartConnector
                 {
                     string id = d["id"] as string;
                     if (id == null || !IdPattern.IsMatch(id)) throw Fail(i, "id must be 1-40 letters, digits, '_', '.' or '-'.");
-                    if (!ids.Add(id)) throw Fail(i, "duplicate id '" + id + "'.");
+                    if (ids.ContainsKey(id)) throw Fail(i, "duplicate id '" + id + "'.");
                     p.Id = id;
                 }
 
@@ -139,7 +146,43 @@ namespace SmartConnector
                         if (d.ContainsKey("scale")) p.Scale = Positive(d, "scale", i);
                         if (d.ContainsKey("rotation")) p.Rotation = Number(d, "rotation", i);
                         break;
+                    case "hatch":
+                        p.Layer = NameField(d, "layer", i, true);
+                        p.Pattern = PatternName(d, i);
+                        p.Boundary = ClosedId(d.ContainsKey("boundary") ? d["boundary"] : null, "boundary", i, ids);
+                        if (d.ContainsKey("holes"))
+                        {
+                            object[] holeIds = AsArray(d["holes"]);
+                            if (holeIds == null || holeIds.Length == 0 || holeIds.Length > 50) throw Fail(i, "'holes' must be a list of 1 to 50 step ids.");
+                            p.Holes = new List<string>();
+                            foreach (object holeId in holeIds)
+                            {
+                                string hole = ClosedId(holeId, "holes", i, ids);
+                                if (String.Equals(hole, p.Boundary, StringComparison.OrdinalIgnoreCase)) throw Fail(i, "a hole cannot be the boundary itself.");
+                                p.Holes.Add(hole);
+                            }
+                        }
+                        if (d.ContainsKey("scale")) p.Scale = Positive(d, "scale", i);
+                        if (d.ContainsKey("angle")) p.Rotation = Number(d, "angle", i);
+                        if (d.ContainsKey("color"))
+                        {
+                            double c = Number(d, "color", i);
+                            if (c < 1 || c > 255 || Math.Truncate(c) != c) throw Fail(i, "color must be an integer from 1 to 255.");
+                            p.Color = (int)c;
+                        }
+                        break;
+                    case "dim_aligned":
+                    case "dim_rotated":
+                        p.Layer = NameField(d, "layer", i, true);
+                        p.Point = Point(d, "from", i);
+                        p.End = Point(d, "to", i);
+                        p.Location = Point(d, "location", i);
+                        if (p.Point[0] == p.End[0] && p.Point[1] == p.End[1] && p.Point[2] == p.End[2]) throw Fail(i, "'from' and 'to' must differ.");
+                        if (op == "dim_rotated") p.Rotation = Number(d, "angle", i);
+                        if (d.ContainsKey("style")) p.DimStyle = NameField(d, "style", i, true);
+                        break;
                 }
+                if (p.Id != null) ids[p.Id] = p;
                 plan.Add(p);
             }
             return plan;
@@ -148,7 +191,7 @@ namespace SmartConnector
         // Checks the plan against what the drawing already holds. layers maps a layer name to whether it is locked.
         // Layers created by an earlier layer step count as existing, unlocked layers for the steps after it.
         // Returns up to 20 messages; an empty list means the plan can be applied.
-        internal static List<string> CheckReferences(List<PlanItem> plan, IDictionary<string, bool> layers, ICollection<string> linetypes, ICollection<string> textStyles, ICollection<string> blocks)
+        internal static List<string> CheckReferences(List<PlanItem> plan, IDictionary<string, bool> layers, ICollection<string> linetypes, ICollection<string> textStyles, ICollection<string> blocks, ICollection<string> dimStyles)
         {
             List<string> errors = new List<string>();
             Dictionary<string, bool> known = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
@@ -156,6 +199,7 @@ namespace SmartConnector
             HashSet<string> lt = new HashSet<string>(linetypes, StringComparer.OrdinalIgnoreCase);
             HashSet<string> st = new HashSet<string>(textStyles, StringComparer.OrdinalIgnoreCase);
             HashSet<string> bl = new HashSet<string>(blocks, StringComparer.OrdinalIgnoreCase);
+            HashSet<string> ds = new HashSet<string>(dimStyles, StringComparer.OrdinalIgnoreCase);
 
             foreach (PlanItem p in plan)
             {
@@ -172,6 +216,7 @@ namespace SmartConnector
                     else if (locked) errors.Add(at + "layer '" + p.Layer + "' is locked.");
                     if (p.TextStyle != null && !st.Contains(p.TextStyle)) errors.Add(at + "text style '" + p.TextStyle + "' does not exist in the drawing.");
                     if (p.Op == "insert" && !bl.Contains(p.BlockName)) errors.Add(at + "block '" + p.BlockName + "' is not defined in the drawing.");
+                    if (p.DimStyle != null && !ds.Contains(p.DimStyle)) errors.Add(at + "dimension style '" + p.DimStyle + "' does not exist in the drawing.");
                 }
                 if (errors.Count >= MaxErrors) { errors.Add("(more problems not listed)"); break; }
             }
@@ -192,6 +237,23 @@ namespace SmartConnector
             foreach (PlanItem p in plan)
                 if (p.Op == "layer" && have.Add(p.Layer)) result.Add(p.Layer);
             return result;
+        }
+
+        // A hatch refers to earlier steps by id, and only closed polylines and circles can bound one.
+        private static string ClosedId(object value, string key, int index, Dictionary<string, PlanItem> ids)
+        {
+            string id = value as string;
+            PlanItem target;
+            if (id == null || !ids.TryGetValue(id, out target) || !(target.Op == "circle" || (target.Op == "polyline" && target.Closed)))
+                throw Fail(index, "'" + key + "' must be the id of an earlier closed polyline or circle step (give that step an id).");
+            return target.Id;
+        }
+
+        private static string PatternName(IDictionary<string, object> d, int index)
+        {
+            string name = d.ContainsKey("pattern") ? d["pattern"] as string : null;
+            if (name == null || !Regex.IsMatch(name, "^[A-Za-z0-9_-]{1,34}$")) throw Fail(index, "'pattern' must be a hatch pattern name such as SOLID, ANSI31 or AR-CONC.");
+            return name;
         }
 
         private static string NameField(IDictionary<string, object> d, string key, int index, bool required)
