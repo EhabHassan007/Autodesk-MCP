@@ -53,6 +53,12 @@ namespace SmartConnector
                         Json.Object("expected_drawing", target(), "layout", str(), "dry_run", Json.Object("type", "boolean"),
                             "items", Json.Object("type", "array", "items", Json.Object("type", "object"), "minItems", 1, "maxItems", AutoCadPlan.MaxItems)),
                         new[] { "expected_drawing", "items" }, false),
+                    Schema.Tool("execute_autocad", "Execute controlled C# against the active AutoCAD drawing: the full AutoCAD ActiveX API, for work the other tools do not cover (hatches, dimensions, tables, block definitions, styles, queries). The code is the body of a method with two dynamic variables, cad (the AutoCAD Application) and doc (the active Document), and must return a string. Use execution_mode read for inspection (allow_model_changes=false); use write for edits (allow_model_changes=true, one Undo group). Call drawing_info first. Does not save unless the code does. Not a sandbox: the code runs with your Windows permissions, so run only code you have read.",
+                        Json.Object("expected_drawing", target(), "execution_mode", Json.Object("type", "string", "enum", new object[] { "read", "write" }),
+                            "allow_model_changes", Json.Object("type", "boolean"),
+                            "code", Json.Object("type", "string", "minLength", 1, "maxLength", AutoCadScript.MaxCodeLength),
+                            "timeout_seconds", Json.Object("type", "integer", "minimum", 1, "maximum", 300)),
+                        new[] { "expected_drawing", "execution_mode", "allow_model_changes", "code" }, false),
                     Schema.Tool("save_drawing", "Explicitly save the expected drawing to its EXISTING path. Invoke only when saving is requested; no Save As.", Json.Object("expected_drawing", target()), new[] { "expected_drawing" }, false)
                 };
                 return _tools;
@@ -248,6 +254,8 @@ namespace SmartConnector
                 IDictionary<string, object> checkedArguments = Schema.Check(Tools, name, arguments, false);
                 // A malformed plan is refused before AutoCAD is contacted.
                 if (name == "apply_plan") AutoCadPlan.Parse(checkedArguments["items"]);
+                // Code is checked and compiled before AutoCAD is contacted, and runs on its own thread with a time limit.
+                if (name == "execute_autocad") return ExecuteScript(checkedArguments);
                 return InvokeCore(name, checkedArguments);
             }
             finally { ClearReferences(); }
@@ -374,6 +382,74 @@ namespace SmartConnector
             Dictionary<string, object> data = Json.Object("steps", plan.Count, "objects_created", objects, "layers_created", layersCreated, "counts", counts, "handles", handles,
                 "layout", layout.Length == 0 ? "Model" : layout, "object_count_before", before, "object_count_after", after, "count_matches_plan", after - before == objects);
             return Json.Object("drawing", DrawingId((object)doc), "result", data, "save_performed", false);
+        }
+
+        private static object ExecuteScript(IDictionary<string, object> a)
+        {
+            string mode = Json.GetString(a, "execution_mode");
+            bool allowChanges = (bool)a["allow_model_changes"];
+            if (mode == "write" && !allowChanges) throw new ToolException("Model-changing execution requires allow_model_changes=true.");
+            if (mode == "read" && allowChanges) throw new ToolException("Read execution requires allow_model_changes=false.");
+            System.Reflection.MethodInfo run = AutoCadScript.Compile(Json.GetString(a, "code"));
+            int timeout = a.ContainsKey("timeout_seconds") ? Convert.ToInt32(a["timeout_seconds"]) : 60;
+
+            // The whole run, including the connection, happens on one STA thread so that AutoCAD's objects stay on it.
+            // A thread inside an AutoCAD call is never aborted (that has hung AutoCAD); on timeout it is left to finish.
+            object result = null;
+            Exception failure = null;
+            Thread worker = new Thread(() =>
+            {
+                try { result = RunScriptOnThread(a, run, mode); }
+                catch (Exception exception) { failure = exception; }
+                finally { ClearReferences(); }
+            });
+            worker.IsBackground = true;
+            worker.SetApartmentState(ApartmentState.STA);
+            worker.Start();
+            if (!worker.Join(TimeSpan.FromSeconds(timeout)))
+                throw new ToolException("The code did not finish within " + timeout + " s. AutoCAD may be busy or showing a dialog. The code keeps running and cannot be stopped from here; check AutoCAD before sending anything else.");
+            if (failure != null)
+            {
+                if (failure is ToolException) throw failure;
+                throw new ToolException("C# execution failed: " + failure.GetType().Name + ": " + failure.Message);
+            }
+            return result;
+        }
+
+        private static object RunScriptOnThread(IDictionary<string, object> a, System.Reflection.MethodInfo run, string mode)
+        {
+            dynamic cad = Connect();
+            if (Convert.ToInt32(cad.Documents.Count) == 0) throw new ToolException("Open a drawing in AutoCAD first.");
+            dynamic doc = cad.ActiveDocument;
+            if (!String.Equals(DrawingId((object)doc), Json.GetString(a, "expected_drawing"), StringComparison.OrdinalIgnoreCase))
+                throw new ToolException("Active drawing changed or expected_drawing is incorrect. Read drawing_info again.");
+            if (mode == "write" && (bool)doc.ReadOnly) throw new ToolException("Drawing is read-only.");
+
+            // AutoCAD's API cannot enforce read-only, so a read run is checked afterwards: new objects advance HANDSEED
+            // and any edit clears the Saved flag of a drawing that was saved.
+            string handSeedBefore = Convert.ToString(doc.GetVariable("HANDSEED"));
+            bool savedBefore = (bool)doc.Saved;
+            string text;
+            if (mode == "write")
+            {
+                doc.StartUndoMark();
+                try { text = AutoCadScript.Run(run, (object)cad, (object)doc); }
+                catch (ToolException exception)
+                {
+                    throw new ToolException(exception.Message + " Changes made before the error stay in the drawing; one UNDO reverts them.");
+                }
+                finally { try { doc.EndUndoMark(); } catch (Exception) { } }
+            }
+            else text = AutoCadScript.Run(run, (object)cad, (object)doc);
+
+            bool savedAfter = (bool)doc.Saved;
+            bool changed = Convert.ToString(doc.GetVariable("HANDSEED")) != handSeedBefore || (savedBefore && !savedAfter);
+            bool truncated;
+            string limited = AutoCadScript.Limit(text, out truncated);
+            Dictionary<string, object> data = Json.Object("execution_mode", mode, "result", limited, "result_truncated", truncated, "drawing_changed", changed, "unsaved_changes", !savedAfter);
+            if (mode == "read" && changed)
+                data["warning"] = "The drawing changed during a read run. Run UNDO in AutoCAD to revert it, and use execution_mode=write with allow_model_changes=true for edits.";
+            return Json.Object("drawing", DrawingId((object)doc), "result", data);
         }
 
         private static object InvokeCore(string name, IDictionary<string, object> a)

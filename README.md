@@ -12,7 +12,7 @@ One Autodesk connector for local Codex/Claude Code and authenticated Claude Free
 
 ## AutoCAD status
 
-The repository includes a version-aware local MCP bridge for full AutoCAD on Windows. It discovers registered AutoCAD ActiveX ProgIDs instead of hardcoding one release. It can inspect the active drawing and layers, inspect top-level entities, create lines/circles/text, edit supported entity properties, manage layers, apply a validated plan of many objects (lines, circles, arcs, polylines, text, multiline text, block inserts) in one undoable call with `apply_plan`, and explicitly save a drawing. AutoCAD 2025 is live-tested; other releases still require a compatibility test before being marked verified.
+The repository includes a version-aware local MCP bridge for full AutoCAD on Windows. It discovers registered AutoCAD ActiveX ProgIDs instead of hardcoding one release. It can inspect the active drawing and layers, inspect top-level entities, create lines/circles/text, edit supported entity properties, manage layers, apply a validated plan of many objects (lines, circles, arcs, polylines, text, multiline text, block inserts) in one undoable call with `apply_plan`, run controlled C# against the full AutoCAD API with `execute_autocad` (local only, never exposed remotely; it is not a sandbox), and explicitly save a drawing. AutoCAD 2025 is live-tested; other releases still require a compatibility test before being marked verified.
 
 The live application still runs on the computer where AutoCAD is installed. GitHub stores and synchronizes the code; it does not host the running AutoCAD session.
 
