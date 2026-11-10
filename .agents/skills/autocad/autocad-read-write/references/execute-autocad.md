@@ -22,7 +22,7 @@ A run cannot be cancelled once inside an AutoCAD call. After a timeout, check Au
 
 ## Starting patterns
 
-These come from the AutoCAD ActiveX object model and have **not yet been run in a live AutoCAD from this tool**. Run each once in a disposable drawing before relying on it, and fix this page with what you learn. Enum values are marked where they should be confirmed.
+These come from the AutoCAD ActiveX object model and have **not yet been run in a live AutoCAD from this tool** (only the simple read and write calls in the verification status below have). Run each once in a disposable drawing before relying on it, and fix this page with what you learn. Enum values are marked where they should be confirmed.
 
 Count block references by name (read):
 
@@ -84,4 +84,12 @@ return sb.ToString();
 
 ## Verification status
 
-Compilation, argument rules, mode and flag checks, error mapping and the result limit are covered by mock tests and by cases in `test-smart-connector-exe.ps1` (which compile real code with the Windows compiler). **Live, AutoCAD 24.3 (2024), 2026-11-10:** the first run failed before reaching the code with `COMException: Error getting system variable`, because the read-mode check read `HANDSEED`, which this AutoCAD refuses over COM. The check now uses object counts and the Saved and DBMOD flags, every reading is optional, and a test fake that refuses `HANDSEED` reproduces and covers it. The fixed build has not yet been run live, and none of the starting patterns have been run in a live AutoCAD. Before relying on this tool, run each pattern above in a disposable blank drawing, undo once per write, confirm the object count returns, and record the AutoCAD version and result here.
+Compilation, argument rules, mode and flag checks, error mapping and the result limit are covered by mock tests and by cases in `test-smart-connector-exe.ps1` (which compile real code with the Windows compiler).
+
+**Live, AutoCAD 24.3 (2024), 2026-11-10, driven directly through the program:**
+- The first run failed before reaching the code with `COMException: Error getting system variable`, because the read-mode check read `HANDSEED`, which this AutoCAD refuses over COM. The check now uses object counts and the Saved and `DBMOD` flags, every reading is optional, and a test fake that refuses `HANDSEED` reproduces and covers it.
+- After the fix, a read run (`return doc.Layers.Count + " layers";`) compiled, ran and returned `"1 layers"` with `drawing_changed` false.
+- A read run that added a circle to an already-unsaved drawing returned `done` with `drawing_changed` true and the warning, so the object-count check works there.
+- A write run that added a circle returned `written` with `drawing_changed` true and no warning.
+
+Not yet confirmed: that one `UNDO` removes the circle of a write run (the write run opens its own Undo group, which `apply_plan` showed works the same way), and none of the starting patterns above (block counts, dimensions, table, text style, layer read-out) have been run live. Run each once in a disposable drawing and record the result here.
