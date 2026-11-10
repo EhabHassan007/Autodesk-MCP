@@ -63,7 +63,11 @@ try {
     # 3. The same tools as the PowerShell bridge, in the same order, with the same arguments.
     . (Join-Path $runtime 'src\autodesk\autodesk-bridge.ps1') -LibraryOnly
     $expected = @(Get-AutodeskMcpTools)
-    $actual = @((Invoke-Mcp 'tools/list').result.tools)
+    $allTools = @((Invoke-Mcp 'tools/list').result.tools)
+    # Tools that only SmartConnector.exe has; the PowerShell fallback bridge does not. Every other tool must match exactly.
+    $exeOnlyTools = @('apply_plan')
+    Assert (@($allTools | Where-Object { $exeOnlyTools -contains $_.name }).Count -eq $exeOnlyTools.Count) ('An exe-only tool is missing from the tool list: ' + (($allTools | ForEach-Object name) -join ','))
+    $actual = @($allTools | Where-Object { $exeOnlyTools -notcontains $_.name })
     Assert ((($actual | ForEach-Object name) -join ',') -eq (($expected | ForEach-Object { $_['name'] }) -join ',')) ('Tool list differs: ' + (($actual | ForEach-Object name) -join ','))
     for ($i = 0; $i -lt $expected.Count; $i++) {
         $e = $expected[$i]; $a = $actual[$i]; $n = $e['name']
@@ -105,6 +109,11 @@ try {
         @('create_entity', @{ expected_drawing = 'a.dwg'; kind = 'Line'; layer = '0'; point = @(0, 0, 0) }, 'Invalid choice: kind'),
         @('create_entity', @{ expected_drawing = 'a.dwg'; kind = 'line'; layer = '0'; point = @(0, 0) }, 'A point must have three coordinates.'),
         @('list_entities', @{ limit = 500 }, 'Number out of range: limit'),
+        @('apply_plan', @{ expected_drawing = 'a.dwg' }, 'Missing argument: items'),
+        @('apply_plan', @{ expected_drawing = 'a.dwg'; items = @() }, 'Too few entries: items'),
+        @('apply_plan', @{ expected_drawing = 'a.dwg'; items = @(@{ op = 'spline' }) }, 'items`[0`]: op must be one of*'),
+        @('apply_plan', @{ expected_drawing = 'a.dwg'; items = @(@{ op = 'circle'; layer = 'A'; center = @(0, 0); radius = 0 }) }, 'items`[0`]: ''radius'' must be greater than 0.'),
+        @('apply_plan', @{ expected_drawing = 'a.dwg'; items = @(@{ op = 'layer'; name = 'A-DETL' }) }, 'No running full AutoCAD instance was found*'),
         @('get_element', @{ element_id = ' ' }, 'Empty argument: element_id'),
         @('drawing_info', @{}, 'No running full AutoCAD instance was found*'),
         @('connection_status', @{}, 'Smart Connector is running, but neither AutoCAD nor Revit is reachable.*'),

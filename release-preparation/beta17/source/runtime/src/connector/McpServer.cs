@@ -466,8 +466,20 @@ namespace SmartConnector
                 {
                     object[] items = value as object[];
                     if (items == null) { ArrayList list = value as ArrayList; if (list != null) items = list.ToArray(); }
-                    if (items == null || items.Length != 3) throw new ToolException("A point must have three coordinates.");
-                    foreach (object item in items) { double coordinate; if (!TryNumber(item, out coordinate)) throw new ToolException("Coordinates must be finite numbers."); }
+                    Dictionary<string, object> itemRule = rule.ContainsKey("items") ? rule["items"] as Dictionary<string, object> : null;
+                    if (itemRule != null && Json.GetString(itemRule, "type") == "object")
+                    {
+                        // A list of objects (for example the steps of apply_plan); each step is checked by its own tool.
+                        if (items == null) throw new ToolException("Invalid array: " + pair.Key);
+                        if (rule.ContainsKey("minItems") && items.Length < Convert.ToInt32(rule["minItems"])) throw new ToolException("Too few entries: " + pair.Key);
+                        if (rule.ContainsKey("maxItems") && items.Length > Convert.ToInt32(rule["maxItems"])) throw new ToolException("Too many entries: " + pair.Key);
+                        foreach (object item in items) if (!(item is IDictionary<string, object>)) throw new ToolException("Every entry of " + pair.Key + " must be an object.");
+                    }
+                    else
+                    {
+                        if (items == null || items.Length != 3) throw new ToolException("A point must have three coordinates.");
+                        foreach (object item in items) { double coordinate; if (!TryNumber(item, out coordinate)) throw new ToolException("Coordinates must be finite numbers."); }
+                    }
                 }
                 if (rule.ContainsKey("enum"))
                 {

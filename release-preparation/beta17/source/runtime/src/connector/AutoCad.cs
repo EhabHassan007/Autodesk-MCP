@@ -49,6 +49,10 @@ namespace SmartConnector
                         Json.Object("expected_drawing", target(), "name", str(), "action", Json.Object("type", "string", "enum", new object[] { "create", "color", "on", "frozen", "locked" }),
                             "color", Json.Object("type", "integer", "minimum", 1, "maximum", 255), "value", Json.Object("type", "boolean")),
                         new[] { "expected_drawing", "name", "action" }, false),
+                    Schema.Tool("apply_plan", "Create many objects in ONE undoable call from a plan (one round trip instead of hundreds). items are ordered steps {op, ...}: layer{name,color?,linetype?,lineweight?}, line{layer,start,end}, circle{layer,center,radius}, arc{layer,center,radius,start_angle,end_angle}, polyline{layer,points:[[x,y],...],closed?}, text{layer,point,text,height,rotation?,style?}, mtext{layer,point,width,text,height?,rotation?,style?; \\P = new line}, insert{layer,name,point,scale?,rotation?}. Points are [x,y] or [x,y,z] in WCS drawing units; angles are degrees counter-clockwise; lineweight is in hundredths of mm. A step may carry an id; its handle is returned. A layer must already exist (or be created by an earlier layer step) and be unlocked; blocks, linetypes and text styles must already be in the drawing. At most 500 steps. Run with dry_run=true first: it checks everything against the drawing and changes nothing. A failed run removes what it created. Does not save.",
+                        Json.Object("expected_drawing", target(), "layout", str(), "dry_run", Json.Object("type", "boolean"),
+                            "items", Json.Object("type", "array", "items", Json.Object("type", "object"), "minItems", 1, "maxItems", AutoCadPlan.MaxItems)),
+                        new[] { "expected_drawing", "items" }, false),
                     Schema.Tool("save_drawing", "Explicitly save the expected drawing to its EXISTING path. Invoke only when saving is requested; no Save As.", Json.Object("expected_drawing", target()), new[] { "expected_drawing" }, false)
                 };
                 return _tools;
@@ -239,8 +243,137 @@ namespace SmartConnector
 
         internal static object Invoke(string name, object arguments)
         {
-            try { return InvokeCore(name, Schema.Check(Tools, name, arguments, false)); }
+            try
+            {
+                IDictionary<string, object> checkedArguments = Schema.Check(Tools, name, arguments, false);
+                // A malformed plan is refused before AutoCAD is contacted.
+                if (name == "apply_plan") AutoCadPlan.Parse(checkedArguments["items"]);
+                return InvokeCore(name, checkedArguments);
+            }
             finally { ClearReferences(); }
+        }
+
+        // Names of the members of a collection such as Layers, Linetypes, TextStyles or Blocks.
+        private static HashSet<string> Names(object source)
+        {
+            dynamic collection = source;
+            HashSet<string> names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            int count = Convert.ToInt32(collection.Count);
+            for (int i = 0; i < count; i++) names.Add(Convert.ToString(collection.Item(i).Name));
+            return names;
+        }
+
+        private static dynamic CreateItem(object spaceSource, PlanItem p)
+        {
+            dynamic space = spaceSource;
+            double toRadians = Math.PI / 180.0;
+            switch (p.Op)
+            {
+                case "line": return space.AddLine(p.Point, p.End);
+                case "circle": return space.AddCircle(p.Point, p.Radius);
+                case "arc": return space.AddArc(p.Point, p.Radius, p.StartAngle * toRadians, p.EndAngle * toRadians);
+                case "polyline":
+                    {
+                        double[] flat = new double[p.Vertices.Count * 2];
+                        for (int i = 0; i < p.Vertices.Count; i++) { flat[2 * i] = p.Vertices[i][0]; flat[2 * i + 1] = p.Vertices[i][1]; }
+                        dynamic polyline = space.AddLightWeightPolyline(flat);
+                        if (p.Closed) polyline.Closed = true;
+                        return polyline;
+                    }
+                case "text":
+                    {
+                        dynamic text = space.AddText(p.Text, p.Point, p.Height);
+                        if (p.Rotation != 0) text.Rotation = p.Rotation * toRadians;
+                        return text;
+                    }
+                case "mtext":
+                    {
+                        dynamic mtext = space.AddMText(p.Point, p.Width, p.Text);
+                        if (p.Height > 0) mtext.Height = p.Height;
+                        if (p.Rotation != 0) mtext.Rotation = p.Rotation * toRadians;
+                        return mtext;
+                    }
+                case "insert": return space.InsertBlock(p.Point, p.BlockName, p.Scale, p.Scale, p.Scale, p.Rotation * toRadians);
+            }
+            throw new ToolException("Unsupported plan step: " + p.Op);
+        }
+
+        // Validates the whole plan against this drawing, then (unless dry_run) creates it in one Undo group. Anything
+        // created is removed again if a step fails, and the object count is read back to confirm the result.
+        private static object ApplyPlan(object source, IDictionary<string, object> a)
+        {
+            dynamic doc = source;
+            List<PlanItem> plan = AutoCadPlan.Parse(a["items"]);
+            bool dryRun = a.ContainsKey("dry_run") && (bool)a["dry_run"];
+            string layout = Json.GetString(a, "layout");
+            if (!dryRun && (bool)doc.ReadOnly) throw new ToolException("Drawing is read-only.");
+            if (layout.Length > 0 && layout != "Model" && !Names((object)doc.Layouts).Contains(layout)) throw new ToolException("Layout not found: " + layout);
+
+            Dictionary<string, bool> layers = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+            dynamic layerTable = doc.Layers;
+            int layerCount = Convert.ToInt32(layerTable.Count);
+            for (int i = 0; i < layerCount; i++) { dynamic item = layerTable.Item(i); layers[Convert.ToString(item.Name)] = (bool)item.Lock; }
+            bool needsLinetypes = plan.Any(p => p.Linetype != null), needsStyles = plan.Any(p => p.TextStyle != null), needsBlocks = plan.Any(p => p.Op == "insert");
+            HashSet<string> linetypes = needsLinetypes ? Names((object)doc.Linetypes) : new HashSet<string>();
+            HashSet<string> styles = needsStyles ? Names((object)doc.TextStyles) : new HashSet<string>();
+            HashSet<string> blocks = needsBlocks ? Names((object)doc.Blocks) : new HashSet<string>();
+            List<string> problems = AutoCadPlan.CheckReferences(plan, layers, linetypes, styles, blocks);
+            if (problems.Count > 0) throw new ToolException("The plan cannot be applied:\n" + String.Join("\n", problems.ToArray()));
+
+            List<string> toCreate = AutoCadPlan.LayersToCreate(plan, layers.Keys);
+            Dictionary<string, object> counts = AutoCadPlan.Counts(plan);
+            if (dryRun)
+                return Json.Object("drawing", DrawingId((object)doc), "dry_run", true, "valid", true, "steps", plan.Count, "counts", counts, "layers_to_create", toCreate,
+                    "layout", layout.Length == 0 ? "Model" : layout, "save_performed", false);
+
+            dynamic space = Space((object)doc, layout);
+            int before = Convert.ToInt32(space.Count);
+            List<object> created = new List<object>();
+            List<string> layersCreated = new List<string>();
+            Dictionary<string, object> handles = new Dictionary<string, object>();
+            int objects = 0;
+            doc.StartUndoMark();
+            try
+            {
+                try
+                {
+                    foreach (PlanItem p in plan)
+                    {
+                        if (p.Op == "layer")
+                        {
+                            dynamic layer;
+                            if (toCreate.Contains(p.Layer, StringComparer.OrdinalIgnoreCase) && !layersCreated.Contains(p.Layer, StringComparer.OrdinalIgnoreCase))
+                            {
+                                layer = doc.Layers.Add(p.Layer);
+                                layersCreated.Add(p.Layer);
+                            }
+                            else layer = doc.Layers.Item(p.Layer);
+                            if (p.Color > 0) layer.Color = p.Color;
+                            if (p.Linetype != null) layer.Linetype = p.Linetype;
+                            if (p.Lineweight >= 0) layer.Lineweight = p.Lineweight;
+                            continue;
+                        }
+                        dynamic entity = CreateItem((object)space, p);
+                        created.Add((object)entity);
+                        entity.Layer = p.Layer;
+                        if (p.TextStyle != null) entity.StyleName = p.TextStyle;
+                        objects++;
+                        if (p.Id != null) handles[p.Id] = Convert.ToString(entity.Handle);
+                    }
+                }
+                catch (Exception)
+                {
+                    for (int i = created.Count - 1; i >= 0; i--) { try { ((dynamic)created[i]).Delete(); } catch (Exception) { } }
+                    foreach (string layerName in layersCreated) { try { doc.Layers.Item(layerName).Delete(); } catch (Exception) { } }
+                    throw;
+                }
+            }
+            finally { doc.EndUndoMark(); }
+
+            int after = Convert.ToInt32(space.Count);
+            Dictionary<string, object> data = Json.Object("steps", plan.Count, "objects_created", objects, "layers_created", layersCreated, "counts", counts, "handles", handles,
+                "layout", layout.Length == 0 ? "Model" : layout, "object_count_before", before, "object_count_after", after, "count_matches_plan", after - before == objects);
+            return Json.Object("drawing", DrawingId((object)doc), "result", data, "save_performed", false);
         }
 
         private static object InvokeCore(string name, IDictionary<string, object> a)
@@ -279,6 +412,7 @@ namespace SmartConnector
                     return ReadEntity((object)doc.HandleToObject(Json.GetString(a, "handle")));
             }
 
+            if (name == "apply_plan") return ApplyPlan((object)doc, a);
             if ((bool)doc.ReadOnly) throw new ToolException("Drawing is read-only.");
             if (name == "save_drawing")
             {

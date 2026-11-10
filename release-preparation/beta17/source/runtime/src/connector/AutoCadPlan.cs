@@ -1,0 +1,273 @@
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
+using System.Text.RegularExpressions;
+
+namespace SmartConnector
+{
+    // One checked step of an apply_plan call. Angles are degrees here and converted when the object is created.
+    internal sealed class PlanItem
+    {
+        internal int Index;
+        internal string Op, Id, Layer, TextStyle, Text, BlockName, Linetype;
+        internal int Color;                    // layer step only; 0 = leave as is
+        internal int Lineweight = -1;          // layer step only; -1 = leave as is
+        internal double[] Point, End;
+        internal double Radius, StartAngle, EndAngle, Height, Width, Rotation;
+        internal double Scale = 1;
+        internal List<double[]> Vertices;
+        internal bool Closed;
+    }
+
+    // The pure part of apply_plan: it checks a plan before AutoCAD is contacted, and checks it against the drawing's
+    // layers, linetypes, text styles and blocks. No COM here, so the whole plan can be refused without touching the drawing.
+    internal static class AutoCadPlan
+    {
+        internal const int MaxItems = 500;
+        internal const int MaxVertices = 2000;
+        private const int MaxErrors = 20;
+
+        private static readonly Regex Name = new Regex("^[^<>/\\\\\":;?*|,=`]{1,255}$", RegexOptions.CultureInvariant);
+        private static readonly Regex IdPattern = new Regex("^[A-Za-z0-9_.-]{1,40}$", RegexOptions.CultureInvariant);
+        // Layer lineweights AutoCAD accepts, in hundredths of a millimetre.
+        private static readonly int[] Lineweights = { 0, 5, 9, 13, 15, 18, 20, 25, 30, 35, 40, 50, 53, 60, 70, 80, 90, 100, 106, 120, 140, 158, 200, 211 };
+
+        private static readonly Dictionary<string, string[]> Allowed = new Dictionary<string, string[]>
+        {
+            { "layer", new[] { "op", "id", "name", "color", "linetype", "lineweight" } },
+            { "line", new[] { "op", "id", "layer", "start", "end" } },
+            { "circle", new[] { "op", "id", "layer", "center", "radius" } },
+            { "arc", new[] { "op", "id", "layer", "center", "radius", "start_angle", "end_angle" } },
+            { "polyline", new[] { "op", "id", "layer", "points", "closed" } },
+            { "text", new[] { "op", "id", "layer", "point", "text", "height", "rotation", "style" } },
+            { "mtext", new[] { "op", "id", "layer", "point", "width", "text", "height", "rotation", "style" } },
+            { "insert", new[] { "op", "id", "layer", "name", "point", "scale", "rotation" } }
+        };
+
+        private static ToolException Fail(int index, string message)
+        {
+            return new ToolException("items[" + index.ToString(CultureInfo.InvariantCulture) + "]: " + message);
+        }
+
+        internal static List<PlanItem> Parse(object source)
+        {
+            object[] raw = source as object[];
+            if (raw == null) { ArrayList list = source as ArrayList; if (list != null) raw = list.ToArray(); }
+            if (raw == null) throw new ToolException("items must be an array of steps.");
+            if (raw.Length == 0) throw new ToolException("items is empty.");
+            if (raw.Length > MaxItems) throw new ToolException("A plan has at most " + MaxItems + " steps; split it into several calls.");
+
+            List<PlanItem> plan = new List<PlanItem>();
+            HashSet<string> ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < raw.Length; i++)
+            {
+                IDictionary<string, object> d = raw[i] as IDictionary<string, object>;
+                if (d == null) throw Fail(i, "a step must be an object.");
+                string op = d.ContainsKey("op") ? d["op"] as string : null;
+                if (op == null || !Allowed.ContainsKey(op)) throw Fail(i, "op must be one of: " + String.Join(", ", Allowed.Keys.ToArray()) + ".");
+                foreach (string key in d.Keys)
+                    if (Array.IndexOf(Allowed[op], key) < 0) throw Fail(i, "unknown field '" + key + "' for op '" + op + "'.");
+
+                PlanItem p = new PlanItem { Index = i, Op = op };
+                if (d.ContainsKey("id"))
+                {
+                    string id = d["id"] as string;
+                    if (id == null || !IdPattern.IsMatch(id)) throw Fail(i, "id must be 1-40 letters, digits, '_', '.' or '-'.");
+                    if (!ids.Add(id)) throw Fail(i, "duplicate id '" + id + "'.");
+                    p.Id = id;
+                }
+
+                switch (op)
+                {
+                    case "layer":
+                        p.Layer = NameField(d, "name", i, true);
+                        if (d.ContainsKey("color"))
+                        {
+                            p.Color = (int)Number(d, "color", i);
+                            if (p.Color < 1 || p.Color > 255 || Number(d, "color", i) != p.Color) throw Fail(i, "color must be an integer from 1 to 255.");
+                        }
+                        if (d.ContainsKey("linetype")) p.Linetype = NameField(d, "linetype", i, true);
+                        if (d.ContainsKey("lineweight"))
+                        {
+                            double w = Number(d, "lineweight", i);
+                            if (Math.Truncate(w) != w || Array.IndexOf(Lineweights, (int)w) < 0) throw Fail(i, "lineweight must be a standard AutoCAD value in hundredths of mm (for example 5, 18, 50, 100).");
+                            p.Lineweight = (int)w;
+                        }
+                        break;
+                    case "line":
+                        p.Layer = NameField(d, "layer", i, true);
+                        p.Point = Point(d, "start", i);
+                        p.End = Point(d, "end", i);
+                        if (p.Point[0] == p.End[0] && p.Point[1] == p.End[1] && p.Point[2] == p.End[2]) throw Fail(i, "line start and end must differ.");
+                        break;
+                    case "circle":
+                        p.Layer = NameField(d, "layer", i, true);
+                        p.Point = Point(d, "center", i);
+                        p.Radius = Positive(d, "radius", i);
+                        break;
+                    case "arc":
+                        p.Layer = NameField(d, "layer", i, true);
+                        p.Point = Point(d, "center", i);
+                        p.Radius = Positive(d, "radius", i);
+                        p.StartAngle = Number(d, "start_angle", i);
+                        p.EndAngle = Number(d, "end_angle", i);
+                        if (p.StartAngle == p.EndAngle) throw Fail(i, "arc start_angle and end_angle must differ.");
+                        break;
+                    case "polyline":
+                        p.Layer = NameField(d, "layer", i, true);
+                        p.Vertices = Vertices(d, "points", i);
+                        if (d.ContainsKey("closed")) { if (!(d["closed"] is bool)) throw Fail(i, "closed must be true or false."); p.Closed = (bool)d["closed"]; }
+                        if (p.Closed && p.Vertices.Count < 3) throw Fail(i, "a closed polyline needs at least 3 points.");
+                        break;
+                    case "text":
+                    case "mtext":
+                        p.Layer = NameField(d, "layer", i, true);
+                        p.Point = Point(d, "point", i);
+                        p.Text = TextField(d, "text", i, op == "text" ? 500 : 4000);
+                        if (op == "text" && p.Text.IndexOf('\n') >= 0) throw Fail(i, "text is one line; use op 'mtext' for several lines.");
+                        if (op == "text" || d.ContainsKey("height")) p.Height = Positive(d, "height", i);
+                        if (op == "mtext") p.Width = Positive(d, "width", i);
+                        if (d.ContainsKey("rotation")) p.Rotation = Number(d, "rotation", i);
+                        if (d.ContainsKey("style")) p.TextStyle = NameField(d, "style", i, true);
+                        break;
+                    case "insert":
+                        p.Layer = NameField(d, "layer", i, true);
+                        p.BlockName = NameField(d, "name", i, true);
+                        p.Point = Point(d, "point", i);
+                        if (d.ContainsKey("scale")) p.Scale = Positive(d, "scale", i);
+                        if (d.ContainsKey("rotation")) p.Rotation = Number(d, "rotation", i);
+                        break;
+                }
+                plan.Add(p);
+            }
+            return plan;
+        }
+
+        // Checks the plan against what the drawing already holds. layers maps a layer name to whether it is locked.
+        // Layers created by an earlier layer step count as existing, unlocked layers for the steps after it.
+        // Returns up to 20 messages; an empty list means the plan can be applied.
+        internal static List<string> CheckReferences(List<PlanItem> plan, IDictionary<string, bool> layers, ICollection<string> linetypes, ICollection<string> textStyles, ICollection<string> blocks)
+        {
+            List<string> errors = new List<string>();
+            Dictionary<string, bool> known = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+            foreach (KeyValuePair<string, bool> pair in layers) known[pair.Key] = pair.Value;
+            HashSet<string> lt = new HashSet<string>(linetypes, StringComparer.OrdinalIgnoreCase);
+            HashSet<string> st = new HashSet<string>(textStyles, StringComparer.OrdinalIgnoreCase);
+            HashSet<string> bl = new HashSet<string>(blocks, StringComparer.OrdinalIgnoreCase);
+
+            foreach (PlanItem p in plan)
+            {
+                string at = "items[" + p.Index.ToString(CultureInfo.InvariantCulture) + "]: ";
+                if (p.Op == "layer")
+                {
+                    if (p.Linetype != null && !lt.Contains(p.Linetype)) errors.Add(at + "linetype '" + p.Linetype + "' is not loaded in the drawing.");
+                    if (!known.ContainsKey(p.Layer)) known[p.Layer] = false;
+                }
+                else
+                {
+                    bool locked;
+                    if (!known.TryGetValue(p.Layer, out locked)) errors.Add(at + "layer '" + p.Layer + "' does not exist; add a layer step before it.");
+                    else if (locked) errors.Add(at + "layer '" + p.Layer + "' is locked.");
+                    if (p.TextStyle != null && !st.Contains(p.TextStyle)) errors.Add(at + "text style '" + p.TextStyle + "' does not exist in the drawing.");
+                    if (p.Op == "insert" && !bl.Contains(p.BlockName)) errors.Add(at + "block '" + p.BlockName + "' is not defined in the drawing.");
+                }
+                if (errors.Count >= MaxErrors) { errors.Add("(more problems not listed)"); break; }
+            }
+            return errors;
+        }
+
+        internal static Dictionary<string, object> Counts(List<PlanItem> plan)
+        {
+            Dictionary<string, object> counts = new Dictionary<string, object>();
+            foreach (PlanItem p in plan) counts[p.Op] = counts.ContainsKey(p.Op) ? (object)((int)counts[p.Op] + 1) : 1;
+            return counts;
+        }
+
+        internal static List<string> LayersToCreate(List<PlanItem> plan, ICollection<string> existing)
+        {
+            HashSet<string> have = new HashSet<string>(existing, StringComparer.OrdinalIgnoreCase);
+            List<string> result = new List<string>();
+            foreach (PlanItem p in plan)
+                if (p.Op == "layer" && have.Add(p.Layer)) result.Add(p.Layer);
+            return result;
+        }
+
+        private static string NameField(IDictionary<string, object> d, string key, int index, bool required)
+        {
+            object value;
+            if (!d.TryGetValue(key, out value)) { if (required) throw Fail(index, "missing '" + key + "'."); return null; }
+            string text = value as string;
+            if (text == null || text.Trim().Length == 0 || text != text.Trim() || !Name.IsMatch(text)) throw Fail(index, "'" + key + "' must be a valid name (no leading or trailing space, none of < > / \\ \" : ; ? * | , = `).");
+            return text;
+        }
+
+        private static string TextField(IDictionary<string, object> d, string key, int index, int max)
+        {
+            object value;
+            if (!d.TryGetValue(key, out value)) throw Fail(index, "missing '" + key + "'.");
+            string text = value as string;
+            if (text == null || text.Trim().Length == 0) throw Fail(index, "'" + key + "' must be non-empty text.");
+            if (text.Length > max) throw Fail(index, "'" + key + "' is longer than " + max + " characters.");
+            return text;
+        }
+
+        private static double Number(IDictionary<string, object> d, string key, int index)
+        {
+            object value;
+            if (!d.TryGetValue(key, out value)) throw Fail(index, "missing '" + key + "'.");
+            double number;
+            if (!Schema.TryNumber(value, out number)) throw Fail(index, "'" + key + "' must be a finite number.");
+            return number;
+        }
+
+        private static double Positive(IDictionary<string, object> d, string key, int index)
+        {
+            double number = Number(d, key, index);
+            if (number <= 0) throw Fail(index, "'" + key + "' must be greater than 0.");
+            return number;
+        }
+
+        private static object[] AsArray(object value)
+        {
+            object[] items = value as object[];
+            if (items == null) { ArrayList list = value as ArrayList; if (list != null) items = list.ToArray(); }
+            return items;
+        }
+
+        // [x, y] or [x, y, z]; z defaults to 0.
+        private static double[] Point(IDictionary<string, object> d, string key, int index)
+        {
+            object value;
+            if (!d.TryGetValue(key, out value)) throw Fail(index, "missing '" + key + "'.");
+            return ToPoint(AsArray(value), key, index);
+        }
+
+        private static double[] ToPoint(object[] items, string key, int index)
+        {
+            if (items == null || (items.Length != 2 && items.Length != 3)) throw Fail(index, "'" + key + "' must be [x, y] or [x, y, z].");
+            double[] result = new double[3];
+            for (int k = 0; k < items.Length; k++)
+                if (!Schema.TryNumber(items[k], out result[k])) throw Fail(index, "'" + key + "' coordinates must be finite numbers.");
+            return result;
+        }
+
+        private static List<double[]> Vertices(IDictionary<string, object> d, string key, int index)
+        {
+            object value;
+            if (!d.TryGetValue(key, out value)) throw Fail(index, "missing '" + key + "'.");
+            object[] items = AsArray(value);
+            if (items == null || items.Length < 2) throw Fail(index, "'" + key + "' needs at least 2 points.");
+            if (items.Length > MaxVertices) throw Fail(index, "'" + key + "' has more than " + MaxVertices + " points.");
+            List<double[]> result = new List<double[]>();
+            foreach (object item in items)
+            {
+                object[] pair = AsArray(item);
+                if (pair == null || pair.Length != 2) throw Fail(index, "each of '" + key + "' must be [x, y].");
+                result.Add(ToPoint(pair, key, index));
+            }
+            return result;
+        }
+    }
+}

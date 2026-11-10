@@ -16,6 +16,8 @@ Use the connected `autocad` MCP tools. The bridge runs locally beside AutoCAD; G
 
 Supported writes include creating lines, circles, and single-line text; moving or deleting top-level entities; changing an entity layer; replacing TEXT/MTEXT content; setting a circle radius; and creating or changing layers.
 
+For more than a handful of objects, use `apply_plan`: it validates a whole plan with `dry_run`, creates it in one Undo group, and returns handles. Read [apply-plan](references/apply-plan.md) first, including its live-verification status.
+
 Respect locked layers and read-only drawings. Only delete requested objects or objects created for the current authorized test. Use a disposable blank drawing for connection tests and restore its original object count. Never clear an existing user drawing for testing.
 
 For connection recovery and local verification, read [setup](references/setup.md).
