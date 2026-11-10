@@ -130,6 +130,9 @@ try {
         @('generate_detail', @{ template = 'reception_counter_section'; params = @{ section = 'accessible' } }, 'The accessible section needs*'),
         @('generate_detail', @{ template = 'reception_counter_section'; apply = $true }, 'expected_drawing is required when apply is true.'),
         @('generate_detail', @{ template = 'reception_counter_section'; apply = $true; expected_drawing = 'a.dwg' }, 'No running full AutoCAD instance was found*'),
+        @('generate_detail', @{ template = 'custom_section' }, 'params.parts is required.'),
+        @('generate_detail', @{ template = 'custom_section'; params = @{ parts = @(@{ id = 'a'; material = 'oak'; x0 = 0; y0 = 0; x1 = 10; y1 = 10 }) } }, 'params.parts`[0`]: material must be one of*'),
+        @('generate_detail', @{ template = 'custom_section'; params = @{ parts = @(@{ id = 'a'; material = 'mdf'; x0 = 0; y0 = 0; x1 = 100; y1 = 100 }, @{ id = 'b'; material = 'mdf'; x0 = 50; y0 = 50; x1 = 150; y1 = 150 }) } }, 'The parts ''a'' and ''b'' overlap by 50 x 50 mm*'),
         @('generate_detail', @{ template = 'reception_counter_section'; annotation = 'sheet' }, 'Invalid choice: annotation'),
         @('generate_detail', @{ template = 'reception_counter_section'; annotation = 'paper' }, 'annotation paper needs view.paper_centre*'),
         @('generate_detail', @{ template = 'reception_counter_section'; annotation = 'paper'; view = @{ zoom = 2 } }, 'Unknown view field: zoom*'),
@@ -148,6 +151,8 @@ try {
     }
     $paper = Invoke-Tool 'generate_detail' @{ template = 'reception_counter_section'; annotation = 'paper'; view = @{ paper_centre = @(200, 150) }; return_plan = $true }
     Assert (-not $paper.isError -and $paper.content[0].text -like '*"paper_items":[*' -and $paper.content[0].text -like '*linear_factor*' -and $paper.content[0].text -like '*viewport_setup*') 'generate_detail paper mode must return the geometry plan, the layout plan and the viewport set-up without AutoCAD'
+    $custom = Invoke-Tool 'generate_detail' @{ template = 'custom_section'; params = @{ parts = @(@{ id = 'top'; material = 'corian'; x0 = 0; y0 = 870; x1 = 600; y1 = 882 }); notes = @(@{ part = 'top'; text = '12MM THK. SOLID SURFACE TOP' }) }; return_plan = $true }
+    Assert (-not $custom.isError -and $custom.content[0].text -like '*12MM THK. SOLID SURFACE TOP*' -and $custom.content[0].text -like '*custom_section*') 'generate_detail custom_section must return a plan without AutoCAD'
     $none = Invoke-Tool 'generate_detail' @{ template = 'reception_counter_section'; annotation = 'none'; return_plan = $true }
     Assert (-not $none.isError -and $none.content[0].text -notlike '*dim_rotated*') 'generate_detail geometry-only mode must draw no dimensions'
     $gen = Invoke-Tool 'generate_detail' @{ template = 'reception_counter_section'; return_plan = $true }

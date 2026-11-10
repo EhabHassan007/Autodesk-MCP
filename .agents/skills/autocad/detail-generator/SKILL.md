@@ -1,7 +1,7 @@
 ---
 name: detail-generator
 category: autocad
-description: Generate a draft construction detail in AutoCAD from a short brief, in millimetres: a vertical section through a reception counter (boards, plinth, Corian or stone top, optional raised bar, wheelchair-accessible variant) with hatches, dimensions, levels and notes, in model space or in a paper-space layout. Use when asked to draw or revise a counter section, or to start a new joinery detail from parameters.
+description: Generate a draft construction detail in AutoCAD from a short brief, in millimetres: a vertical section through a reception counter (boards, plinth, Corian or stone top, optional raised bar, wheelchair-accessible variant), or a section of any joinery from a parts list read off pictures, with hatches, dimensions, levels and notes, in model space or in a paper-space layout. Use when asked to draw or revise a counter section, or to start a new joinery detail from parameters.
 ---
 
 # Detail Generator
@@ -39,7 +39,7 @@ The usual brief is not a list of parameters but **rendered pictures from several
 1. Read the pictures and plans and write an **interpretation list**: the parts, their materials, the overall length, depth and heights, and any special feature (curves, steel frames, glass, lighting).
 2. Mark every number as **given** (from the user's dimensions or plan) or **estimated from the picture**. Pictures have no scale, so ask for at least two real dimensions per view, such as an overall length and a counter height. Never present an estimate as a fact.
 3. Show the list and the open questions, and **wait for the user's confirmation or corrections** before drawing anything.
-4. Build from the confirmed design, sections first, then plan and elevations, as drafts for review.
+4. Build from the confirmed design, sections first, then plan and elevations, as drafts for review. Use `template` `custom_section` for anything the reception template does not cover: the confirmed list becomes `params.parts` (id, material, x0, y0, x1, y1 in mm; x from the staff face, y up from the floor), with `levels`, `notes`, `dimensions` and `title` written from the specification. Every number and every word of a note is yours to supply; the generator invents none, warns when parts have no note, refuses overlapping parts and unknown materials (mdf, ply, stone, corian, steel, glass, outline), and does not check the design against the pictures or any code.
 
 Where the pictures show something the template cannot draw yet, say so and offer the nearest standard construction, clearly marked.
 

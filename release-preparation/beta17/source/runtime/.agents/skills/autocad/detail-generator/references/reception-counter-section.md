@@ -68,6 +68,33 @@ Board thicknesses (18 mm MDF), the 600 depth, the 900 top, the 100 plinth set ba
 ## Verification status
 
 - The generator is covered by 71 mock checks: the geometry of each part, dimensions attached to real edges and showing the true distances, both top materials, the raised bar, the accessible section and its refusals, origin and scale handling, deterministic output, and a run through `apply_plan` against a stand-in AutoCAD (millimetre guard, existing layers left alone, a dimension scale on every dimension). The Windows test script covers the argument errors and a plan without AutoCAD.
-- Paper-space annotation, geometry-only mode, block attributes and the paper-space dimension factor are covered by 65 further mock checks (a dimension's paper length times its factor equals the model length for every dimension; rollback when a factor or an attribute is refused; a missing layout or block refuses the job before anything is drawn). They have **not** been run in a live AutoCAD: whether the layout dimensions read the model size, whether the viewport lines up with the annotation, and the block attribute fill all need a live check.
+- Paper-space annotation, geometry-only mode, block attributes and the paper-space dimension factor are covered by 65 further mock checks (a dimension's paper length times its factor equals the model length for every dimension; rollback when a factor or an attribute is refused; a missing layout or block refuses the job before anything is drawn). They, and `custom_section`, have **not** been run in a live AutoCAD: whether the layout dimensions read the model size, whether the viewport lines up with the annotation, and the block attribute fill all need a live check.
 - **Not yet run in a live AutoCAD.** Run a default section in a disposable millimetre drawing first: confirm the dry run, the real run, the look of the hatches and dimensions, the text and dimension sizes at the chosen scale, and that one `UNDO` removes it all. The dimension `scale` property (`ScaleFactor`) is also unconfirmed live; if AutoCAD refuses it the result carries a warning and the dimension style decides the size.
 - The accessible section has been checked only for internal consistency, not against any code.
+
+## Template: custom_section
+
+A section built entirely from what the caller supplies, for details the reception template does not cover (display counters, vanities, kitchen units, shelving, anything read off renders and plans).
+
+```json
+{
+  "template": "custom_section",
+  "params": {
+    "parts": [
+      {"id": "base", "material": "mdf", "x0": 0, "y0": 100, "x1": 600, "y1": 118},
+      {"id": "top",  "material": "corian", "x0": 0, "y0": 870, "x1": 600, "y1": 882}
+    ],
+    "levels": [{"y": 882, "label": "EL +0.88 COUNTER TOP"}],
+    "notes": [{"part": "top", "text": "12MM THK. SOLID SURFACE TOP"}],
+    "dimensions": [{"from": [0, 0], "to": [0, 100], "axis": "y"}],
+    "title": "SECTION A-A"
+  }
+}
+```
+
+- **Coordinates:** millimetres, x from the staff face (or any chosen datum), y up from the floor. The tool places the section at `origin`.
+- **Materials and drawing:** `mdf` ANSI31, `ply` ANSI32, `stone` ANSI36, `corian` solid, `steel` solid in grey (colour 8), `glass` and `outline` outline only. Anything else is refused rather than guessed.
+- **Checks:** at most 60 parts, ids unique (case-insensitive), each part at least 1 mm each way, parts may touch but not overlap, everything within 10 m. A note must name a part and, if it gives `y`, point inside it.
+- **Annotation:** notes run right from the part's right edge at its mid height unless `y` is given; vertical dimensions sit left (`axis` `y`), horizontal ones below (`axis` `x`), `chain` 1 to 4 steps outwards; overall width and height are added outside the last chain unless `overall_dimensions` is false; `floor` false drops the floor line. Levels sit left of the dimensions. `annotation`, `layout`, `view` and `level_block` work as for the reception template.
+- **Nothing is invented or verified.** Texts are as given (use the office style: capitals, thickness first). The result warns when no notes were given or parts have none. The generator does not compare the section with the pictures or any code, so show the interpretation list to the user before drawing and check the result against it.
+- Covered by 57 mock checks (including three deliberate breakages of the rules to prove the tests catch them). Not yet run in a live AutoCAD.
