@@ -40,20 +40,7 @@ for (int i = 0; i < n; i++)
 return string.Join("\n", counts.OrderBy(k => k.Key).Select(k => k.Key + ": " + k.Value).ToArray());
 ```
 
-Hatch a closed polyline (write). Confirm that pattern type `1` means a predefined pattern in your AutoCAD:
-
-```csharp
-dynamic ms = doc.ModelSpace;
-dynamic poly = ms.AddLightWeightPolyline(new double[] { 0, 0, 100, 0, 100, 50, 0, 50 });
-poly.Closed = true;
-poly.Layer = "A-DETL";
-dynamic hatch = ms.AddHatch(1, "ANSI31", true);
-hatch.AppendOuterLoop(new object[] { poly });
-hatch.PatternScale = 1;
-hatch.Layer = "A-DETL-GENF";
-hatch.Evaluate();
-return (string)hatch.Handle;
-```
+Hatches: use `apply_plan` (`hatch` step with `boundary` and `holes`). Do not call `AppendOuterLoop` from `execute_autocad` with a plain `new object[] { ... }`: AutoCAD 2024 refuses it with `Invalid object array`, found in live testing. A hatch loop needs an array of automation objects, which `apply_plan` builds for you.
 
 Aligned and rotated dimensions (write); the style must already exist:
 
