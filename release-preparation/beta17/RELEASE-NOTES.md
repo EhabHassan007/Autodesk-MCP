@@ -27,4 +27,4 @@ Lean core: Smart Connector now runs nothing in the background. This removes the 
 - Fixed: in the setup window, text could cover other text (the title cut off, descriptions hidden behind the next box, the progress bar under the step name) on screens where text is drawn larger than the layout expects. Every page now measures its text after it is filled and moves anything that would overlap down, boxes grow to hold their text, and a page that is still too tall scrolls. Setup also writes one line to its log with the display scale and window size.
 - The Revit add-in is now compiled in the automated tests with the same Windows compiler the PCs use, against the Revit 2024 API reference assemblies.
 
-SHA-256: 935F893DFFDC8D1F828339A53D96207B0F23E6F3C9269AB4905FAE598D77AA59
+SHA-256: D3AAE4CA5502E56CBD9823EDF60CE5E9EFEA1867DE01FCC9DB911978F21C0300
