@@ -9,6 +9,14 @@ using Microsoft.Win32;
 
 namespace SmartConnector
 {
+    // IDispatch, which every AutoCAD automation object implements. A hatch loop must reach AutoCAD as an array of automation
+    // objects (a SAFEARRAY of VT_DISPATCH, which is what Visual Basic's Object() and AcadEntity() arrays are). An array of this
+    // interface is marshaled that way; a plain object[] becomes an array of variants and AutoCAD answers "Invalid object array".
+    [System.Runtime.InteropServices.ComImport]
+    [System.Runtime.InteropServices.Guid("00020400-0000-0000-C000-000000000046")]
+    [System.Runtime.InteropServices.InterfaceType(System.Runtime.InteropServices.ComInterfaceType.InterfaceIsIDispatch)]
+    internal interface IDispatchOnly { }
+
     // AutoCAD tools, over AutoCAD's own COM automation (full AutoCAD only; AutoCAD LT has none).
     internal static class AutoCadBridge
     {
@@ -273,18 +281,53 @@ namespace SmartConnector
             return names;
         }
 
+        private static void AddForm(List<string> forms, string form)
+        {
+            if (!forms.Contains(form)) forms.Add(form);
+        }
+
+        // Tries the array forms AutoCAD might accept for a hatch loop, best first, and says which one worked, so the form that
+        // works on a given AutoCAD is visible in the result. A form that cannot even be built here is skipped.
+        private static readonly string[] LoopForms = { "dispatch-array", "wrapped-variants", "variant-array" };
+
+        private static string AppendLoop(object hatchSource, bool inner, object entity)
+        {
+            dynamic hatch = hatchSource;
+            Exception last = null;
+            for (int attempt = 0; attempt < LoopForms.Length; attempt++)
+            {
+                dynamic array;
+                try { array = LoopArray(attempt, entity); }
+                catch (Exception exception) { last = exception; continue; }
+                try
+                {
+                    if (inner) hatch.AppendInnerLoop(array); else hatch.AppendOuterLoop(array);
+                    return LoopForms[attempt];
+                }
+                catch (Exception exception) { last = exception; }
+            }
+            throw new ToolException("AutoCAD refused the hatch loop in every array form tried (" + String.Join(", ", LoopForms) + "): " + (last == null ? "no detail" : last.Message));
+        }
+
+        private static object LoopArray(int attempt, object entity)
+        {
+            if (attempt == 0) { IDispatchOnly[] array = new IDispatchOnly[1]; array[0] = (IDispatchOnly)entity; return array; }
+            if (attempt == 1) return new object[] { new System.Runtime.InteropServices.DispatchWrapper(entity) };
+            return new object[] { entity };
+        }
+
         // The boundary and holes are objects created by earlier steps. Pattern type 1 is acHatchPatternTypePreDefined:
         // a pattern found by name (SOLID, ANSI31, or a custom pattern on the support path). The hatch is not associative.
         // If a loop is refused, the half-built hatch is deleted before the error leaves.
-        private static dynamic CreateHatch(object spaceSource, PlanItem p, Dictionary<string, object> byId)
+        private static dynamic CreateHatch(object spaceSource, PlanItem p, Dictionary<string, object> byId, List<string> loopForms)
         {
             dynamic space = spaceSource;
             dynamic hatch = space.AddHatch(1, p.Pattern, false);
             try
             {
-                hatch.AppendOuterLoop(new object[] { byId[p.Boundary] });
+                AddForm(loopForms, AppendLoop((object)hatch, false, byId[p.Boundary]));
                 if (p.Holes != null)
-                    foreach (string hole in p.Holes) hatch.AppendInnerLoop(new object[] { byId[hole] });
+                    foreach (string hole in p.Holes) AddForm(loopForms, AppendLoop((object)hatch, true, byId[hole]));
                 if (!String.Equals(p.Pattern, "SOLID", StringComparison.OrdinalIgnoreCase))
                 {
                     hatch.PatternScale = p.Scale;
@@ -373,6 +416,7 @@ namespace SmartConnector
             List<string> layersCreated = new List<string>();
             Dictionary<string, object> handles = new Dictionary<string, object>();
             Dictionary<string, object> byId = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+            List<string> loopForms = new List<string>();
             int objects = 0;
             doc.StartUndoMark();
             try
@@ -395,7 +439,7 @@ namespace SmartConnector
                             if (p.Lineweight >= 0) layer.Lineweight = p.Lineweight;
                             continue;
                         }
-                        dynamic entity = p.Op == "hatch" ? CreateHatch((object)space, p, byId) : CreateItem((object)space, p);
+                        dynamic entity = p.Op == "hatch" ? CreateHatch((object)space, p, byId, loopForms) : CreateItem((object)space, p);
                         created.Add((object)entity);
                         entity.Layer = p.Layer;
                         if (p.TextStyle != null) entity.StyleName = p.TextStyle;
@@ -416,6 +460,7 @@ namespace SmartConnector
             int after = Convert.ToInt32(space.Count);
             Dictionary<string, object> data = Json.Object("steps", plan.Count, "objects_created", objects, "layers_created", layersCreated, "counts", counts, "handles", handles,
                 "layout", layout.Length == 0 ? "Model" : layout, "object_count_before", before, "object_count_after", after, "count_matches_plan", after - before == objects);
+            if (loopForms.Count > 0) data["hatch_loop_array_form"] = loopForms;
             return Json.Object("drawing", DrawingId((object)doc), "result", data, "save_performed", false);
         }
 
@@ -456,35 +501,71 @@ namespace SmartConnector
             dynamic cad = Connect();
             if (Convert.ToInt32(cad.Documents.Count) == 0) throw new ToolException("Open a drawing in AutoCAD first.");
             dynamic doc = cad.ActiveDocument;
-            if (!String.Equals(DrawingId((object)doc), Json.GetString(a, "expected_drawing"), StringComparison.OrdinalIgnoreCase))
+            return RunScriptOnDrawing((object)cad, (object)doc, a, run, mode);
+        }
+
+        // What a read run must not change, as one comparable text: the number of objects in model space and in the layouts,
+        // layers, blocks, and the DBMOD flag. This check only warns, so every reading is optional: a value AutoCAD will not
+        // give (AutoCAD 2024 refuses HANDSEED over COM) must never stop the code from running.
+        private static string Fingerprint(object source)
+        {
+            dynamic doc = source;
+            string f = "";
+            try { f += "m" + Convert.ToInt32(doc.ModelSpace.Count); } catch (Exception) { f += "m?"; }
+            try
+            {
+                dynamic layouts = doc.Layouts;
+                int count = Convert.ToInt32(layouts.Count), total = 0;
+                for (int i = 0; i < count; i++) total += Convert.ToInt32(layouts.Item(i).Block.Count);
+                f += "|p" + total;
+            }
+            catch (Exception) { f += "|p?"; }
+            try { f += "|l" + Convert.ToInt32(doc.Layers.Count); } catch (Exception) { f += "|l?"; }
+            try { f += "|b" + Convert.ToInt32(doc.Blocks.Count); } catch (Exception) { f += "|b?"; }
+            try { f += "|d" + Convert.ToString(doc.GetVariable("DBMOD")); } catch (Exception) { f += "|d?"; }
+            return f;
+        }
+
+        private static bool SavedFlag(object source)
+        {
+            try { dynamic doc = source; return (bool)doc.Saved; }
+            catch (Exception) { return true; }
+        }
+
+        // The run itself, given the drawing, so it can be tested against a stand-in for AutoCAD.
+        internal static object RunScriptOnDrawing(object cadSource, object docSource, IDictionary<string, object> a, System.Reflection.MethodInfo run, string mode)
+        {
+            dynamic doc = docSource;
+            if (!String.Equals(DrawingId(docSource), Json.GetString(a, "expected_drawing"), StringComparison.OrdinalIgnoreCase))
                 throw new ToolException("Active drawing changed or expected_drawing is incorrect. Read drawing_info again.");
             if (mode == "write" && (bool)doc.ReadOnly) throw new ToolException("Drawing is read-only.");
 
-            // AutoCAD's API cannot enforce read-only, so a read run is checked afterwards: new objects advance HANDSEED
-            // and any edit clears the Saved flag of a drawing that was saved.
-            string handSeedBefore = Convert.ToString(doc.GetVariable("HANDSEED"));
-            bool savedBefore = (bool)doc.Saved;
+            // AutoCAD's API cannot enforce read-only, so a read run is checked afterwards. Edits that add or remove objects
+            // change the counts; any edit clears the Saved flag of a drawing that was saved. Changing an existing object in a
+            // drawing that was already unsaved cannot be seen, so the check is a warning and not a guarantee.
+            string before = Fingerprint(docSource);
+            bool savedBefore = SavedFlag(docSource);
             string text;
             if (mode == "write")
             {
                 doc.StartUndoMark();
-                try { text = AutoCadScript.Run(run, (object)cad, (object)doc); }
+                try { text = AutoCadScript.Run(run, cadSource, docSource); }
                 catch (ToolException exception)
                 {
                     throw new ToolException(exception.Message + " Changes made before the error stay in the drawing; one UNDO reverts them.");
                 }
                 finally { try { doc.EndUndoMark(); } catch (Exception) { } }
             }
-            else text = AutoCadScript.Run(run, (object)cad, (object)doc);
+            else text = AutoCadScript.Run(run, cadSource, docSource);
 
-            bool savedAfter = (bool)doc.Saved;
-            bool changed = Convert.ToString(doc.GetVariable("HANDSEED")) != handSeedBefore || (savedBefore && !savedAfter);
+            bool savedAfter = SavedFlag(docSource);
+            bool changed = Fingerprint(docSource) != before || (savedBefore && !savedAfter);
             bool truncated;
             string limited = AutoCadScript.Limit(text, out truncated);
             Dictionary<string, object> data = Json.Object("execution_mode", mode, "result", limited, "result_truncated", truncated, "drawing_changed", changed, "unsaved_changes", !savedAfter);
             if (mode == "read" && changed)
                 data["warning"] = "The drawing changed during a read run. Run UNDO in AutoCAD to revert it, and use execution_mode=write with allow_model_changes=true for edits.";
-            return Json.Object("drawing", DrawingId((object)doc), "result", data);
+            return Json.Object("drawing", DrawingId(docSource), "result", data);
         }
 
         private static object InvokeCore(string name, IDictionary<string, object> a)
