@@ -171,11 +171,13 @@ namespace SmartConnector
             return status;
         }
 
+        // A saved drawing is identified by its full path, an unsaved one by its name. The full name itself decides: a never-saved
+        // drawing in AutoCAD 2024 reports a non-empty Path but an empty FullName, which made the id blank.
         private static string DrawingId(object source)
         {
             dynamic document = source;
-            string path = Convert.ToString(document.Path);
-            return String.IsNullOrEmpty(path) ? Convert.ToString(document.Name) : Convert.ToString(document.FullName);
+            string full = Convert.ToString(document.FullName);
+            return Regex.IsMatch(full, @"^([A-Za-z]:[\\/]|\\\\)") ? full : Convert.ToString(document.Name);
         }
 
         private static bool IsMissingMember(Exception exception)

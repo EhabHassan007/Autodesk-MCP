@@ -22,3 +22,7 @@ A sandboxed shell can fail to access AutoCAD COM even when the MCP process succe
 ## Tests
 
 Run `src/autocad/work/test-bridge.ps1` for protocol validation and mock object-model tests. Mock tests do not prove a live AutoCAD connection. Perform live tests only in a disposable blank drawing: record the object count, create and read a small circle, move and read it again, delete that handle, and verify the original count. Leave it unsaved unless saving was requested.
+
+## Live findings
+
+- 2026-11-10, AutoCAD 24.3 (2024, LMS Tech licence), blank unsaved `Drawing1.dwg`: the drawing reports a non-empty `Path` but an empty `FullName`. The old rule (unsaved when `Path` is empty) therefore returned a blank `drawing_id`, and every `expected_drawing` was refused. The id is now the full path when `FullName` is a drive or network path, and the drawing name otherwise. If a tool says the active drawing changed, run `drawing_info` and use its `drawing_id` exactly.
