@@ -475,3 +475,16 @@ test('content rejected before stays hidden in later uploads, and such an upload 
   assert.match(gh.closed[1][1],/rejected earlier with the same content/);
   assert.equal((await s.request('/admin/api/reviews/close','POST',admin,{pr:99})).status,409,'only open intake PRs can be closed here');
 });
+
+test('a skill is approved only into the category its SKILL.md declares, so the repository checks pass',async t=>{
+  const s=setup(t);
+  const skill=pending('revit-z',{category:'revit',checks:{blocked:[],flags:[],declared:'revit'}});
+  const gh=reviewBackend(s,[skill]);
+  const wrong=await decide(s,skill,'approve',{category:'autocad'});
+  assert.equal(wrong.status,422);
+  assert.match((await wrong.json()).detail,/says "category: revit"/);
+  assert.equal(gh.approved.length,0,'nothing is written to main');
+  assert.equal(s.sqlite.prepare('SELECT COUNT(*) AS n FROM review_decisions').get().n,0,'the refusal records no decision');
+  assert.equal((await decide(s,skill,'approve',{category:'revit'})).status,200);
+  assert.deepEqual(gh.approved,[['revit-z','revit']]);
+});
