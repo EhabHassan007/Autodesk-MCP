@@ -29,7 +29,29 @@ Tool arguments: `scale` (denominator, default 10), `origin` (floor at the staff 
 - Hatches on `A-DETL-GENF` (0.09): MDF `ANSI31`, marine plywood `ANSI32`, stone `ANSI36`, Corian solid fill. Pattern scales follow the detail scale. These are standard AutoCAD patterns, so no pattern files are needed.
 - Dimensions on `A-ANNO-DIMS` (0.13), all on the left or below so none crosses a note: plinth height, overall height, depth, and for the bar the step and the bar run, for the accessible section the clear height under the top and the knee depth.
 - Level markers (F.F.L., counter top, bar top) on the left, notes with horizontal leaders on the customer side, a section title and the scale. Notes use the office wording style: all capitals, thickness first, for example `18MM THK. MDF CARCASS IN MELAMINE FINISH`.
-- Layers: `A-DETL-WIDE` 0.50, `A-DETL` 0.25, `A-DETL-THIN` 0.13, `A-DETL-GENF` 0.09, `A-ANNO-DIMS` 0.13, `G-ANNO-TEXT` 0.13, with the office layer colours.
+- Layers (office names, this generator's lineweights): `A-DETL-WIDE` 0.50, `A-DETL` 0.25, `A-DETL-THIN` 0.13, `A-DETL-GENF` 0.09, `A-ANNO-DIMS` 0.13, `G-ANNO-TEXT` 0.13, with the office layer colours.
+
+## Annotation and dimension style (from the reference sheets)
+
+Read from three finished reception counter sheets. All three agree.
+
+| Item | Reference |
+|---|---|
+| Dimension style | `na1`, the only style used on every dimension |
+| Dimension text | 3.5 mm on paper, in text style `na1` (a Swiss condensed face), text above the dimension line and aligned with it |
+| Arrows | architectural tick, 2.0 mm |
+| Extension lines | start 1.5 mm off the object and extend 1.5 mm past the dimension line; dimension spacing 1.5 mm |
+| Units | whole millimetres, no decimals |
+| Dimension colours | dimension line by block, extension lines grey (8), text green (3) |
+| Notes | text style `EN-S` (Swiss), 2.0 to 2.5 mm; the leader notes are blocks with a `LABEL` attribute, 2.5 mm in two sheets and 3.5 mm in the first |
+| Titles | `EN-SCB` (Swiss bold), view title block attributes `BOTTOM-TITLE`, `SCALE`, `SHEET-NO`, `TOP-TITLE` |
+| Levels | a block with attributes `LEVEL` and `Area` (for example `EL. +0.90`, `COUNTER TOP`) |
+| Section markers | a block with attributes `VIEWNUMBER` and `SHEETNUMBER` |
+| Where dimensions live | in paper space, over the viewports, with the scale factor of the viewport so the model value shows |
+
+What the generator does with it: it uses `na1`, `EN-S` and `EN-SCB` when the drawing has them, sets notes and levels to 2.5 mm, titles to 3.5 mm, and gives each dimension the detail scale so the 3.5 mm style prints at 3.5 mm. It draws the annotation in model space with the detail, so it works without a sheet.
+
+**Not matched yet:** the level, view title and section marker **blocks** (levels, titles and leaders are drawn as plain lines and text), and paper-space annotation. A later step can insert the office blocks with their attributes, and the sheet-preparation skill places paper-space annotation over viewports.
 
 ## The accessible section
 

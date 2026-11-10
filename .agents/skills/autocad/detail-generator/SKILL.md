@@ -18,6 +18,17 @@ description: Generate a draft construction detail in AutoCAD from a short brief,
 
 Read [reception counter section](references/reception-counter-section.md) for the parameters, defaults, what is drawn and what is not.
 
+## Working from renders and plans
+
+The usual brief is not a list of parameters but **rendered pictures from several angles, plans, and some dimensions**. Do not draw from the pictures directly.
+
+1. Read the pictures and plans and write an **interpretation list**: the parts, their materials, the overall length, depth and heights, and any special feature (curves, steel frames, glass, lighting).
+2. Mark every number as **given** (from the user's dimensions or plan) or **estimated from the picture**. Pictures have no scale, so ask for at least two real dimensions per view, such as an overall length and a counter height. Never present an estimate as a fact.
+3. Show the list and the open questions, and **wait for the user's confirmation or corrections** before drawing anything.
+4. Build from the confirmed design, sections first, then plan and elevations, as drafts for review.
+
+Where the pictures show something the template cannot draw yet, say so and offer the nearest standard construction, clearly marked.
+
 ## Rules
 
 - Millimetres only. Never convert or reinterpret units.
@@ -25,5 +36,6 @@ Read [reception counter section](references/reception-counter-section.md) for th
 - **The accessible section has no built-in numbers.** It needs `accessible_height`, `knee_clearance_height`, `knee_clearance_depth` and `code_reference`, taken from the code and edition the project uses. Never fill them from memory, and never carry a figure from one jurisdiction into another. The generator prints the code reference on the drawing, marked "to be verified".
 - Top material follows the item: Corian (the default) for counters, stone for kitchens and F&B.
 - Do not copy dimensions or curves from one project's drawing into a default. The defaults come from conventions repeated across the office's kitchen and joinery sheets; anything specific to one counter is an option.
-- Dimension and text sizes depend on the dimension style and the detail scale. The generator sets each dimension's scale to the detail scale; check the first dimension on screen, and if the size is wrong pass `dimension_scale` or fix the style.
+- **Annotation follows the reference sheets.** When the drawing has them, dimensions use style `na1`, notes and levels use text style `EN-S`, and titles use `EN-SCB`; the result lists them under `reference_styles` and says in `style_notes` which are missing. Pass `dimension_style` or `text_style` to override, or `use_reference_styles` false to use the current styles. See the reference for the numbers behind these styles.
+- Dimension and text sizes depend on the style and the detail scale. The generator sets each dimension's scale to the detail scale, so a 3.5 mm style prints 3.5 mm at that scale; check the first dimension on screen, and if the size is wrong pass `dimension_scale` or fix the style.
 - If the plan is refused, the message names the step; fix the parameter and retry. A failed plan removes what it created.

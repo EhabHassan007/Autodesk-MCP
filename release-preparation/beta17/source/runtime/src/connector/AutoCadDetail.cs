@@ -11,6 +11,7 @@ namespace SmartConnector
         internal List<Dictionary<string, object>> Items = new List<Dictionary<string, object>>();
         internal List<string> Warnings = new List<string>();
         internal Dictionary<string, object> Summary = new Dictionary<string, object>();
+        internal int Scale = 10;
     }
 
     // Detail Generator. A brief (a template name and a few parameters) becomes an apply_plan plan. No AutoCAD calls happen
@@ -121,12 +122,13 @@ namespace SmartConnector
             }
 
             DetailResult r = new DetailResult();
+            r.Scale = scale;
             double tf = topMaterial == "stone" ? StoneThickness : CorianThickness;     // finish thickness
             double ts = T;                                                              // substrate under the finish
             string subMaterial = topMaterial == "stone" ? "ply" : "mdf";
             double topUnder = H - tf - ts;
             double d = scale;                                                           // model millimetres per paper millimetre
-            double textH = 2.0 * d;
+            double textH = 2.5 * d;                                                     // notes and levels: the reference sheets use 2.5 mm leader text
 
             // ---- checks that the brief can be built ----
             if (topUnder - (PH + T) < 120) throw new ToolException("The height is too small for the plinth, bottom panel and top: less than 120 mm of carcass remains.");

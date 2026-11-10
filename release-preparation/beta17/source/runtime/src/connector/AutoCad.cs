@@ -67,11 +67,11 @@ namespace SmartConnector
                             "code", Json.Object("type", "string", "minLength", 1, "maxLength", AutoCadScript.MaxCodeLength),
                             "timeout_seconds", Json.Object("type", "integer", "minimum", 1, "maximum", 300)),
                         new[] { "expected_drawing", "execution_mode", "allow_model_changes", "code" }, false),
-                    Schema.Tool("generate_detail", "Detail Generator: build a draft construction detail from a short brief, and optionally draw it. Template reception_counter_section is a vertical section through a reception counter, in millimetres only: boards, plinth, top (corian by default, or stone), optional shelf, optional raised bar, or a wheelchair-accessible section (params.section = accessible; it needs accessible_height, knee_clearance_height, knee_clearance_depth and code_reference from the code you adopt, none are built in). params holds the design parameters in mm, all with defaults except the accessible ones. scale is the detail scale denominator (10 = 1:10); origin is where the floor meets the staff face. With apply=false (the default) AutoCAD is not contacted: you get a summary, warnings and, with return_plan, the steps. With apply=true (expected_drawing required) the drawing must be in millimetres, the plan is checked against it and drawn like apply_plan; dry_run defaults to true. Existing layers are left as they are unless update_layers. Every result is a draft for a designer's review.",
+                    Schema.Tool("generate_detail", "Detail Generator: build a draft construction detail from a short brief, and optionally draw it. Template reception_counter_section is a vertical section through a reception counter, in millimetres only: boards, plinth, top (corian by default, or stone), optional shelf, optional raised bar, or a wheelchair-accessible section (params.section = accessible; it needs accessible_height, knee_clearance_height, knee_clearance_depth and code_reference from the code you adopt, none are built in). params holds the design parameters in mm, all with defaults except the accessible ones. scale is the detail scale denominator (10 = 1:10); origin is where the floor meets the staff face. With apply=false (the default) AutoCAD is not contacted: you get a summary, warnings and, with return_plan, the steps. With apply=true (expected_drawing required) the drawing must be in millimetres, the plan is checked against it and drawn like apply_plan; dry_run defaults to true. Existing layers are left as they are unless update_layers. Unless dimension_style or text_style is given (or use_reference_styles is false), the drawing's reference styles are used when present: dimension style na1, text style EN-S for notes and levels, EN-SCB for titles; if one is missing the result says so. Every result is a draft for a designer's review.",
                         Json.Object("expected_drawing", target(), "template", Json.Object("type", "string", "enum", new object[] { AutoCadDetail.ReceptionCounterSection }),
                             "params", Json.Object("type", "object"), "scale", Json.Object("type", "integer", "minimum", 1, "maximum", 200), "origin", point(),
                             "dimension_style", str(), "text_style", str(), "dimension_scale", Json.Object("type", "number", "exclusiveMinimum", 0),
-                            "apply", Json.Object("type", "boolean"), "dry_run", Json.Object("type", "boolean"), "update_layers", Json.Object("type", "boolean"), "return_plan", Json.Object("type", "boolean")),
+                            "apply", Json.Object("type", "boolean"), "dry_run", Json.Object("type", "boolean"), "update_layers", Json.Object("type", "boolean"), "use_reference_styles", Json.Object("type", "boolean"), "return_plan", Json.Object("type", "boolean")),
                         new[] { "template" }, false),
                     Schema.Tool("save_drawing", "Explicitly save the expected drawing to its EXISTING path. Invoke only when saving is requested; no Save As.", Json.Object("expected_drawing", target()), new[] { "expected_drawing" }, false)
                 };
@@ -611,6 +611,41 @@ namespace SmartConnector
             return ApplyGenerated((object)doc, a, built, generated);
         }
 
+        // The reference sheets use dimension style na1, text style EN-S for notes and EN-SCB for titles. A step the caller gave an
+        // explicit style keeps it; the others take the reference style if the drawing has it. Anything missing is reported.
+        private static void ResolveReferenceStyles(object docSource, DetailResult built, Dictionary<string, object> generated)
+        {
+            dynamic doc = docSource;
+            HashSet<string> dimStyles = Names((object)doc.DimStyles), textStyles = Names((object)doc.TextStyles);
+            List<string> notes = new List<string>();
+            string refDim = dimStyles.Contains("na1") ? "na1" : null;
+            string refText = textStyles.Contains("EN-S") ? "EN-S" : null;
+            string refTitle = textStyles.Contains("EN-SCB") ? "EN-SCB" : refText;
+            bool wantsDim = false, wantsText = false, wantsTitle = false;
+            foreach (Dictionary<string, object> item in built.Items)
+            {
+                string op = Json.GetString(item, "op");
+                if (item.ContainsKey("style")) continue;
+                if (op == "dim_rotated")
+                {
+                    wantsDim = true;
+                    if (refDim != null) item["style"] = refDim;
+                }
+                else if (op == "text")
+                {
+                    bool title = Convert.ToDouble(item["height"], System.Globalization.CultureInfo.InvariantCulture) >= 3.4 * built.Scale;
+                    if (title) { wantsTitle = true; if (refTitle != null) item["style"] = refTitle; }
+                    else { wantsText = true; if (refText != null) item["style"] = refText; }
+                }
+            }
+            if (wantsDim && refDim == null) notes.Add("Dimension style na1 was not found, so the current dimension style is used and the dimension sizes will not match the reference sheets.");
+            if (wantsText && refText == null) notes.Add("Text style EN-S was not found, so the current text style is used for notes and levels.");
+            if (wantsTitle && refTitle == null) notes.Add("Text style EN-SCB was not found, so the current text style is used for titles.");
+            Dictionary<string, object> used = Json.Object("dimension", refDim, "notes", refText, "titles", refTitle);
+            generated["reference_styles"] = used;
+            if (notes.Count > 0) generated["style_notes"] = notes;
+        }
+
         // Checks the drawing (identity, millimetres, existing layers), then dry-runs or draws the generated plan.
         internal static object ApplyGenerated(object docSource, IDictionary<string, object> a, DetailResult built, Dictionary<string, object> generated)
         {
@@ -624,6 +659,7 @@ namespace SmartConnector
             if (units != 4)
                 throw new ToolException("The drawing is not in millimetres (INSUNITS = " + units.ToString(System.Globalization.CultureInfo.InvariantCulture) + "), so nothing was drawn. The Detail Generator works in millimetres only; start from a millimetre template such as acadiso.dwt.");
 
+            if (!a.ContainsKey("use_reference_styles") || (bool)a["use_reference_styles"]) ResolveReferenceStyles(docSource, built, generated);
             bool update = a.ContainsKey("update_layers") && (bool)a["update_layers"];
             HashSet<string> existing = Names((object)doc.Layers);
             List<object> steps = new List<object>();
