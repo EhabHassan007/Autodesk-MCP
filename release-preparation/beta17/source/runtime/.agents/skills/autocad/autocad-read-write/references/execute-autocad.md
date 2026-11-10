@@ -11,7 +11,7 @@ Use `execute_autocad` for work the narrow tools and `apply_plan` do not cover: t
 - It is compiled **before** AutoCAD is contacted. Compile errors come back with line numbers counted from your first line, and nothing in the drawing is touched.
 - Arguments: `expected_drawing` (from `drawing_info`), `execution_mode` (`read` or `write`), `allow_model_changes` (`false` for read, `true` for write; a mismatch is refused), `code`, optional `timeout_seconds` (1-300, default 60).
 - `write` runs inside one Undo group. If the code throws part-way, what it already did stays in the drawing and one `UNDO` reverts it; the error says so.
-- The result reports `drawing_changed` and `unsaved_changes`. AutoCAD cannot enforce read-only, so a `read` run is checked afterwards and carries a `warning` if the drawing changed anyway.
+- The result reports `drawing_changed` and `unsaved_changes`. AutoCAD cannot enforce read-only, so a `read` run is checked afterwards and carries a `warning` if the drawing changed anyway. The check compares object counts (model space, layouts, layers, blocks) and the Saved and DBMOD flags. It sees added or removed objects, and any edit to a drawing that was saved; it cannot see a change to an existing object in a drawing that was already unsaved. It is a warning, not a guarantee, and it can never stop your code from running.
 - It does not save unless your code does. Do not save in code; use `save_drawing` when the user asks.
 
 ## Safety
@@ -97,4 +97,4 @@ return sb.ToString();
 
 ## Verification status
 
-Compilation, argument rules, mode and flag checks, error mapping and the result limit are covered by mock tests and by cases in `test-smart-connector-exe.ps1` (which compile real code with the Windows compiler). Nothing has yet been run against a live AutoCAD. Before relying on this tool, run each pattern above in a disposable blank drawing, undo once per write, confirm the object count returns, and record the AutoCAD version and result here.
+Compilation, argument rules, mode and flag checks, error mapping and the result limit are covered by mock tests and by cases in `test-smart-connector-exe.ps1` (which compile real code with the Windows compiler). **Live, AutoCAD 24.3 (2024), 2026-11-10:** the first run failed before reaching the code with `COMException: Error getting system variable`, because the read-mode check read `HANDSEED`, which this AutoCAD refuses over COM. The check now uses object counts and the Saved and DBMOD flags, every reading is optional, and a test fake that refuses `HANDSEED` reproduces and covers it. The fixed build has not yet been run live, and none of the starting patterns have been run in a live AutoCAD. Before relying on this tool, run each pattern above in a disposable blank drawing, undo once per write, confirm the object count returns, and record the AutoCAD version and result here.

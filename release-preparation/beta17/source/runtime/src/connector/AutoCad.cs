@@ -456,35 +456,71 @@ namespace SmartConnector
             dynamic cad = Connect();
             if (Convert.ToInt32(cad.Documents.Count) == 0) throw new ToolException("Open a drawing in AutoCAD first.");
             dynamic doc = cad.ActiveDocument;
-            if (!String.Equals(DrawingId((object)doc), Json.GetString(a, "expected_drawing"), StringComparison.OrdinalIgnoreCase))
+            return RunScriptOnDrawing((object)cad, (object)doc, a, run, mode);
+        }
+
+        // What a read run must not change, as one comparable text: the number of objects in model space and in the layouts,
+        // layers, blocks, and the DBMOD flag. This check only warns, so every reading is optional: a value AutoCAD will not
+        // give (AutoCAD 2024 refuses HANDSEED over COM) must never stop the code from running.
+        private static string Fingerprint(object source)
+        {
+            dynamic doc = source;
+            string f = "";
+            try { f += "m" + Convert.ToInt32(doc.ModelSpace.Count); } catch (Exception) { f += "m?"; }
+            try
+            {
+                dynamic layouts = doc.Layouts;
+                int count = Convert.ToInt32(layouts.Count), total = 0;
+                for (int i = 0; i < count; i++) total += Convert.ToInt32(layouts.Item(i).Block.Count);
+                f += "|p" + total;
+            }
+            catch (Exception) { f += "|p?"; }
+            try { f += "|l" + Convert.ToInt32(doc.Layers.Count); } catch (Exception) { f += "|l?"; }
+            try { f += "|b" + Convert.ToInt32(doc.Blocks.Count); } catch (Exception) { f += "|b?"; }
+            try { f += "|d" + Convert.ToString(doc.GetVariable("DBMOD")); } catch (Exception) { f += "|d?"; }
+            return f;
+        }
+
+        private static bool SavedFlag(object source)
+        {
+            try { dynamic doc = source; return (bool)doc.Saved; }
+            catch (Exception) { return true; }
+        }
+
+        // The run itself, given the drawing, so it can be tested against a stand-in for AutoCAD.
+        internal static object RunScriptOnDrawing(object cadSource, object docSource, IDictionary<string, object> a, System.Reflection.MethodInfo run, string mode)
+        {
+            dynamic doc = docSource;
+            if (!String.Equals(DrawingId(docSource), Json.GetString(a, "expected_drawing"), StringComparison.OrdinalIgnoreCase))
                 throw new ToolException("Active drawing changed or expected_drawing is incorrect. Read drawing_info again.");
             if (mode == "write" && (bool)doc.ReadOnly) throw new ToolException("Drawing is read-only.");
 
-            // AutoCAD's API cannot enforce read-only, so a read run is checked afterwards: new objects advance HANDSEED
-            // and any edit clears the Saved flag of a drawing that was saved.
-            string handSeedBefore = Convert.ToString(doc.GetVariable("HANDSEED"));
-            bool savedBefore = (bool)doc.Saved;
+            // AutoCAD's API cannot enforce read-only, so a read run is checked afterwards. Edits that add or remove objects
+            // change the counts; any edit clears the Saved flag of a drawing that was saved. Changing an existing object in a
+            // drawing that was already unsaved cannot be seen, so the check is a warning and not a guarantee.
+            string before = Fingerprint(docSource);
+            bool savedBefore = SavedFlag(docSource);
             string text;
             if (mode == "write")
             {
                 doc.StartUndoMark();
-                try { text = AutoCadScript.Run(run, (object)cad, (object)doc); }
+                try { text = AutoCadScript.Run(run, cadSource, docSource); }
                 catch (ToolException exception)
                 {
                     throw new ToolException(exception.Message + " Changes made before the error stay in the drawing; one UNDO reverts them.");
                 }
                 finally { try { doc.EndUndoMark(); } catch (Exception) { } }
             }
-            else text = AutoCadScript.Run(run, (object)cad, (object)doc);
+            else text = AutoCadScript.Run(run, cadSource, docSource);
 
-            bool savedAfter = (bool)doc.Saved;
-            bool changed = Convert.ToString(doc.GetVariable("HANDSEED")) != handSeedBefore || (savedBefore && !savedAfter);
+            bool savedAfter = SavedFlag(docSource);
+            bool changed = Fingerprint(docSource) != before || (savedBefore && !savedAfter);
             bool truncated;
             string limited = AutoCadScript.Limit(text, out truncated);
             Dictionary<string, object> data = Json.Object("execution_mode", mode, "result", limited, "result_truncated", truncated, "drawing_changed", changed, "unsaved_changes", !savedAfter);
             if (mode == "read" && changed)
                 data["warning"] = "The drawing changed during a read run. Run UNDO in AutoCAD to revert it, and use execution_mode=write with allow_model_changes=true for edits.";
-            return Json.Object("drawing", DrawingId((object)doc), "result", data);
+            return Json.Object("drawing", DrawingId(docSource), "result", data);
         }
 
         private static object InvokeCore(string name, IDictionary<string, object> a)
