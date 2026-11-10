@@ -57,7 +57,7 @@ namespace SmartConnector
                         Json.Object("expected_drawing", target(), "name", str(), "action", Json.Object("type", "string", "enum", new object[] { "create", "color", "on", "frozen", "locked" }),
                             "color", Json.Object("type", "integer", "minimum", 1, "maximum", 255), "value", Json.Object("type", "boolean")),
                         new[] { "expected_drawing", "name", "action" }, false),
-                    Schema.Tool("apply_plan", "Create many objects in ONE undoable call from a plan (one round trip instead of hundreds). items are ordered steps {op, ...}: layer{name,color?,linetype?,lineweight?}, line{layer,start,end}, circle{layer,center,radius}, arc{layer,center,radius,start_angle,end_angle}, polyline{layer,points:[[x,y],...],closed?}, text{layer,point,text,height,rotation?,style?}, mtext{layer,point,width,text,height?,rotation?,style?; \\P = new line}, insert{layer,name,point,scale?,rotation?}, hatch{layer,pattern,boundary,holes?,scale?,angle?,color?} (boundary and holes are ids of EARLIER closed polyline or circle steps, so give those steps an id), dim_aligned{layer,from,to,location,style?}, dim_rotated{layer,from,to,location,angle,style?} (location is a point the dimension line passes through; the value shown is the measured one). Points are [x,y] or [x,y,z] in WCS drawing units; angles are degrees counter-clockwise; lineweight is in hundredths of mm. A step may carry an id; its handle is returned. A layer must already exist (or be created by an earlier layer step) and be unlocked; blocks, linetypes, text styles and dimension styles must already be in the drawing. At most 500 steps. Run with dry_run=true first: it checks everything against the drawing and changes nothing. A failed run removes what it created. Does not save.",
+                    Schema.Tool("apply_plan", "Create many objects in ONE undoable call from a plan (one round trip instead of hundreds). items are ordered steps {op, ...}: layer{name,color?,linetype?,lineweight?}, line{layer,start,end}, circle{layer,center,radius}, arc{layer,center,radius,start_angle,end_angle}, polyline{layer,points:[[x,y],...],closed?}, text{layer,point,text,height,rotation?,style?}, mtext{layer,point,width,text,height?,rotation?,style?; \\P = new line}, insert{layer,name,point,scale?,rotation?}, hatch{layer,pattern,boundary,holes?,scale?,angle?,color?} (boundary and holes are ids of EARLIER closed polyline or circle steps, so give those steps an id), dim_aligned{layer,from,to,location,style?,scale?}, dim_rotated{layer,from,to,location,angle,style?,scale?} (location is a point the dimension line passes through; the value shown is the measured one; scale sets the dimension's overall scale, for example the detail scale denominator). Points are [x,y] or [x,y,z] in WCS drawing units; angles are degrees counter-clockwise; lineweight is in hundredths of mm. A step may carry an id; its handle is returned. A layer must already exist (or be created by an earlier layer step) and be unlocked; blocks, linetypes, text styles and dimension styles must already be in the drawing. At most 500 steps. Run with dry_run=true first: it checks everything against the drawing and changes nothing. A failed run removes what it created. Does not save.",
                         Json.Object("expected_drawing", target(), "layout", str(), "dry_run", Json.Object("type", "boolean"),
                             "items", Json.Object("type", "array", "items", Json.Object("type", "object"), "minItems", 1, "maxItems", AutoCadPlan.MaxItems)),
                         new[] { "expected_drawing", "items" }, false),
@@ -67,6 +67,12 @@ namespace SmartConnector
                             "code", Json.Object("type", "string", "minLength", 1, "maxLength", AutoCadScript.MaxCodeLength),
                             "timeout_seconds", Json.Object("type", "integer", "minimum", 1, "maximum", 300)),
                         new[] { "expected_drawing", "execution_mode", "allow_model_changes", "code" }, false),
+                    Schema.Tool("generate_detail", "Detail Generator: build a draft construction detail from a short brief, and optionally draw it. Template reception_counter_section is a vertical section through a reception counter, in millimetres only: boards, plinth, top (corian by default, or stone), optional shelf, optional raised bar, or a wheelchair-accessible section (params.section = accessible; it needs accessible_height, knee_clearance_height, knee_clearance_depth and code_reference from the code you adopt, none are built in). params holds the design parameters in mm, all with defaults except the accessible ones. scale is the detail scale denominator (10 = 1:10); origin is where the floor meets the staff face. With apply=false (the default) AutoCAD is not contacted: you get a summary, warnings and, with return_plan, the steps. With apply=true (expected_drawing required) the drawing must be in millimetres, the plan is checked against it and drawn like apply_plan; dry_run defaults to true. Existing layers are left as they are unless update_layers. Every result is a draft for a designer's review.",
+                        Json.Object("expected_drawing", target(), "template", Json.Object("type", "string", "enum", new object[] { AutoCadDetail.ReceptionCounterSection }),
+                            "params", Json.Object("type", "object"), "scale", Json.Object("type", "integer", "minimum", 1, "maximum", 200), "origin", point(),
+                            "dimension_style", str(), "text_style", str(), "dimension_scale", Json.Object("type", "number", "exclusiveMinimum", 0),
+                            "apply", Json.Object("type", "boolean"), "dry_run", Json.Object("type", "boolean"), "update_layers", Json.Object("type", "boolean"), "return_plan", Json.Object("type", "boolean")),
+                        new[] { "template" }, false),
                     Schema.Tool("save_drawing", "Explicitly save the expected drawing to its EXISTING path. Invoke only when saving is requested; no Save As.", Json.Object("expected_drawing", target()), new[] { "expected_drawing" }, false)
                 };
                 return _tools;
@@ -266,6 +272,7 @@ namespace SmartConnector
                 if (name == "apply_plan") AutoCadPlan.Parse(checkedArguments["items"]);
                 // Code is checked and compiled before AutoCAD is contacted, and runs on its own thread with a time limit.
                 if (name == "execute_autocad") return ExecuteScript(checkedArguments);
+                if (name == "generate_detail") return GenerateDetail(checkedArguments);
                 return InvokeCore(name, checkedArguments);
             }
             finally { ClearReferences(); }
@@ -417,6 +424,7 @@ namespace SmartConnector
             Dictionary<string, object> handles = new Dictionary<string, object>();
             Dictionary<string, object> byId = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
             List<string> loopForms = new List<string>();
+            List<string> warnings = new List<string>();
             int objects = 0;
             doc.StartUndoMark();
             try
@@ -444,6 +452,11 @@ namespace SmartConnector
                         entity.Layer = p.Layer;
                         if (p.TextStyle != null) entity.StyleName = p.TextStyle;
                         if (p.DimStyle != null) entity.StyleName = p.DimStyle;
+                        if (p.DimScale > 0)
+                        {
+                            try { entity.ScaleFactor = p.DimScale; }
+                            catch (Exception) { warnings.Add("items[" + p.Index.ToString(System.Globalization.CultureInfo.InvariantCulture) + "]: the dimension scale could not be applied; set the scale in the dimension style instead."); }
+                        }
                         objects++;
                         if (p.Id != null) { handles[p.Id] = Convert.ToString(entity.Handle); byId[p.Id] = (object)entity; }
                     }
@@ -461,6 +474,7 @@ namespace SmartConnector
             Dictionary<string, object> data = Json.Object("steps", plan.Count, "objects_created", objects, "layers_created", layersCreated, "counts", counts, "handles", handles,
                 "layout", layout.Length == 0 ? "Model" : layout, "object_count_before", before, "object_count_after", after, "count_matches_plan", after - before == objects);
             if (loopForms.Count > 0) data["hatch_loop_array_form"] = loopForms;
+            if (warnings.Count > 0) data["warnings"] = warnings;
             return Json.Object("drawing", DrawingId((object)doc), "result", data, "save_performed", false);
         }
 
@@ -566,6 +580,64 @@ namespace SmartConnector
             if (mode == "read" && changed)
                 data["warning"] = "The drawing changed during a read run. Run UNDO in AutoCAD to revert it, and use execution_mode=write with allow_model_changes=true for edits.";
             return Json.Object("drawing", DrawingId(docSource), "result", data);
+        }
+
+        // Detail Generator: the plan is built and checked before AutoCAD is contacted. With apply it is then dry-run or drawn through ApplyPlan.
+        private static object GenerateDetail(IDictionary<string, object> a)
+        {
+            IDictionary<string, object> parameters = null;
+            if (a.ContainsKey("params"))
+            {
+                parameters = a["params"] as IDictionary<string, object>;
+                if (parameters == null) throw new ToolException("params must be an object.");
+            }
+            int scale = a.ContainsKey("scale") ? Convert.ToInt32(a["scale"]) : 10;
+            double ox = 0, oy = 0;
+            if (a.ContainsKey("origin")) { double[] o = Schema.Point(a["origin"]); ox = o[0]; oy = o[1]; }
+            string dimStyle = a.ContainsKey("dimension_style") ? Json.GetString(a, "dimension_style") : null;
+            string textStyle = a.ContainsKey("text_style") ? Json.GetString(a, "text_style") : null;
+            double dimScale = a.ContainsKey("dimension_scale") ? Convert.ToDouble(a["dimension_scale"], System.Globalization.CultureInfo.InvariantCulture) : 0;
+            DetailResult built = AutoCadDetail.Build(Json.GetString(a, "template"), parameters, scale, ox, oy, dimStyle, textStyle, dimScale);
+
+            Dictionary<string, object> generated = Json.Object("summary", built.Summary, "warnings", built.Warnings);
+            if (a.ContainsKey("return_plan") && (bool)a["return_plan"]) generated["items"] = built.Items;
+            bool apply = a.ContainsKey("apply") && (bool)a["apply"];
+            if (!apply) return Json.Object("applied", false, "generated", generated);
+            if (Json.GetString(a, "expected_drawing").Length == 0) throw new ToolException("expected_drawing is required when apply is true.");
+
+            dynamic cad = Connect();
+            if (Convert.ToInt32(cad.Documents.Count) == 0) throw new ToolException("Open a drawing in AutoCAD first.");
+            dynamic doc = cad.ActiveDocument;
+            return ApplyGenerated((object)doc, a, built, generated);
+        }
+
+        // Checks the drawing (identity, millimetres, existing layers), then dry-runs or draws the generated plan.
+        internal static object ApplyGenerated(object docSource, IDictionary<string, object> a, DetailResult built, Dictionary<string, object> generated)
+        {
+            dynamic doc = docSource;
+            string id = DrawingId(docSource);
+            if (!String.Equals(id, Json.GetString(a, "expected_drawing"), StringComparison.OrdinalIgnoreCase))
+                throw new ToolException("Active drawing changed or expected_drawing is incorrect. Read drawing_info again.");
+            int units;
+            try { units = Convert.ToInt32(doc.GetVariable("INSUNITS")); }
+            catch (Exception) { throw new ToolException("The drawing's units could not be read, so nothing was drawn. The Detail Generator works in millimetres only."); }
+            if (units != 4)
+                throw new ToolException("The drawing is not in millimetres (INSUNITS = " + units.ToString(System.Globalization.CultureInfo.InvariantCulture) + "), so nothing was drawn. The Detail Generator works in millimetres only; start from a millimetre template such as acadiso.dwt.");
+
+            bool update = a.ContainsKey("update_layers") && (bool)a["update_layers"];
+            HashSet<string> existing = Names((object)doc.Layers);
+            List<object> steps = new List<object>();
+            List<string> kept = new List<string>();
+            foreach (Dictionary<string, object> item in built.Items)
+            {
+                if (!update && Json.GetString(item, "op") == "layer" && existing.Contains(Json.GetString(item, "name"))) { kept.Add(Json.GetString(item, "name")); continue; }
+                steps.Add(item);
+            }
+            bool dry = !a.ContainsKey("dry_run") || (bool)a["dry_run"];
+            Dictionary<string, object> planArguments = Json.Object("expected_drawing", id, "dry_run", dry, "items", steps.ToArray());
+            object planResult = ApplyPlan(docSource, planArguments);
+            if (kept.Count > 0) generated["existing_layers_left_unchanged"] = kept;
+            return Json.Object("applied", !dry, "generated", generated, "plan_result", planResult);
         }
 
         private static object InvokeCore(string name, IDictionary<string, object> a)
