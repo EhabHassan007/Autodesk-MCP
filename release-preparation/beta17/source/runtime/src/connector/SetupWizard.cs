@@ -295,7 +295,7 @@ namespace SmartConnector
 
         private Panel NewPage()
         {
-            Panel page = new Panel(); page.Dock = DockStyle.Fill; page.BackColor = Color.White; page.Visible = false;
+            Panel page = new Panel(); page.Dock = DockStyle.Fill; page.BackColor = Color.White; page.Visible = false; page.AutoScroll = true;
             _body.Controls.Add(page);
             return page;
         }
@@ -448,7 +448,7 @@ namespace SmartConnector
             _logBox = new TextBox();
             _logBox.Multiline = true; _logBox.ScrollBars = ScrollBars.Vertical; _logBox.ReadOnly = true; _logBox.Visible = false;
             _logBox.Font = Brand.Font(8.5f, FontStyle.Regular, "Consolas");
-            _logBox.Location = new Point(28, 100); _logBox.Size = new Size(500, 250);
+            _logBox.Location = new Point(28, 100); _logBox.Size = new Size(500, 250); _logBox.Tag = "overlay";
             _installing.Controls.Add(_logBox); _logBox.BringToFront();
 
             // --- 5 Finish
@@ -571,6 +571,7 @@ namespace SmartConnector
                 y += 26;
             }
             _detailsLink.Location = new Point(30, y + 6);
+            Brand.ResolveOverlaps(_installing);
         }
 
         private static string StepText(string id) { return WizardSteps.First(step => step[0] == id)[1]; }
@@ -583,7 +584,7 @@ namespace SmartConnector
             Label label = _stepLabels[id]; string text = StepText(id);
             switch (status)
             {
-                case "running": label.Text = "\u25D0   " + text + "..."; label.ForeColor = Brand.Accent; _currentTask.Text = text + "..."; break;
+                case "running": label.Text = "\u25D0   " + text + "..."; label.ForeColor = Brand.Accent; _currentTask.Text = text + "..."; Brand.ResolveOverlaps(_installing); break;
                 case "ok": label.Text = "\u2713   " + text; label.ForeColor = Brand.Good; break;
                 case "skipped": label.Text = "\u2013   " + text + (detail.Length > 0 ? "  (" + detail + ")" : ""); label.ForeColor = Brand.Muted; break;
                 case "failed": label.Text = "\u2717   " + text + (detail.Length > 0 ? "  (" + detail + ")" : ""); label.ForeColor = Brand.Bad; break;
@@ -610,6 +611,8 @@ namespace SmartConnector
                 case 3: _next.Text = "Install"; _next.Enabled = true; FillReview(); break;
                 case 5: _next.Text = "Finish"; _next.Enabled = true; break;
             }
+            // Text can be taller than the fixed positions allow (font, display scale): keep it from covering other text.
+            Brand.ResolveOverlaps(_pages[index]);
         }
 
         private void StartInstall()
@@ -760,6 +763,16 @@ namespace SmartConnector
             // Windows may refuse focus to a window started from Explorer, leaving setup hidden behind it.
             // Stay on top until the person first switches to the window, then behave normally.
             form.TopMost = true;
+            // One line for the setup log: how this window is drawn on this screen (no personal data), so a layout problem can be traced.
+            form.Shown += delegate
+            {
+                try
+                {
+                    File.AppendAllText(logPath, "[window] display scale " + Brand.Scale().ToString("0.00", System.Globalization.CultureInfo.InvariantCulture) + ", client " + form.ClientSize.Width + "x" + form.ClientSize.Height
+                        + ", body font " + form.Font.SizeInPoints.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + " pt (" + form.Font.Size.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + " " + form.Font.Unit + ")\r\n", new UTF8Encoding(false));
+                }
+                catch (Exception) { }
+            };
             form.Shown += delegate { form.Activate(); };
             form.Activated += delegate { if (!wizard._activated) { wizard._activated = true; form.TopMost = false; } };
 
