@@ -41,7 +41,7 @@ The usual brief is not a list of parameters but **rendered pictures from several
 3. Show the list and the open questions, and **wait for the user's confirmation or corrections** before drawing anything.
 4. Build from the confirmed design, sections first, then plan and elevations, as drafts for review. Use `template` `custom_section` for anything the reception template does not cover, once per view (`view` section, elevation or plan, each with its own `origin` in model space and, in paper mode, its own `paper_centre` and viewport on the same layout). Shaped panels use `points`, repeated slats or fins use `repeat`, LED strips use `lines` with kind `led`, and in elevations the nearer parts go last in the list so they hide what is behind them. the confirmed list becomes `params.parts` (id, material, x0, y0, x1, y1 in mm; x from the staff face, y up from the floor), with `levels`, `notes`, `dimensions` and `title` written from the specification. Every number and every word of a note is yours to supply; the generator invents none, warns when parts have no note, refuses overlapping parts and unknown materials (mdf, ply, stone, corian, steel, glass, outline), and does not check the design against the pictures or any code.
 
-Where the pictures show something the template cannot draw yet, say so and offer the nearest standard construction, clearly marked.
+Read [reading renders](references/reading-renders.md) for how to read catalogue dimensions (chords, plan depth versus body depth, which surface a height measures to), typical sizes to cross-check estimates, and how materials map to the tool. Where the pictures show something the template cannot draw yet, say so and offer the nearest standard construction, clearly marked.
 
 ## Rules
 
