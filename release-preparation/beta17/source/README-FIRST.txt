@@ -12,6 +12,7 @@ Antivirus: Smart Connector is not code-signed, so Kaspersky and other antivirus 
   C:\Users\<you>\AppData\Local\AutodeskMcpConnector
   the folder that holds this installer
 Run the installer from a company network folder or a synced OneDrive folder, or right-click it > Properties > Unblock, so Windows does not show "Windows protected your PC".
+While setup runs, a minimised PowerShell window appears on the taskbar. That is normal: setup is not hidden, and the window closes by itself when setup finishes.
 
 Nothing runs in the background: no scheduled tasks, no notification-area icon, no process left running. Once a day, opening Revit, AutoCAD or Smart Connector looks for a new version and asks you; choose Update now, save your work and close Revit and AutoCAD, and the update window installs it. In AutoCAD the check starts with the first Smart Connector button you use. Setup and updates remove the background tasks earlier versions created.
 
