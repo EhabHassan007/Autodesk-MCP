@@ -67,13 +67,14 @@ namespace SmartConnector
                             "code", Json.Object("type", "string", "minLength", 1, "maxLength", AutoCadScript.MaxCodeLength),
                             "timeout_seconds", Json.Object("type", "integer", "minimum", 1, "maximum", 300)),
                         new[] { "expected_drawing", "execution_mode", "allow_model_changes", "code" }, false),
-                    Schema.Tool("generate_detail", "Detail Generator: build a draft construction detail from a short brief, and optionally draw it. Two templates. custom_section draws a section from parts the caller read off pictures and plans: params.parts [{id, material (mdf, ply, stone, corian, steel, glass, outline), x0, y0, x1, y1}] in mm with x from the staff face and y up from the floor, optional levels [{y, label}], notes [{part, text, y?}], dimensions [{from, to, axis x|y, chain?}], title, overall_dimensions, floor; every number and wording is the caller's and nothing is invented or checked against a code. reception_counter_section is a vertical section through a reception counter, in millimetres only: boards, plinth, top (corian by default, or stone), optional shelf, optional raised bar, or a wheelchair-accessible section (params.section = accessible; it needs accessible_height, knee_clearance_height, knee_clearance_depth and code_reference from the code you adopt, none are built in). params holds the design parameters in mm, all with defaults except the accessible ones. scale is the detail scale denominator (10 = 1:10); origin is where the floor meets the staff face. With apply=false (the default) AutoCAD is not contacted: you get a summary, warnings and, with return_plan, the steps. With apply=true (expected_drawing required) the drawing must be in millimetres, the plan is checked against it and drawn like apply_plan; dry_run defaults to true. Existing layers are left as they are unless update_layers. Unless dimension_style or text_style is given (or use_reference_styles is false), the drawing's reference styles are used when present: dimension style na1, text style EN-S for notes and levels, EN-SCB for titles; if one is missing the result says so. annotation says where dimensions, notes, levels and titles go: model (default, drawn in model space at the detail scale), paper (drawn in the layout named by layout at true paper size, text 2.5 mm, dimensions reading the model size; view.paper_centre [x,y] is where the detail sits on the sheet, optional view.model_centre; the layout needs a viewport at scale 1:scale centred on the model centre, which the result states and which this tool cannot set), or none (geometry only). level_block (with level_tag, default LEVEL, and level_block_scale) uses an office block with an attribute for level markers in paper mode. Every result is a draft for a designer's review.",
+                    Schema.Tool("generate_detail", "Detail Generator: build a draft construction detail from a short brief, and optionally draw it. Two templates. custom_section draws a section from parts the caller read off pictures and plans: params.parts [{id, material (mdf, ply, stone, corian, steel, glass, outline), x0, y0, x1, y1}] in mm with x from the staff face and y up from the floor, optional levels [{y, label}], notes [{part, text, y?}], dimensions [{from, to, axis x|y, chain?}], title, overall_dimensions, floor; every number and wording is the caller's and nothing is invented or checked against a code. reception_counter_section is a vertical section through a reception counter, in millimetres only: boards, plinth, top (corian by default, or stone), optional shelf, optional raised bar, or a wheelchair-accessible section (params.section = accessible; it needs accessible_height, knee_clearance_height, knee_clearance_depth and code_reference from the code you adopt, none are built in). params holds the design parameters in mm, all with defaults except the accessible ones. scale is the detail scale denominator (10 = 1:10); origin is where the floor meets the staff face. With apply=false (the default) AutoCAD is not contacted: you get a summary, warnings and, with return_plan, the steps. With apply=true (expected_drawing required) the drawing must be in millimetres, the plan is checked against it and drawn like apply_plan; dry_run defaults to true. Existing layers are left as they are unless update_layers. Unless dimension_style or text_style is given (or use_reference_styles is false), the drawing's reference styles are used when present: dimension style na1, text style EN-S for notes and levels, EN-SCB for titles; if one is missing the result says so. annotation says where dimensions, notes, levels and titles go: model (default, drawn in model space at the detail scale), paper (drawn in the layout named by layout at true paper size, text 2.5 mm, dimensions reading the model size; view.paper_centre [x,y] is where the detail sits on the sheet, optional view.model_centre; the layout needs a viewport at scale 1:scale centred on the model centre, which the result states), or none (geometry only). With create_viewport (paper mode) the tool makes that viewport itself on layer G-ANNO-VPRT (not plotted): centred on the sheet at view.paper_centre (default with apply: the centre of the layout's sheet), sized to the parts plus a 10 mm margin or view.viewport_size [w,h] in paper mm, at 1:scale, view centred on the model centre and locked. level_block (with level_tag, default LEVEL, and level_block_scale) uses an office block with an attribute for level markers in paper mode. Every result is a draft for a designer's review.",
                         Json.Object("expected_drawing", target(), "template", Json.Object("type", "string", "enum", new object[] { AutoCadDetail.ReceptionCounterSection, AutoCadDetail.CustomSection }),
                             "params", Json.Object("type", "object"), "scale", Json.Object("type", "integer", "minimum", 1, "maximum", 200), "origin", point(),
                             "dimension_style", str(), "text_style", str(), "dimension_scale", Json.Object("type", "number", "exclusiveMinimum", 0),
                             "apply", Json.Object("type", "boolean"), "dry_run", Json.Object("type", "boolean"), "update_layers", Json.Object("type", "boolean"), "use_reference_styles", Json.Object("type", "boolean"), "return_plan", Json.Object("type", "boolean"),
                             "annotation", Json.Object("type", "string", "enum", new object[] { "model", "paper", "none" }), "layout", str(), "view", Json.Object("type", "object"),
-                            "level_block", str(), "level_tag", str(), "level_block_scale", Json.Object("type", "number", "exclusiveMinimum", 0)),
+                            "level_block", str(), "level_tag", str(), "level_block_scale", Json.Object("type", "number", "exclusiveMinimum", 0),
+                            "create_viewport", Json.Object("type", "boolean")),
                         new[] { "template" }, false),
                     Schema.Tool("save_drawing", "Explicitly save the expected drawing to its EXISTING path. Invoke only when saving is requested; no Save As.", Json.Object("expected_drawing", target()), new[] { "expected_drawing" }, false)
                 };
@@ -649,27 +650,83 @@ namespace SmartConnector
             {
                 IDictionary<string, object> view = a["view"] as IDictionary<string, object>;
                 if (view == null) throw new ToolException("view must be an object.");
-                foreach (string key in view.Keys) if (key != "paper_centre" && key != "model_centre") throw new ToolException("Unknown view field: " + key + ". Allowed: paper_centre, model_centre.");
-                if (view.ContainsKey("paper_centre")) place.PaperCentre = Schema.Point(view["paper_centre"]);
-                if (view.ContainsKey("model_centre")) place.ModelCentre = Schema.Point(view["model_centre"]);
+                foreach (string key in view.Keys) if (key != "paper_centre" && key != "model_centre" && key != "viewport_size") throw new ToolException("Unknown view field: " + key + ". Allowed: paper_centre, model_centre, viewport_size.");
+                if (view.ContainsKey("paper_centre")) place.PaperCentre = Pair(view["paper_centre"], "view.paper_centre", -100000, 100000);
+                if (view.ContainsKey("model_centre")) place.ModelCentre = Pair(view["model_centre"], "view.model_centre", -1e9, 1e9);
+                if (view.ContainsKey("viewport_size"))
+                {
+                    if (!(a.ContainsKey("create_viewport") && (bool)a["create_viewport"])) throw new ToolException("view.viewport_size is used with create_viewport only.");
+                    double[] size = Pair(view["viewport_size"], "view.viewport_size", 10, 2000);
+                    a["__viewport_size"] = size;
+                }
             }
             if (a.ContainsKey("level_block")) place.LevelBlock = Json.GetString(a, "level_block");
             if (a.ContainsKey("level_tag")) place.LevelTag = Json.GetString(a, "level_tag");
             if (a.ContainsKey("level_block_scale")) place.LevelBlockScale = Convert.ToDouble(a["level_block_scale"], System.Globalization.CultureInfo.InvariantCulture);
             if (place.Mode == "paper" && apply0(a) && Json.GetString(a, "layout").Length == 0) throw new ToolException("annotation paper needs layout: the name of the layout to annotate.");
             if (place.Mode != "paper" && a.ContainsKey("layout")) throw new ToolException("layout is used with annotation paper only.");
+            bool createViewport = a.ContainsKey("create_viewport") && (bool)a["create_viewport"];
+            if (createViewport && place.Mode != "paper") throw new ToolException("create_viewport is used with annotation paper only.");
+            dynamic doc = null;
+            string centreSource = null;
+            if (place.Mode == "paper" && place.PaperCentre == null && createViewport)
+            {
+                // The viewport is ours, so the detail can go in the middle of the sheet: that needs the layout's paper size from AutoCAD.
+                if (!apply0(a)) throw new ToolException("view.paper_centre is needed to preview without AutoCAD. With apply and create_viewport it defaults to the centre of the layout's sheet.");
+                if (Json.GetString(a, "expected_drawing").Length == 0) throw new ToolException("expected_drawing is required when apply is true.");
+                doc = ActiveDrawing();
+                if (!String.Equals(DrawingId((object)doc), Json.GetString(a, "expected_drawing"), StringComparison.OrdinalIgnoreCase))
+                    throw new ToolException("Active drawing changed or expected_drawing is incorrect. Read drawing_info again.");
+                place.PaperCentre = SheetCentre((object)doc, Json.GetString(a, "layout"));
+                centreSource = "the centre of the sheet of layout '" + Json.GetString(a, "layout") + "' (approximate: printer margins can move it a few millimetres)";
+            }
             DetailResult built = AutoCadDetail.Build(Json.GetString(a, "template"), parameters, scale, ox, oy, dimStyle, textStyle, dimScale, place);
 
             Dictionary<string, object> generated = Json.Object("summary", built.Summary, "warnings", built.Warnings);
+            if (centreSource != null) generated["paper_centre_source"] = centreSource;
             if (a.ContainsKey("return_plan") && (bool)a["return_plan"]) { generated["items"] = built.Items; if (built.PaperItems.Count > 0) generated["paper_items"] = built.PaperItems; }
             bool apply = a.ContainsKey("apply") && (bool)a["apply"];
             if (!apply) return Json.Object("applied", false, "generated", generated);
             if (Json.GetString(a, "expected_drawing").Length == 0) throw new ToolException("expected_drawing is required when apply is true.");
+            if (doc == null) doc = ActiveDrawing();
+            return ApplyGenerated((object)doc, a, built, generated);
+        }
 
+        private static dynamic ActiveDrawing()
+        {
             dynamic cad = Connect();
             if (Convert.ToInt32(cad.Documents.Count) == 0) throw new ToolException("Open a drawing in AutoCAD first.");
-            dynamic doc = cad.ActiveDocument;
-            return ApplyGenerated((object)doc, a, built, generated);
+            return cad.ActiveDocument;
+        }
+
+        private static double[] Pair(object value, string name, double min, double max)
+        {
+            System.Collections.IEnumerable seq = value as System.Collections.IEnumerable;
+            List<double> n = new List<double>();
+            if (value != null && !(value is string) && seq != null)
+                foreach (object o in seq) { double x; if (!Schema.TryNumber(o, out x)) { n.Clear(); break; } n.Add(x); }
+            if (n.Count < 2 || n.Count > 3 || n[0] < min || n[0] > max || n[1] < min || n[1] > max)
+                throw new ToolException(name + " must be [x, y] with numbers between " + min.ToString(System.Globalization.CultureInfo.InvariantCulture) + " and " + max.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".");
+            return new[] { n[0], n[1] };
+        }
+
+        // The centre of a layout's sheet in paper millimetres, from its paper size and plot rotation. Paper-space coordinates start at the
+        // printable area, so this can be a few millimetres off the true sheet centre; it is a default, and the viewport and annotation share it.
+        internal static double[] SheetCentre(object docSource, string layout)
+        {
+            dynamic doc = docSource;
+            if (layout.Length == 0 || layout == "Model" || !Names((object)doc.Layouts).Contains(layout)) throw new ToolException("Layout not found: " + layout);
+            dynamic sheet = doc.Layouts.Item(layout);
+            double w = 0, h = 0;
+            try { sheet.GetPaperSize(out w, out h); }
+            catch (Exception) { throw new ToolException("The paper size of layout '" + layout + "' could not be read. Give view.paper_centre."); }
+            int units = Convert.ToInt32(sheet.PaperUnits);
+            if (units == 0) { w *= 25.4; h *= 25.4; }
+            else if (units != 1) throw new ToolException("Layout '" + layout + "' uses pixel paper units. Give view.paper_centre.");
+            int rotation = Convert.ToInt32(sheet.PlotRotation);
+            if (rotation == 1 || rotation == 3) { double t = w; w = h; h = t; }
+            if (w < 50 || h < 50) throw new ToolException("Layout '" + layout + "' has no usable paper size (" + w.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + " x " + h.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + " mm). Choose a paper size in Page Setup, or give view.paper_centre.");
+            return new[] { Math.Round(w / 2.0, 1), Math.Round(h / 2.0, 1) };
         }
 
         // The reference sheets use dimension style na1, text style EN-S for notes and EN-SCB for titles. A step the caller gave an
@@ -748,14 +805,125 @@ namespace SmartConnector
             Dictionary<string, object> paperArguments = Json.Object("expected_drawing", id, "dry_run", true, "items", paperSteps.ToArray(), "layout", layout);
             object modelCheck = ApplyPlan(docSource, Json.Object("expected_drawing", id, "dry_run", true, "items", steps.ToArray()));
             object paperCheck = ApplyPlan(docSource, paperArguments);
-            string viewportWarning = ViewportWarning(docSource, layout, built.Scale);
-            if (viewportWarning != null) generated["viewport_warning"] = viewportWarning;
+            bool createViewport = a.ContainsKey("create_viewport") && (bool)a["create_viewport"];
+            ViewportPlan viewport = null;
+            if (createViewport)
+            {
+                viewport = PlanViewport(docSource, a, built);
+                generated["viewport"] = viewport.Describe();
+            }
+            else
+            {
+                string viewportWarning = ViewportWarning(docSource, layout, built.Scale);
+                if (viewportWarning != null) generated["viewport_warning"] = viewportWarning;
+            }
             if (dry) return Json.Object("applied", false, "generated", generated, "plan_result", modelCheck, "paper_plan_result", paperCheck);
 
             object modelResult = ApplyPlan(docSource, planArguments);
             paperArguments["dry_run"] = false;
-            try { return Json.Object("applied", true, "generated", generated, "plan_result", modelResult, "paper_plan_result", ApplyPlan(docSource, paperArguments)); }
+            object paperResult;
+            try { paperResult = ApplyPlan(docSource, paperArguments); }
             catch (ToolException e) { throw new ToolException("The geometry was drawn in model space, but the annotation in layout '" + layout + "' failed and was rolled back: " + e.Message + " Undo once (U) to remove the geometry, fix the cause, then run again."); }
+            if (viewport == null) return Json.Object("applied", true, "generated", generated, "plan_result", modelResult, "paper_plan_result", paperResult);
+            object viewportResult;
+            try { viewportResult = CreateViewport(docSource, layout, viewport); }
+            catch (Exception e)
+            {
+                string reason = e is ToolException ? e.Message : e.GetType().Name + ": " + e.Message;
+                throw new ToolException("The geometry and the annotation were drawn, but the viewport could not be made and nothing of it was kept: " + reason + " Undo twice (U, U) to remove both, or add a viewport at 1:" + built.Scale.ToString(System.Globalization.CultureInfo.InvariantCulture) + " centred on the model point in generated.summary.viewport_setup.");
+            }
+            return Json.Object("applied", true, "generated", generated, "plan_result", modelResult, "paper_plan_result", paperResult, "viewport_result", viewportResult);
+        }
+
+        internal const string ViewportLayer = "G-ANNO-VPRT";
+        private const double ViewportMargin = 10;   // paper millimetres around the parts
+
+        internal sealed class ViewportPlan
+        {
+            internal double[] Centre, ViewCentre;
+            internal double Width, Height;
+            internal int Scale;
+            internal bool LayerExists;
+            internal Dictionary<string, object> Describe()
+            {
+                return Json.Object("layer", ViewportLayer, "plotted", false, "centre", new object[] { Centre[0], Centre[1] }, "size", new object[] { Width, Height },
+                    "scale", "1:" + Scale.ToString(System.Globalization.CultureInfo.InvariantCulture), "view_centre", new object[] { ViewCentre[0], ViewCentre[1] },
+                    "layer_to_create", !LayerExists);
+            }
+        }
+
+        // Where the viewport goes and how big it is, checked before anything is drawn: the parts must fit and the layer must be usable.
+        internal static ViewportPlan PlanViewport(object docSource, IDictionary<string, object> a, DetailResult built)
+        {
+            dynamic doc = docSource;
+            Func<object, double[]> two = o => ((object[])o).Select(x => Convert.ToDouble(x, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+            double[] parts = two(built.Summary["parts_size_paper_mm"]);
+            ViewportPlan v = new ViewportPlan { Centre = two(built.Summary["paper_centre"]), ViewCentre = two(built.Summary["model_centre"]), Scale = built.Scale };
+            v.Width = Math.Round(parts[0] + 2 * ViewportMargin, 1);
+            v.Height = Math.Round(parts[1] + 2 * ViewportMargin, 1);
+            if (a.ContainsKey("__viewport_size"))
+            {
+                double[] size = (double[])a["__viewport_size"];
+                if (size[0] < parts[0] || size[1] < parts[1])
+                    throw new ToolException("view.viewport_size " + size[0].ToString(System.Globalization.CultureInfo.InvariantCulture) + " x " + size[1].ToString(System.Globalization.CultureInfo.InvariantCulture) + " mm is smaller than the parts on paper (" + parts[0].ToString(System.Globalization.CultureInfo.InvariantCulture) + " x " + parts[1].ToString(System.Globalization.CultureInfo.InvariantCulture) + " mm), so they would be cut off. Nothing was drawn.");
+                v.Width = size[0]; v.Height = size[1];
+            }
+            Dictionary<string, bool> locks = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+            dynamic layers = doc.Layers;
+            int count = Convert.ToInt32(layers.Count);
+            for (int i = 0; i < count; i++) { dynamic l = layers.Item(i); locks[Convert.ToString(l.Name)] = (bool)l.Lock; }
+            bool locked;
+            v.LayerExists = locks.TryGetValue(ViewportLayer, out locked);
+            if (v.LayerExists && locked) throw new ToolException("Layer " + ViewportLayer + " is locked, so the viewport cannot be placed on it. Unlock it and run again. Nothing was drawn.");
+            return v;
+        }
+
+        // Makes the viewport in one Undo group: turned on, made active, zoomed to the model centre, set to 1:scale (which keeps the centre),
+        // locked, back to paper space. A layer it creates is not plotted; an existing layer is left as it is. On failure everything of it is removed.
+        internal static object CreateViewport(object docSource, string layout, ViewportPlan v)
+        {
+            dynamic doc = docSource;
+            dynamic sheet = doc.Layouts.Item(layout);
+            dynamic viewport = null;
+            bool layerCreated = false;
+            doc.StartUndoMark();
+            try
+            {
+                try
+                {
+                    if (!v.LayerExists)
+                    {
+                        dynamic layer = doc.Layers.Add(ViewportLayer);
+                        layerCreated = true;
+                        layer.Color = 8;
+                        layer.Plottable = false;
+                    }
+                    doc.ActiveLayout = sheet;
+                    viewport = sheet.Block.AddPViewport(new double[] { v.Centre[0], v.Centre[1], 0 }, v.Width, v.Height);
+                    viewport.Layer = ViewportLayer;
+                    viewport.Display(true);
+                    doc.MSpace = true;
+                    doc.ActivePViewport = viewport;
+                    doc.Application.ZoomCenter(new double[] { v.ViewCentre[0], v.ViewCentre[1], 0 }, v.Height * v.Scale);
+                    viewport.CustomScale = 1.0 / v.Scale;
+                    viewport.DisplayLocked = true;
+                    doc.MSpace = false;
+                    double custom = Convert.ToDouble(viewport.CustomScale);
+                    if (Math.Abs(custom * v.Scale - 1.0) > 1e-6) throw new ToolException("the viewport scale read back as " + custom.ToString(System.Globalization.CultureInfo.InvariantCulture) + " instead of 1:" + v.Scale.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".");
+                    if (!(bool)viewport.DisplayLocked) throw new ToolException("the viewport display did not lock.");
+                    return Json.Object("handle", Convert.ToString(viewport.Handle), "layer", ViewportLayer, "layer_created", layerCreated, "custom_scale", custom, "display_locked", true,
+                        "centre", new object[] { v.Centre[0], v.Centre[1] }, "size", new object[] { v.Width, v.Height }, "view_centre", new object[] { v.ViewCentre[0], v.ViewCentre[1] },
+                        "note", "The view centre cannot be read back from AutoCAD; it was set by zooming to view_centre before the scale was set.");
+                }
+                catch (Exception)
+                {
+                    try { doc.MSpace = false; } catch (Exception) { }
+                    if (viewport != null) { try { viewport.Delete(); } catch (Exception) { } }
+                    if (layerCreated) { try { doc.Layers.Item(ViewportLayer).Delete(); } catch (Exception) { } }
+                    throw;
+                }
+            }
+            finally { doc.EndUndoMark(); }
         }
 
         // The annotation is placed for a viewport at 1:scale. If the layout has viewports and none is at that scale, say so; the view centre cannot be read.

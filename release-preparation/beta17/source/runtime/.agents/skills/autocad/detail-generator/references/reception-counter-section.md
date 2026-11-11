@@ -59,7 +59,7 @@ A lowered top over the full depth, with only a staff-side box under it and an op
 
 ## Not drawn yet
 
-Plans and elevations, drawers and shutters, hardware, the raised bar's own support, curved fronts, lighting recesses, creating the layout, viewport and title block (the tool annotates a layout that exists and warns when its viewport scale does not match; it cannot set the viewport's view centre), leaders as blocks (levels can use an office block through `level_block`; leaders are plain lines and text).
+Plans and elevations, drawers and shutters, hardware, the raised bar's own support, curved fronts, lighting recesses, creating the layout and title block (the tool annotates a layout that exists; with `create_viewport` it also makes the 1:scale viewport), leaders as blocks (levels can use an office block through `level_block`; leaders are plain lines and text).
 
 ## Where the defaults come from
 
