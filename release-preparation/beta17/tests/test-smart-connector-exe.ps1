@@ -131,6 +131,8 @@ try {
         @('generate_detail', @{ template = 'reception_counter_section'; apply = $true }, 'expected_drawing is required when apply is true.'),
         @('generate_detail', @{ template = 'reception_counter_section'; apply = $true; expected_drawing = 'a.dwg' }, 'No running full AutoCAD instance was found*'),
         @('generate_detail', @{ template = 'custom_section' }, 'params.parts is required.'),
+        @('generate_detail', @{ template = 'custom_section'; params = @{ view = 'side'; parts = @(@{ id = 'a'; material = 'mdf'; x0 = 0; y0 = 0; x1 = 10; y1 = 10 }) } }, 'params.view must be section, elevation or plan.'),
+        @('generate_detail', @{ template = 'custom_section'; params = @{ parts = @(@{ id = 'a'; material = 'mdf'; points = @(@(0, 0), @(100, 100), @(100, 0), @(0, 100)) }) } }, 'params.parts`[0`] (''a''): the outline crosses itself*'),
         @('generate_detail', @{ template = 'custom_section'; params = @{ parts = @(@{ id = 'a'; material = 'oak'; x0 = 0; y0 = 0; x1 = 10; y1 = 10 }) } }, 'params.parts`[0`]: material must be one of*'),
         @('generate_detail', @{ template = 'custom_section'; params = @{ parts = @(@{ id = 'a'; material = 'mdf'; x0 = 0; y0 = 0; x1 = 100; y1 = 100 }, @{ id = 'b'; material = 'mdf'; x0 = 50; y0 = 50; x1 = 150; y1 = 150 }) } }, 'The parts ''a'' and ''b'' overlap by 50 x 50 mm*'),
         @('generate_detail', @{ template = 'reception_counter_section'; annotation = 'sheet' }, 'Invalid choice: annotation'),
