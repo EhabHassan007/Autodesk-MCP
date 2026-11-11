@@ -36,7 +36,8 @@ Every step may carry an `id` (letters, digits, `_`, `.`, `-`; unique); the resul
 - Geometry on a locked layer is refused. A failed run deletes what it created, including layers it added.
 - A hatch refers to earlier steps by id, so the boundary and hole steps must come first and carry an `id`. Order matters: the steps run top to bottom.
 - Dimensions show the measured value; there is no text override, in line with the plain-numbers rule of the sheet-preparation skill.
-- Not yet supported: leaders and multileaders, tables, radial, diametric and angular dimensions, gradient hatches, hatch boundaries made of separate lines or arcs, block attributes, xrefs. Use `execute_autocad` for those (see its reference) until they are added and live-tested.
+- `leader` (not yet live-verified): `{"op":"leader","layer":"A","point":[x,y],"target":[x,y],"text":"...","block":"Multiple Leader Lab","tag":"LABEL","landing":4,"width":45}` places the label block at `point`, fills its text attribute and sets its dynamic Distance1, Distance2, Angle1 (and `visibility`) so the leader runs to `target`. Without `block` it makes a native multileader (`height` sets the text size). `insert` attributes accept the roles `@elevation` and `@description` besides plain tags.
+- Not yet supported: tables, radial, diametric and angular dimensions, gradient hatches, hatch boundaries made of separate lines or arcs, xrefs. Use `execute_autocad` for those (see its reference) until they are added and live-tested.
 
 ## Verification status
 

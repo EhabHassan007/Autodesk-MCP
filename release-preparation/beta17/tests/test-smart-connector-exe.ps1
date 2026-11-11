@@ -144,6 +144,9 @@ try {
         @('generate_detail', @{ template = 'reception_counter_section'; layout = 'Layout1' }, 'layout is used with annotation paper only.'),
         @('generate_detail', @{ template = 'reception_counter_section'; level_block = 'LVL' }, 'level_block is used with annotation paper only.'),
         @('generate_detail', @{ template = 'reception_counter_section'; create_viewport = $true }, 'create_viewport is used with annotation paper only.'),
+        @('generate_detail', @{ template = 'reception_counter_section'; leader_block = 'MLL' }, 'level_block, leader_block, title_block, note_width and sheet are used with annotation paper only.'),
+        @('generate_detail', @{ template = 'reception_counter_section'; layer_scheme = 'office' }, 'Invalid choice: layer_scheme'),
+        @('generate_detail', @{ template = 'reception_counter_section'; annotation = 'paper'; view = @{ paper_centre = @(200, 150) }; sheet = @{ number = 'A1' } }, 'Unknown sheet field: number*'),
         @('generate_detail', @{ template = 'reception_counter_section'; annotation = 'paper'; create_viewport = $true }, 'view.paper_centre is needed to preview without AutoCAD*'),
         @('generate_detail', @{ template = 'reception_counter_section'; annotation = 'paper'; view = @{ paper_centre = @(200, 150); viewport_size = @(100, 100) } }, 'view.viewport_size is used with create_viewport only.'),
         @('get_element', @{ element_id = ' ' }, 'Empty argument: element_id'),
@@ -158,6 +161,8 @@ try {
     }
     $paper = Invoke-Tool 'generate_detail' @{ template = 'reception_counter_section'; annotation = 'paper'; view = @{ paper_centre = @(200, 150) }; return_plan = $true }
     Assert (-not $paper.isError -and $paper.content[0].text -like '*"paper_items"*' -and $paper.content[0].text -like '*linear_factor*' -and $paper.content[0].text -like '*viewport_setup*') 'generate_detail paper mode must return the geometry plan, the layout plan and the viewport set-up without AutoCAD'
+    $ao = Invoke-Tool 'generate_detail' @{ template = 'reception_counter_section'; annotation = 'paper'; layer_scheme = 'ao'; leader_block = 'Multiple Leader Lab'; view = @{ paper_centre = @(200, 150) }; return_plan = $true }
+    Assert (-not $ao.isError -and $ao.content[0].text -like '*"op":"leader"*' -and $ao.content[0].text -like '*AO-MDF_SECTION_PLAN*' -and $ao.content[0].text -like '*mm THK MDF CARCASS W/ MELAMINE FINISH*') 'generate_detail paper mode with the office scheme must return leaders on the office layers without AutoCAD'
     $custom = Invoke-Tool 'generate_detail' @{ template = 'custom_section'; params = @{ parts = @(@{ id = 'top'; material = 'corian'; x0 = 0; y0 = 870; x1 = 600; y1 = 882 }); notes = @(@{ part = 'top'; text = '12MM THK. SOLID SURFACE TOP' }) }; return_plan = $true }
     Assert (-not $custom.isError -and $custom.content[0].text -like '*12MM THK. SOLID SURFACE TOP*' -and $custom.content[0].text -like '*custom_section*') 'generate_detail custom_section must return a plan without AutoCAD'
     $curve = Invoke-Tool 'generate_detail' @{ template = 'custom_section'; scale = 20; params = @{ view = 'plan'; parts = @(@{ id = 'c'; material = 'corian'; points = @(@{ x = 1200; y = 0; radius = 800 }, @(2000, 800), @{ x = 1400; y = 800; radius = -200 }, @(1200, 600)) }) }; return_plan = $true }

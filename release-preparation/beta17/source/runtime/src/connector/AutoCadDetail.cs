@@ -1204,15 +1204,15 @@ namespace SmartConnector
             double noteX = topEndX + 34 * d;
             Action<double, double, string> note = (targetX, y, text) => em.Note(targetX, y, text, noteX);
             string topNote = topMaterial == "stone"
-                ? Mm(StoneThickness) + "MM THK. STONE TOP ON " + Mm(ts) + "MM THK. MARINE PLYWOOD BACKING"
-                : Mm(CorianThickness) + "MM THK. SOLID SURFACE (CORIAN) TOP ON " + Mm(ts) + "MM THK. MDF SUBSTRATE";
+                ? Mm(StoneThickness) + "mm THK STONE TOP ON " + Mm(ts) + "mm THK MARINE PLYWOOD BACKING"
+                : Mm(CorianThickness) + "mm THK SOLID SURFACE (CORIAN) TOP ON " + Mm(ts) + "mm THK MDF SUBSTRATE";
             double carcassY = PH + T + (topUnder - PH - T) * 0.7;
             double plinthY = (FG + PH) / 2.0;
             if (bar) note(topEndX, barTop - tf / 2.0, topNote + " (ALL TOPS)");
             else note(topEndX, H - tf / 2.0, topNote);
-            if (accessible) note(boxDepth, carcassY, Mm(T) + "MM THK. MDF CARCASS IN MELAMINE FINISH");
-            else note(D, carcassY, Mm(T) + "MM THK. MDF CARCASS IN MELAMINE FINISH");
-            if (PH > FG) note(accessible ? boxDepth - PS : D - PS, plinthY, Mm(T) + "MM THK. MDF PLINTH ON ADJUSTABLE LEGS");
+            if (accessible) note(boxDepth, carcassY, Mm(T) + "mm THK MDF CARCASS W/ MELAMINE FINISH");
+            else note(D, carcassY, Mm(T) + "mm THK MDF CARCASS W/ MELAMINE FINISH");
+            if (PH > FG) note(accessible ? boxDepth - PS : D - PS, plinthY, Mm(T) + "mm THK MDF PLINTH ON ADJUSTABLE LEGS");
             em.FlushNotes(r);
 
             // titles

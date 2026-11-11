@@ -28,7 +28,7 @@ Tool arguments: `scale` (denominator, default 10), `origin` (floor at the staff 
 - Boards as closed outlines on `A-DETL-WIDE` (cut, 0.50): bottom panel, two end panels up to the underside of the top, optional shelf, top substrate and finish, two plinth boards. Raised bar: the customer-side panel runs up to the underside of the bar, the counter top stops at it, and the bar is a second substrate and finish.
 - Hatches on `A-DETL-GENF` (0.09): MDF `ANSI31`, marine plywood `ANSI32`, stone `ANSI36`, Corian solid fill. Pattern scales follow the detail scale. These are standard AutoCAD patterns, so no pattern files are needed.
 - Dimensions on `A-ANNO-DIMS` (0.13), all on the left or below so none crosses a note: plinth height, overall height, depth, and for the bar the step and the bar run, for the accessible section the clear height under the top and the knee depth.
-- Level markers (F.F.L., counter top, bar top) on the left, notes with horizontal leaders on the customer side, a section title and the scale. Notes use the office wording style: all capitals, thickness first, for example `18MM THK. MDF CARCASS IN MELAMINE FINISH`.
+- Level markers (F.F.L., counter top, bar top) on the left, notes with horizontal leaders on the customer side, a section title and the scale. Notes use the office wording style: capitals with a lowercase `mm`, thickness first, no dot after THK, `W/` for with, for example `18mm THK MDF CARCASS W/ MELAMINE FINISH`. In paper mode each note is a leader (the office `Multiple Leader Lab` block, or a native multileader if the block is missing), never a bare line.
 - Layers (office names, this generator's lineweights): `A-DETL-WIDE` 0.50, `A-DETL` 0.25, `A-DETL-THIN` 0.13, `A-DETL-GENF` 0.09, `A-ANNO-DIMS` 0.13, `G-ANNO-TEXT` 0.13, with the office layer colours.
 
 ## Annotation and dimension style (from the reference sheets)
@@ -87,7 +87,7 @@ A section built entirely from what the caller supplies, for details the receptio
       {"id": "top",  "material": "corian", "x0": 0, "y0": 870, "x1": 600, "y1": 882}
     ],
     "levels": [{"y": 882, "label": "EL +0.88 COUNTER TOP"}],
-    "notes": [{"part": "top", "text": "12MM THK. SOLID SURFACE TOP"}],
+    "notes": [{"part": "top", "text": "12mm THK SOLID SURFACE TOP"}],
     "dimensions": [{"from": [0, 0], "to": [0, 100], "axis": "y"}],
     "title": "SECTION A-A"
   }

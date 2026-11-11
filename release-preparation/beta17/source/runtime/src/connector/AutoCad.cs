@@ -761,7 +761,8 @@ namespace SmartConnector
                 place.SheetProject = text("project"); place.SheetNo = text("sheet_no"); place.ViewNo = text("view_no");
             }
             if (place.Mode != "paper" && (place.LeaderBlock != null || place.TitleBlock != null || place.LevelBlock != null || a.ContainsKey("sheet") || a.ContainsKey("note_width")))
-                throw new ToolException("level_block, leader_block, title_block, note_width and sheet are used with annotation paper only.");            if (a.ContainsKey("level_block_scale")) place.LevelBlockScale = Convert.ToDouble(a["level_block_scale"], System.Globalization.CultureInfo.InvariantCulture);
+                throw new ToolException("level_block, leader_block, title_block, note_width and sheet are used with annotation paper only.");
+            if (a.ContainsKey("level_block_scale")) place.LevelBlockScale = Convert.ToDouble(a["level_block_scale"], System.Globalization.CultureInfo.InvariantCulture);
             if (place.Mode == "paper" && apply0(a) && Json.GetString(a, "layout").Length == 0) throw new ToolException("annotation paper needs layout: the name of the layout to annotate.");
             if (place.Mode != "paper" && a.ContainsKey("layout")) throw new ToolException("layout is used with annotation paper only.");
             bool createViewport = a.ContainsKey("create_viewport") && (bool)a["create_viewport"];
