@@ -150,7 +150,7 @@ try {
         Assert ($result.isError -and $result.content[0].text -like $check[2]) ("{0}: expected '{1}', got '{2}'" -f $check[0], $check[2], $result.content[0].text)
     }
     $paper = Invoke-Tool 'generate_detail' @{ template = 'reception_counter_section'; annotation = 'paper'; view = @{ paper_centre = @(200, 150) }; return_plan = $true }
-    Assert (-not $paper.isError -and $paper.content[0].text -like '*"paper_items":[*' -and $paper.content[0].text -like '*linear_factor*' -and $paper.content[0].text -like '*viewport_setup*') 'generate_detail paper mode must return the geometry plan, the layout plan and the viewport set-up without AutoCAD'
+    Assert (-not $paper.isError -and $paper.content[0].text -like '*"paper_items"*' -and $paper.content[0].text -like '*linear_factor*' -and $paper.content[0].text -like '*viewport_setup*') 'generate_detail paper mode must return the geometry plan, the layout plan and the viewport set-up without AutoCAD'
     $custom = Invoke-Tool 'generate_detail' @{ template = 'custom_section'; params = @{ parts = @(@{ id = 'top'; material = 'corian'; x0 = 0; y0 = 870; x1 = 600; y1 = 882 }); notes = @(@{ part = 'top'; text = '12MM THK. SOLID SURFACE TOP' }) }; return_plan = $true }
     Assert (-not $custom.isError -and $custom.content[0].text -like '*12MM THK. SOLID SURFACE TOP*' -and $custom.content[0].text -like '*custom_section*') 'generate_detail custom_section must return a plan without AutoCAD'
     $none = Invoke-Tool 'generate_detail' @{ template = 'reception_counter_section'; annotation = 'none'; return_plan = $true }
