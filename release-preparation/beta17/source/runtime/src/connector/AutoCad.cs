@@ -825,14 +825,22 @@ namespace SmartConnector
             try { paperResult = ApplyPlan(docSource, paperArguments); }
             catch (ToolException e) { throw new ToolException("The geometry was drawn in model space, but the annotation in layout '" + layout + "' failed and was rolled back: " + e.Message + " Undo once (U) to remove the geometry, fix the cause, then run again."); }
             if (viewport == null) return Json.Object("applied", true, "generated", generated, "plan_result", modelResult, "paper_plan_result", paperResult);
-            object viewportResult;
-            try { viewportResult = CreateViewport(docSource, layout, viewport); }
+            try
+            {
+                object viewportResult = CreateViewport(docSource, layout, viewport);
+                return Json.Object("applied", true, "generated", generated, "plan_result", modelResult, "paper_plan_result", paperResult, "viewport_result", viewportResult);
+            }
             catch (Exception e)
             {
+                // The geometry and annotation are in and correct; only the viewport is missing. Report it with the results instead of failing them.
                 string reason = e is ToolException ? e.Message : e.GetType().Name + ": " + e.Message;
-                throw new ToolException("The geometry and the annotation were drawn, but the viewport could not be made and nothing of it was kept: " + reason + " Undo twice (U, U) to remove both, or add a viewport at 1:" + built.Scale.ToString(System.Globalization.CultureInfo.InvariantCulture) + " centred on the model point in generated.summary.viewport_setup.");
+                generated["viewport_error"] = "The viewport could not be made, and nothing of it was kept: " + reason;
+                generated["viewport_next_step"] = "The geometry and annotation are in place. Add a viewport at 1:" + built.Scale.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                    + " centred on model point " + viewport.ViewCentre[0].ToString(System.Globalization.CultureInfo.InvariantCulture) + ", " + viewport.ViewCentre[1].ToString(System.Globalization.CultureInfo.InvariantCulture)
+                    + " at paper point " + viewport.Centre[0].ToString(System.Globalization.CultureInfo.InvariantCulture) + ", " + viewport.Centre[1].ToString(System.Globalization.CultureInfo.InvariantCulture)
+                    + ", or type U twice in AutoCAD to remove the annotation and the geometry.";
+                return Json.Object("applied", true, "generated", generated, "plan_result", modelResult, "paper_plan_result", paperResult, "viewport_result", null);
             }
-            return Json.Object("applied", true, "generated", generated, "plan_result", modelResult, "paper_plan_result", paperResult, "viewport_result", viewportResult);
         }
 
         internal const string ViewportLayer = "G-ANNO-VPRT";
@@ -878,14 +886,54 @@ namespace SmartConnector
             return v;
         }
 
-        // Makes the viewport in one Undo group: turned on, made active, zoomed to the model centre, set to 1:scale (which keeps the centre),
-        // locked, back to paper space. A layer it creates is not plotted; an existing layer is left as it is. On failure everything of it is removed.
+        // How the viewport's view is read: DXF 12 (view centre in DCS), 17 (target), 51 (twist), 45 (view height). AutoCAD's COM interface
+        // has no view-centre property, so one read-only AutoLISP entget is sent and its answer read from a file (as get-viewport-centres.ps1
+        // does, live-proven on the counter sheets). The last argument is the wait in milliseconds. Replaceable for tests.
+        internal static Func<object, string, int, double[]> ReadViewportView = LispViewportView;
+
+        private static double[] LispViewportView(object docSource, string handle, int waitMs)
+        {
+            dynamic doc = docSource;
+            string file = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "dg-vp-" + Guid.NewGuid().ToString("N") + ".txt");
+            string path = file.Replace('\\', '/');
+            string lisp = "(progn (setq dg:e (entget (handent \"" + handle + "\")) dg:c (cdr (assoc 12 dg:e)) dg:t (cdr (assoc 17 dg:e)) dg:f (open \"" + path + "\" \"w\"))"
+                + " (write-line (strcat (rtos (car dg:c) 2 8) \",\" (rtos (cadr dg:c) 2 8) \",\" (rtos (car dg:t) 2 8) \",\" (rtos (cadr dg:t) 2 8) \",\" (rtos (cdr (assoc 51 dg:e)) 2 8) \",\" (rtos (cdr (assoc 45 dg:e)) 2 8) \",END\") dg:f)"
+                + " (close dg:f) (setq dg:e nil dg:c nil dg:t nil dg:f nil) (princ))\n";
+            doc.SendCommand(lisp);
+            try
+            {
+                for (int waited = 0; waited < waitMs; waited += 200)
+                {
+                    System.Threading.Thread.Sleep(200);
+                    if (!System.IO.File.Exists(file)) continue;
+                    string text;
+                    try { text = System.IO.File.ReadAllText(file).Trim(); } catch (System.IO.IOException) { continue; }
+                    string[] parts = text.Split(',');
+                    if (parts.Length != 7 || parts[6] != "END") continue;
+                    double[] values = new double[6];
+                    for (int k = 0; k < 6; k++) values[k] = Double.Parse(parts[k], System.Globalization.CultureInfo.InvariantCulture);
+                    return values;
+                }
+            }
+            finally { try { System.IO.File.Delete(file); } catch (Exception) { } }
+            throw new ToolException("AutoCAD did not answer the read-only view query within " + (waitMs / 1000).ToString(System.Globalization.CultureInfo.InvariantCulture) + " seconds. Is a dialog open or a command running? Press Esc in AutoCAD and run again.");
+        }
+
+        // Makes the viewport in one Undo group. Route 1, live-proven on AutoCAD 2024: layout current, paper space, regen, add the viewport,
+        // turn it on, regen, switch into it, zoom to the model centre, set the scale. (Without the second regen AutoCAD answers "There is no
+        // active modelspace viewport".) Route 2, if route 1 throws, the counter-sheet method with COM properties only: read the view offset,
+        // set Target = model centre - offset, then the scale. The view centre is then read back and, if it is off, corrected through Target.
+        // A layer it creates is not plotted; an existing layer is left as it is. On failure everything of it is removed.
         internal static object CreateViewport(object docSource, string layout, ViewportPlan v)
         {
             dynamic doc = docSource;
+            int busy = 0;
+            try { busy = Convert.ToInt32(doc.GetVariable("CMDACTIVE")); } catch (Exception) { }
+            if (busy != 0) throw new ToolException("a command is running in AutoCAD. Press Esc and run again.");
             dynamic sheet = doc.Layouts.Item(layout);
             dynamic viewport = null;
             bool layerCreated = false;
+            Func<double, string> n = x => x.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
             doc.StartUndoMark();
             try
             {
@@ -899,21 +947,64 @@ namespace SmartConnector
                         layer.Plottable = false;
                     }
                     doc.ActiveLayout = sheet;
+                    try { doc.ActiveSpace = 0; } catch (Exception) { }
+                    try { doc.Regen(1); } catch (Exception) { }
                     viewport = sheet.Block.AddPViewport(new double[] { v.Centre[0], v.Centre[1], 0 }, v.Width, v.Height);
                     viewport.Layer = ViewportLayer;
                     viewport.Display(true);
-                    doc.MSpace = true;
-                    doc.ActivePViewport = viewport;
-                    doc.Application.ZoomCenter(new double[] { v.ViewCentre[0], v.ViewCentre[1], 0 }, v.Height * v.Scale);
-                    viewport.CustomScale = 1.0 / v.Scale;
+                    string handle = Convert.ToString(viewport.Handle);
+                    string method, zoomError = null;
+                    try
+                    {
+                        doc.Regen(1);
+                        doc.MSpace = true;
+                        doc.ActivePViewport = viewport;
+                        doc.Application.ZoomCenter(new double[] { v.ViewCentre[0], v.ViewCentre[1], 0 }, v.Height * v.Scale);
+                        viewport.CustomScale = 1.0 / v.Scale;
+                        doc.MSpace = false;
+                        method = "zoom";
+                    }
+                    catch (Exception e)
+                    {
+                        zoomError = e.Message;
+                        try { doc.MSpace = false; } catch (Exception) { }
+                        double[] offset = ReadViewportView(docSource, handle, 12000);
+                        if (Math.Abs(offset[4]) > 1e-9) throw new ToolException("the new viewport's view is twisted; only plan views are supported.");
+                        viewport.Target = new double[] { v.ViewCentre[0] - offset[0], v.ViewCentre[1] - offset[1], 0 };
+                        viewport.CustomScale = 1.0 / v.Scale;
+                        method = "target";
+                    }
+
+                    // read the view back; correct it through Target if it is off; without an answer, say it was not read back
+                    bool readBack = false, corrected = false;
+                    double cx = Double.NaN, cy = Double.NaN;
+                    double[] view = null;
+                    try { view = ReadViewportView(docSource, handle, 6000); } catch (Exception) { }
+                    if (view != null)
+                    {
+                        cx = view[2] + view[0]; cy = view[3] + view[1];
+                        if (Math.Sqrt(Math.Pow(cx - v.ViewCentre[0], 2) + Math.Pow(cy - v.ViewCentre[1], 2)) > 0.5)
+                        {
+                            viewport.Target = new double[] { v.ViewCentre[0] - view[0], v.ViewCentre[1] - view[1], 0 };
+                            corrected = true;
+                            view = ReadViewportView(docSource, handle, 6000);
+                            cx = view[2] + view[0]; cy = view[3] + view[1];
+                            if (Math.Sqrt(Math.Pow(cx - v.ViewCentre[0], 2) + Math.Pow(cy - v.ViewCentre[1], 2)) > 0.5)
+                                throw new ToolException("the viewport's view centre read back as " + n(cx) + ", " + n(cy) + " instead of " + n(v.ViewCentre[0]) + ", " + n(v.ViewCentre[1]) + ", even after correcting it.");
+                        }
+                        readBack = true;
+                    }
                     viewport.DisplayLocked = true;
-                    doc.MSpace = false;
                     double custom = Convert.ToDouble(viewport.CustomScale);
                     if (Math.Abs(custom * v.Scale - 1.0) > 1e-6) throw new ToolException("the viewport scale read back as " + custom.ToString(System.Globalization.CultureInfo.InvariantCulture) + " instead of 1:" + v.Scale.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".");
                     if (!(bool)viewport.DisplayLocked) throw new ToolException("the viewport display did not lock.");
-                    return Json.Object("handle", Convert.ToString(viewport.Handle), "layer", ViewportLayer, "layer_created", layerCreated, "custom_scale", custom, "display_locked", true,
-                        "centre", new object[] { v.Centre[0], v.Centre[1] }, "size", new object[] { v.Width, v.Height }, "view_centre", new object[] { v.ViewCentre[0], v.ViewCentre[1] },
-                        "note", "The view centre cannot be read back from AutoCAD; it was set by zooming to view_centre before the scale was set.");
+                    try { doc.Regen(1); } catch (Exception) { }
+                    Dictionary<string, object> result = Json.Object("handle", handle, "method", method, "layer", ViewportLayer, "layer_created", layerCreated, "custom_scale", custom, "display_locked", true,
+                        "centre", new object[] { v.Centre[0], v.Centre[1] }, "size", new object[] { v.Width, v.Height }, "view_centre_read_back", readBack);
+                    if (readBack) { result["view_centre"] = new object[] { Math.Round(cx, 3), Math.Round(cy, 3) }; result["view_centre_corrected"] = corrected; }
+                    else result["note"] = "AutoCAD did not answer the view read-back, so the centre is not proven: check that the section sits in the middle of the viewport.";
+                    if (zoomError != null) result["zoom_route_error"] = zoomError;
+                    return result;
                 }
                 catch (Exception)
                 {
