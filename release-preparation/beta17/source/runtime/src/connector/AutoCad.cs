@@ -57,7 +57,7 @@ namespace SmartConnector
                         Json.Object("expected_drawing", target(), "name", str(), "action", Json.Object("type", "string", "enum", new object[] { "create", "color", "on", "frozen", "locked" }),
                             "color", Json.Object("type", "integer", "minimum", 1, "maximum", 255), "value", Json.Object("type", "boolean")),
                         new[] { "expected_drawing", "name", "action" }, false),
-                    Schema.Tool("apply_plan", "Create many objects in ONE undoable call from a plan (one round trip instead of hundreds). items are ordered steps {op, ...}: layer{name,color?,linetype?,lineweight?}, line{layer,start,end}, circle{layer,center,radius}, arc{layer,center,radius,start_angle,end_angle}, polyline{layer,points:[[x,y],...],closed?}, text{layer,point,text,height,rotation?,style?}, mtext{layer,point,width,text,height?,rotation?,style?; \\P = new line}, insert{layer,name,point,scale?,rotation?}, hatch{layer,pattern,boundary,holes?,scale?,angle?,color?} (boundary and holes are ids of EARLIER closed polyline or circle steps, so give those steps an id), dim_aligned{layer,from,to,location,style?,scale?}, dim_rotated{layer,from,to,location,angle,style?,scale?} (location is a point the dimension line passes through; the value shown is the measured one; scale sets the dimension's overall scale, for example the detail scale denominator). Points are [x,y] or [x,y,z] in WCS drawing units; angles are degrees counter-clockwise; lineweight is in hundredths of mm. A step may carry an id; its handle is returned. A layer must already exist (or be created by an earlier layer step) and be unlocked; blocks, linetypes, text styles and dimension styles must already be in the drawing. At most 500 steps. Run with dry_run=true first: it checks everything against the drawing and changes nothing. A failed run removes what it created. Does not save.",
+                    Schema.Tool("apply_plan", "Create many objects in ONE undoable call from a plan (one round trip instead of hundreds). items are ordered steps {op, ...}: layer{name,color?,linetype?,lineweight?}, line{layer,start,end}, circle{layer,center,radius}, arc{layer,center,radius,start_angle,end_angle}, polyline{layer,points:[[x,y],...],closed?}, text{layer,point,text,height,rotation?,style?}, mtext{layer,point,width,text,height?,rotation?,style?; \\P = new line}, insert{layer,name,point,scale?,rotation?,attributes? (object of attribute tag: text; a tag the block lacks fails the step)}, hatch{layer,pattern,boundary,holes?,scale?,angle?,color?} (boundary and holes are ids of EARLIER closed polyline or circle steps, so give those steps an id), dim_aligned{layer,from,to,location,style?,scale?}, dim_rotated{layer,from,to,location,angle,style?,scale?} (location is a point the dimension line passes through; the value shown is the measured one; scale sets the dimension's overall scale, for example the detail scale denominator; linear_factor, for a dimension drawn in a paper-space layout over model geometry, multiplies the measured value so it reads the model size, for example 10 for a 1:10 viewport). Points are [x,y] or [x,y,z] in WCS drawing units; angles are degrees counter-clockwise; lineweight is in hundredths of mm. A step may carry an id; its handle is returned. A layer must already exist (or be created by an earlier layer step) and be unlocked; blocks, linetypes, text styles and dimension styles must already be in the drawing. At most 500 steps. Run with dry_run=true first: it checks everything against the drawing and changes nothing. A failed run removes what it created. Does not save.",
                         Json.Object("expected_drawing", target(), "layout", str(), "dry_run", Json.Object("type", "boolean"),
                             "items", Json.Object("type", "array", "items", Json.Object("type", "object"), "minItems", 1, "maxItems", AutoCadPlan.MaxItems)),
                         new[] { "expected_drawing", "items" }, false),
@@ -67,11 +67,13 @@ namespace SmartConnector
                             "code", Json.Object("type", "string", "minLength", 1, "maxLength", AutoCadScript.MaxCodeLength),
                             "timeout_seconds", Json.Object("type", "integer", "minimum", 1, "maximum", 300)),
                         new[] { "expected_drawing", "execution_mode", "allow_model_changes", "code" }, false),
-                    Schema.Tool("generate_detail", "Detail Generator: build a draft construction detail from a short brief, and optionally draw it. Template reception_counter_section is a vertical section through a reception counter, in millimetres only: boards, plinth, top (corian by default, or stone), optional shelf, optional raised bar, or a wheelchair-accessible section (params.section = accessible; it needs accessible_height, knee_clearance_height, knee_clearance_depth and code_reference from the code you adopt, none are built in). params holds the design parameters in mm, all with defaults except the accessible ones. scale is the detail scale denominator (10 = 1:10); origin is where the floor meets the staff face. With apply=false (the default) AutoCAD is not contacted: you get a summary, warnings and, with return_plan, the steps. With apply=true (expected_drawing required) the drawing must be in millimetres, the plan is checked against it and drawn like apply_plan; dry_run defaults to true. Existing layers are left as they are unless update_layers. Every result is a draft for a designer's review.",
-                        Json.Object("expected_drawing", target(), "template", Json.Object("type", "string", "enum", new object[] { AutoCadDetail.ReceptionCounterSection }),
+                    Schema.Tool("generate_detail", "Detail Generator: build a draft construction detail from a short brief, and optionally draw it. Two templates. custom_section draws a section from parts the caller read off pictures and plans: params.parts [{id, material (mdf, ply, stone, corian, steel, glass, outline), x0, y0, x1, y1}] in mm with x from the staff face and y up from the floor, optional levels [{y, label}], notes [{part, text, y?}], dimensions [{from, to, axis x|y, chain?}], title, overall_dimensions, floor; every number and wording is the caller's and nothing is invented or checked against a code. reception_counter_section is a vertical section through a reception counter, in millimetres only: boards, plinth, top (corian by default, or stone), optional shelf, optional raised bar, or a wheelchair-accessible section (params.section = accessible; it needs accessible_height, knee_clearance_height, knee_clearance_depth and code_reference from the code you adopt, none are built in). params holds the design parameters in mm, all with defaults except the accessible ones. scale is the detail scale denominator (10 = 1:10); origin is where the floor meets the staff face. With apply=false (the default) AutoCAD is not contacted: you get a summary, warnings and, with return_plan, the steps. With apply=true (expected_drawing required) the drawing must be in millimetres, the plan is checked against it and drawn like apply_plan; dry_run defaults to true. Existing layers are left as they are unless update_layers. Unless dimension_style or text_style is given (or use_reference_styles is false), the drawing's reference styles are used when present: dimension style na1, text style EN-S for notes and levels, EN-SCB for titles; if one is missing the result says so. annotation says where dimensions, notes, levels and titles go: model (default, drawn in model space at the detail scale), paper (drawn in the layout named by layout at true paper size, text 2.5 mm, dimensions reading the model size; view.paper_centre [x,y] is where the detail sits on the sheet, optional view.model_centre; the layout needs a viewport at scale 1:scale centred on the model centre, which the result states and which this tool cannot set), or none (geometry only). level_block (with level_tag, default LEVEL, and level_block_scale) uses an office block with an attribute for level markers in paper mode. Every result is a draft for a designer's review.",
+                        Json.Object("expected_drawing", target(), "template", Json.Object("type", "string", "enum", new object[] { AutoCadDetail.ReceptionCounterSection, AutoCadDetail.CustomSection }),
                             "params", Json.Object("type", "object"), "scale", Json.Object("type", "integer", "minimum", 1, "maximum", 200), "origin", point(),
                             "dimension_style", str(), "text_style", str(), "dimension_scale", Json.Object("type", "number", "exclusiveMinimum", 0),
-                            "apply", Json.Object("type", "boolean"), "dry_run", Json.Object("type", "boolean"), "update_layers", Json.Object("type", "boolean"), "return_plan", Json.Object("type", "boolean")),
+                            "apply", Json.Object("type", "boolean"), "dry_run", Json.Object("type", "boolean"), "update_layers", Json.Object("type", "boolean"), "use_reference_styles", Json.Object("type", "boolean"), "return_plan", Json.Object("type", "boolean"),
+                            "annotation", Json.Object("type", "string", "enum", new object[] { "model", "paper", "none" }), "layout", str(), "view", Json.Object("type", "object"),
+                            "level_block", str(), "level_tag", str(), "level_block_scale", Json.Object("type", "number", "exclusiveMinimum", 0)),
                         new[] { "template" }, false),
                     Schema.Tool("save_drawing", "Explicitly save the expected drawing to its EXISTING path. Invoke only when saving is requested; no Save As.", Json.Object("expected_drawing", target()), new[] { "expected_drawing" }, false)
                 };
@@ -351,6 +353,23 @@ namespace SmartConnector
             return hatch;
         }
 
+        // Fills the block's attributes by tag (case-insensitive). A tag the block does not have fails the step, so a wrong tag is never silent.
+        private static void SetAttributes(object blockSource, PlanItem p)
+        {
+            dynamic block = blockSource;
+            Dictionary<string, dynamic> found = new Dictionary<string, dynamic>(StringComparer.OrdinalIgnoreCase);
+            if ((bool)block.HasAttributes)
+                foreach (dynamic attribute in (System.Collections.IEnumerable)block.GetAttributes())
+                    found[Convert.ToString(attribute.TagString)] = attribute;
+            foreach (KeyValuePair<string, string> pair in p.Attributes)
+            {
+                dynamic attribute;
+                if (!found.TryGetValue(pair.Key, out attribute)) throw new ToolException("items[" + p.Index.ToString(System.Globalization.CultureInfo.InvariantCulture) + "]: block '" + p.BlockName + "' has no attribute '" + pair.Key + "'.");
+                attribute.TextString = pair.Value;
+                if (Convert.ToString(attribute.TextString) != pair.Value) throw new ToolException("items[" + p.Index.ToString(System.Globalization.CultureInfo.InvariantCulture) + "]: attribute '" + pair.Key + "' did not take the text.");
+            }
+        }
+
         private static dynamic CreateItem(object spaceSource, PlanItem p)
         {
             dynamic space = spaceSource;
@@ -381,7 +400,17 @@ namespace SmartConnector
                         if (p.Rotation != 0) mtext.Rotation = p.Rotation * toRadians;
                         return mtext;
                     }
-                case "insert": return space.InsertBlock(p.Point, p.BlockName, p.Scale, p.Scale, p.Scale, p.Rotation * toRadians);
+                case "insert":
+                    {
+                        dynamic block = space.InsertBlock(p.Point, p.BlockName, p.Scale, p.Scale, p.Scale, p.Rotation * toRadians);
+                        if (p.Attributes != null)
+                        {
+                            // the block is not in the plan's rollback list yet, so a failed attribute must remove it here
+                            try { SetAttributes((object)block, p); }
+                            catch (Exception) { try { block.Delete(); } catch (Exception) { } throw; }
+                        }
+                        return block;
+                    }
                 case "dim_aligned": return space.AddDimAligned(p.Point, p.End, p.Location);
                 case "dim_rotated": return space.AddDimRotated(p.Point, p.End, p.Location, p.Rotation * toRadians);
             }
@@ -456,6 +485,18 @@ namespace SmartConnector
                         {
                             try { entity.ScaleFactor = p.DimScale; }
                             catch (Exception) { warnings.Add("items[" + p.Index.ToString(System.Globalization.CultureInfo.InvariantCulture) + "]: the dimension scale could not be applied; set the scale in the dimension style instead."); }
+                        }
+                        if (p.LinearFactor > 0)
+                        {
+                            // A paper-space dimension of model geometry must read the model value. The reference sheets use a negative factor; the size is what counts.
+                            // If neither sign is accepted the whole plan is refused (and rolled back), because a dimension that reads the wrong value must never be left in a drawing.
+                            try { entity.LinearScaleFactor = -p.LinearFactor; }
+                            catch (Exception)
+                            {
+                                try { entity.LinearScaleFactor = p.LinearFactor; }
+                                catch (Exception) { throw new ToolException("items[" + p.Index.ToString(System.Globalization.CultureInfo.InvariantCulture) + "]: the dimension's linear scale factor could not be set, so nothing was kept."); }
+                            }
+                            if (Math.Abs(Math.Abs(Convert.ToDouble(entity.LinearScaleFactor)) - p.LinearFactor) > 1e-9) throw new ToolException("items[" + p.Index.ToString(System.Globalization.CultureInfo.InvariantCulture) + "]: the dimension's linear scale factor did not read back as " + p.LinearFactor.ToString(System.Globalization.CultureInfo.InvariantCulture) + ", so nothing was kept.");
                         }
                         objects++;
                         if (p.Id != null) { handles[p.Id] = Convert.ToString(entity.Handle); byId[p.Id] = (object)entity; }
@@ -583,6 +624,11 @@ namespace SmartConnector
         }
 
         // Detail Generator: the plan is built and checked before AutoCAD is contacted. With apply it is then dry-run or drawn through ApplyPlan.
+        private static bool apply0(IDictionary<string, object> a)
+        {
+            return a.ContainsKey("apply") && (bool)a["apply"];
+        }
+
         private static object GenerateDetail(IDictionary<string, object> a)
         {
             IDictionary<string, object> parameters = null;
@@ -597,10 +643,25 @@ namespace SmartConnector
             string dimStyle = a.ContainsKey("dimension_style") ? Json.GetString(a, "dimension_style") : null;
             string textStyle = a.ContainsKey("text_style") ? Json.GetString(a, "text_style") : null;
             double dimScale = a.ContainsKey("dimension_scale") ? Convert.ToDouble(a["dimension_scale"], System.Globalization.CultureInfo.InvariantCulture) : 0;
-            DetailResult built = AutoCadDetail.Build(Json.GetString(a, "template"), parameters, scale, ox, oy, dimStyle, textStyle, dimScale);
+            DetailAnnotation place = new DetailAnnotation();
+            if (a.ContainsKey("annotation")) place.Mode = Json.GetString(a, "annotation");
+            if (a.ContainsKey("view"))
+            {
+                IDictionary<string, object> view = a["view"] as IDictionary<string, object>;
+                if (view == null) throw new ToolException("view must be an object.");
+                foreach (string key in view.Keys) if (key != "paper_centre" && key != "model_centre") throw new ToolException("Unknown view field: " + key + ". Allowed: paper_centre, model_centre.");
+                if (view.ContainsKey("paper_centre")) place.PaperCentre = Schema.Point(view["paper_centre"]);
+                if (view.ContainsKey("model_centre")) place.ModelCentre = Schema.Point(view["model_centre"]);
+            }
+            if (a.ContainsKey("level_block")) place.LevelBlock = Json.GetString(a, "level_block");
+            if (a.ContainsKey("level_tag")) place.LevelTag = Json.GetString(a, "level_tag");
+            if (a.ContainsKey("level_block_scale")) place.LevelBlockScale = Convert.ToDouble(a["level_block_scale"], System.Globalization.CultureInfo.InvariantCulture);
+            if (place.Mode == "paper" && apply0(a) && Json.GetString(a, "layout").Length == 0) throw new ToolException("annotation paper needs layout: the name of the layout to annotate.");
+            if (place.Mode != "paper" && a.ContainsKey("layout")) throw new ToolException("layout is used with annotation paper only.");
+            DetailResult built = AutoCadDetail.Build(Json.GetString(a, "template"), parameters, scale, ox, oy, dimStyle, textStyle, dimScale, place);
 
             Dictionary<string, object> generated = Json.Object("summary", built.Summary, "warnings", built.Warnings);
-            if (a.ContainsKey("return_plan") && (bool)a["return_plan"]) generated["items"] = built.Items;
+            if (a.ContainsKey("return_plan") && (bool)a["return_plan"]) { generated["items"] = built.Items; if (built.PaperItems.Count > 0) generated["paper_items"] = built.PaperItems; }
             bool apply = a.ContainsKey("apply") && (bool)a["apply"];
             if (!apply) return Json.Object("applied", false, "generated", generated);
             if (Json.GetString(a, "expected_drawing").Length == 0) throw new ToolException("expected_drawing is required when apply is true.");
@@ -609,6 +670,41 @@ namespace SmartConnector
             if (Convert.ToInt32(cad.Documents.Count) == 0) throw new ToolException("Open a drawing in AutoCAD first.");
             dynamic doc = cad.ActiveDocument;
             return ApplyGenerated((object)doc, a, built, generated);
+        }
+
+        // The reference sheets use dimension style na1, text style EN-S for notes and EN-SCB for titles. A step the caller gave an
+        // explicit style keeps it; the others take the reference style if the drawing has it. Anything missing is reported.
+        private static void ResolveReferenceStyles(object docSource, DetailResult built, Dictionary<string, object> generated)
+        {
+            dynamic doc = docSource;
+            HashSet<string> dimStyles = Names((object)doc.DimStyles), textStyles = Names((object)doc.TextStyles);
+            List<string> notes = new List<string>();
+            string refDim = dimStyles.Contains("na1") ? "na1" : null;
+            string refText = textStyles.Contains("EN-S") ? "EN-S" : null;
+            string refTitle = textStyles.Contains("EN-SCB") ? "EN-SCB" : refText;
+            bool wantsDim = false, wantsText = false, wantsTitle = false;
+            foreach (Dictionary<string, object> item in built.Items.Concat(built.PaperItems))
+            {
+                string op = Json.GetString(item, "op");
+                if (item.ContainsKey("style")) continue;
+                if (op == "dim_rotated")
+                {
+                    wantsDim = true;
+                    if (refDim != null) item["style"] = refDim;
+                }
+                else if (op == "text")
+                {
+                    bool title = Convert.ToDouble(item["height"], System.Globalization.CultureInfo.InvariantCulture) >= 3.4 * built.HeightUnit;
+                    if (title) { wantsTitle = true; if (refTitle != null) item["style"] = refTitle; }
+                    else { wantsText = true; if (refText != null) item["style"] = refText; }
+                }
+            }
+            if (wantsDim && refDim == null) notes.Add("Dimension style na1 was not found, so the current dimension style is used and the dimension sizes will not match the reference sheets.");
+            if (wantsText && refText == null) notes.Add("Text style EN-S was not found, so the current text style is used for notes and levels.");
+            if (wantsTitle && refTitle == null) notes.Add("Text style EN-SCB was not found, so the current text style is used for titles.");
+            Dictionary<string, object> used = Json.Object("dimension", refDim, "notes", refText, "titles", refTitle);
+            generated["reference_styles"] = used;
+            if (notes.Count > 0) generated["style_notes"] = notes;
         }
 
         // Checks the drawing (identity, millimetres, existing layers), then dry-runs or draws the generated plan.
@@ -624,6 +720,7 @@ namespace SmartConnector
             if (units != 4)
                 throw new ToolException("The drawing is not in millimetres (INSUNITS = " + units.ToString(System.Globalization.CultureInfo.InvariantCulture) + "), so nothing was drawn. The Detail Generator works in millimetres only; start from a millimetre template such as acadiso.dwt.");
 
+            if (!a.ContainsKey("use_reference_styles") || (bool)a["use_reference_styles"]) ResolveReferenceStyles(docSource, built, generated);
             bool update = a.ContainsKey("update_layers") && (bool)a["update_layers"];
             HashSet<string> existing = Names((object)doc.Layers);
             List<object> steps = new List<object>();
@@ -635,9 +732,54 @@ namespace SmartConnector
             }
             bool dry = !a.ContainsKey("dry_run") || (bool)a["dry_run"];
             Dictionary<string, object> planArguments = Json.Object("expected_drawing", id, "dry_run", dry, "items", steps.ToArray());
-            object planResult = ApplyPlan(docSource, planArguments);
             if (kept.Count > 0) generated["existing_layers_left_unchanged"] = kept;
-            return Json.Object("applied", !dry, "generated", generated, "plan_result", planResult);
+            if (built.PaperItems.Count == 0)
+            {
+                object planResult = ApplyPlan(docSource, planArguments);
+                return Json.Object("applied", !dry, "generated", generated, "plan_result", planResult);
+            }
+
+            // Annotation in a layout: the model-space geometry and the paper-space annotation are two plans. Both are checked against the drawing
+            // before anything is drawn, so a missing layout, style or block refuses the whole job. The layer steps are repeated in the layout plan.
+            string layout = Json.GetString(a, "layout");
+            List<object> paperSteps = new List<object>();
+            foreach (object step in steps) if (Json.GetString((IDictionary<string, object>)step, "op") == "layer") paperSteps.Add(step);
+            paperSteps.AddRange(built.PaperItems.Cast<object>());
+            Dictionary<string, object> paperArguments = Json.Object("expected_drawing", id, "dry_run", true, "items", paperSteps.ToArray(), "layout", layout);
+            object modelCheck = ApplyPlan(docSource, Json.Object("expected_drawing", id, "dry_run", true, "items", steps.ToArray()));
+            object paperCheck = ApplyPlan(docSource, paperArguments);
+            string viewportWarning = ViewportWarning(docSource, layout, built.Scale);
+            if (viewportWarning != null) generated["viewport_warning"] = viewportWarning;
+            if (dry) return Json.Object("applied", false, "generated", generated, "plan_result", modelCheck, "paper_plan_result", paperCheck);
+
+            object modelResult = ApplyPlan(docSource, planArguments);
+            paperArguments["dry_run"] = false;
+            try { return Json.Object("applied", true, "generated", generated, "plan_result", modelResult, "paper_plan_result", ApplyPlan(docSource, paperArguments)); }
+            catch (ToolException e) { throw new ToolException("The geometry was drawn in model space, but the annotation in layout '" + layout + "' failed and was rolled back: " + e.Message + " Undo once (U) to remove the geometry, fix the cause, then run again."); }
+        }
+
+        // The annotation is placed for a viewport at 1:scale. If the layout has viewports and none is at that scale, say so; the view centre cannot be read.
+        private static string ViewportWarning(object docSource, string layout, int scale)
+        {
+            try
+            {
+                dynamic block = ((dynamic)docSource).Layouts.Item(layout).Block;
+                int count = Convert.ToInt32(block.Count), viewports = 0;
+                bool match = false;
+                for (int i = 0; i < count; i++)
+                {
+                    dynamic entity = block.Item(i);
+                    if (Convert.ToString(entity.ObjectName) != "AcDbViewport") continue;
+                    double custom = Convert.ToDouble(entity.CustomScale);
+                    if (custom <= 0) continue;   // the layout's own paper viewport
+                    viewports++;
+                    if (Math.Abs(custom * scale - 1.0) < 0.001) match = true;
+                }
+                if (viewports == 0) return "Layout '" + layout + "' has no viewport yet. Add one at scale 1:" + scale + " centred on the model point given in generated.summary.viewport_setup, or the annotation will not line up with the detail.";
+                if (!match) return "Layout '" + layout + "' has " + viewports.ToString(System.Globalization.CultureInfo.InvariantCulture) + " viewport(s) but none at scale 1:" + scale + ". Dimensions read the model size only if the viewport is at that scale.";
+                return null;
+            }
+            catch (Exception) { return "The layout's viewports could not be read, so the viewport scale was not checked."; }
         }
 
         private static object InvokeCore(string name, IDictionary<string, object> a)

@@ -24,6 +24,8 @@ namespace SmartConnector
         internal List<string> Holes;           // hatch: ids of earlier closed steps, each an inner loop
         internal double[] Location;            // dimensions: a point the dimension line passes through
         internal double DimScale;              // dimensions: overall scale of sizes (DIMSCALE for this dimension); 0 = the style decides
+        internal double LinearFactor;          // dimensions in paper space: the measured value is multiplied by this (DIMLFAC), so a dimension of model geometry reads true; 0 = the style decides
+        internal List<KeyValuePair<string, string>> Attributes;   // insert: attribute tag and value
     }
 
     // The pure part of apply_plan: it checks a plan before AutoCAD is contacted, and checks it against the drawing's
@@ -48,10 +50,10 @@ namespace SmartConnector
             { "polyline", new[] { "op", "id", "layer", "points", "closed" } },
             { "text", new[] { "op", "id", "layer", "point", "text", "height", "rotation", "style" } },
             { "mtext", new[] { "op", "id", "layer", "point", "width", "text", "height", "rotation", "style" } },
-            { "insert", new[] { "op", "id", "layer", "name", "point", "scale", "rotation" } },
+            { "insert", new[] { "op", "id", "layer", "name", "point", "scale", "rotation", "attributes" } },
             { "hatch", new[] { "op", "id", "layer", "pattern", "boundary", "holes", "scale", "angle", "color" } },
-            { "dim_aligned", new[] { "op", "id", "layer", "from", "to", "location", "style", "scale" } },
-            { "dim_rotated", new[] { "op", "id", "layer", "from", "to", "location", "angle", "style", "scale" } }
+            { "dim_aligned", new[] { "op", "id", "layer", "from", "to", "location", "style", "scale", "linear_factor" } },
+            { "dim_rotated", new[] { "op", "id", "layer", "from", "to", "location", "angle", "style", "scale", "linear_factor" } }
         };
 
         private static ToolException Fail(int index, string message)
@@ -146,6 +148,19 @@ namespace SmartConnector
                         p.Point = Point(d, "point", i);
                         if (d.ContainsKey("scale")) p.Scale = Positive(d, "scale", i);
                         if (d.ContainsKey("rotation")) p.Rotation = Number(d, "rotation", i);
+                        if (d.ContainsKey("attributes"))
+                        {
+                            IDictionary<string, object> attributes = d["attributes"] as IDictionary<string, object>;
+                            if (attributes == null || attributes.Count == 0 || attributes.Count > 20) throw Fail(i, "'attributes' must be an object of 1 to 20 tag: text pairs.");
+                            p.Attributes = new List<KeyValuePair<string, string>>();
+                            foreach (KeyValuePair<string, object> pair in attributes)
+                            {
+                                string value = pair.Value as string;
+                                if (pair.Key.Length == 0 || pair.Key.Length > 40 || value == null || value.Length > 255 || value.IndexOf('\n') >= 0)
+                                    throw Fail(i, "attribute '" + pair.Key + "' must be a tag of up to 40 characters with a one-line text of up to 255.");
+                                p.Attributes.Add(new KeyValuePair<string, string>(pair.Key, value));
+                            }
+                        }
                         break;
                     case "hatch":
                         p.Layer = NameField(d, "layer", i, true);
@@ -182,6 +197,7 @@ namespace SmartConnector
                         if (op == "dim_rotated") p.Rotation = Number(d, "angle", i);
                         if (d.ContainsKey("style")) p.DimStyle = NameField(d, "style", i, true);
                         if (d.ContainsKey("scale")) p.DimScale = Positive(d, "scale", i);
+                        if (d.ContainsKey("linear_factor")) p.LinearFactor = Positive(d, "linear_factor", i);
                         break;
                 }
                 if (p.Id != null) ids[p.Id] = p;

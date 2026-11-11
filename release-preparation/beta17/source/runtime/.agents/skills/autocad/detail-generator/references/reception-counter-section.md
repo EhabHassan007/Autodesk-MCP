@@ -29,7 +29,29 @@ Tool arguments: `scale` (denominator, default 10), `origin` (floor at the staff 
 - Hatches on `A-DETL-GENF` (0.09): MDF `ANSI31`, marine plywood `ANSI32`, stone `ANSI36`, Corian solid fill. Pattern scales follow the detail scale. These are standard AutoCAD patterns, so no pattern files are needed.
 - Dimensions on `A-ANNO-DIMS` (0.13), all on the left or below so none crosses a note: plinth height, overall height, depth, and for the bar the step and the bar run, for the accessible section the clear height under the top and the knee depth.
 - Level markers (F.F.L., counter top, bar top) on the left, notes with horizontal leaders on the customer side, a section title and the scale. Notes use the office wording style: all capitals, thickness first, for example `18MM THK. MDF CARCASS IN MELAMINE FINISH`.
-- Layers: `A-DETL-WIDE` 0.50, `A-DETL` 0.25, `A-DETL-THIN` 0.13, `A-DETL-GENF` 0.09, `A-ANNO-DIMS` 0.13, `G-ANNO-TEXT` 0.13, with the office layer colours.
+- Layers (office names, this generator's lineweights): `A-DETL-WIDE` 0.50, `A-DETL` 0.25, `A-DETL-THIN` 0.13, `A-DETL-GENF` 0.09, `A-ANNO-DIMS` 0.13, `G-ANNO-TEXT` 0.13, with the office layer colours.
+
+## Annotation and dimension style (from the reference sheets)
+
+Read from three finished reception counter sheets. All three agree.
+
+| Item | Reference |
+|---|---|
+| Dimension style | `na1`, the only style used on every dimension |
+| Dimension text | 3.5 mm on paper, in text style `na1` (a Swiss condensed face), text above the dimension line and aligned with it |
+| Arrows | architectural tick, 2.0 mm |
+| Extension lines | start 1.5 mm off the object and extend 1.5 mm past the dimension line; dimension spacing 1.5 mm |
+| Units | whole millimetres, no decimals |
+| Dimension colours | dimension line by block, extension lines grey (8), text green (3) |
+| Notes | text style `EN-S` (Swiss), 2.0 to 2.5 mm; the leader notes are blocks with a `LABEL` attribute, 2.5 mm in two sheets and 3.5 mm in the first |
+| Titles | `EN-SCB` (Swiss bold), view title block attributes `BOTTOM-TITLE`, `SCALE`, `SHEET-NO`, `TOP-TITLE` |
+| Levels | a block with attributes `LEVEL` and `Area` (for example `EL. +0.90`, `COUNTER TOP`) |
+| Section markers | a block with attributes `VIEWNUMBER` and `SHEETNUMBER` |
+| Where dimensions live | in paper space, over the viewports, with the scale factor of the viewport so the model value shows |
+
+What the generator does with it: it uses `na1`, `EN-S` and `EN-SCB` when the drawing has them, sets notes and levels to 2.5 mm, titles to 3.5 mm, and gives each dimension the detail scale so the 3.5 mm style prints at 3.5 mm. It draws the annotation in model space with the detail, so it works without a sheet.
+
+**Not matched yet:** the level, view title and section marker **blocks** (levels, titles and leaders are drawn as plain lines and text), and paper-space annotation. A later step can insert the office blocks with their attributes, and the sheet-preparation skill places paper-space annotation over viewports.
 
 ## The accessible section
 
@@ -37,7 +59,7 @@ A lowered top over the full depth, with only a staff-side box under it and an op
 
 ## Not drawn yet
 
-Plans and elevations, drawers and shutters, hardware, the raised bar's own support, curved fronts, lighting recesses, block-based level markers and leaders (levels and leaders are plain lines and text), sheet layout and viewports.
+Plans and elevations, drawers and shutters, hardware, the raised bar's own support, curved fronts, lighting recesses, creating the layout, viewport and title block (the tool annotates a layout that exists and warns when its viewport scale does not match; it cannot set the viewport's view centre), leaders as blocks (levels can use an office block through `level_block`; leaders are plain lines and text).
 
 ## Where the defaults come from
 
@@ -46,5 +68,33 @@ Board thicknesses (18 mm MDF), the 600 depth, the 900 top, the 100 plinth set ba
 ## Verification status
 
 - The generator is covered by 71 mock checks: the geometry of each part, dimensions attached to real edges and showing the true distances, both top materials, the raised bar, the accessible section and its refusals, origin and scale handling, deterministic output, and a run through `apply_plan` against a stand-in AutoCAD (millimetre guard, existing layers left alone, a dimension scale on every dimension). The Windows test script covers the argument errors and a plan without AutoCAD.
+- Paper-space annotation, geometry-only mode, block attributes and the paper-space dimension factor are covered by 65 further mock checks (a dimension's paper length times its factor equals the model length for every dimension; rollback when a factor or an attribute is refused; a missing layout or block refuses the job before anything is drawn). They, and `custom_section`, have **not** been run in a live AutoCAD: whether the layout dimensions read the model size, whether the viewport lines up with the annotation, and the block attribute fill all need a live check.
 - **Not yet run in a live AutoCAD.** Run a default section in a disposable millimetre drawing first: confirm the dry run, the real run, the look of the hatches and dimensions, the text and dimension sizes at the chosen scale, and that one `UNDO` removes it all. The dimension `scale` property (`ScaleFactor`) is also unconfirmed live; if AutoCAD refuses it the result carries a warning and the dimension style decides the size.
 - The accessible section has been checked only for internal consistency, not against any code.
+
+## Template: custom_section
+
+A section built entirely from what the caller supplies, for details the reception template does not cover (display counters, vanities, kitchen units, shelving, anything read off renders and plans).
+
+```json
+{
+  "template": "custom_section",
+  "params": {
+    "parts": [
+      {"id": "base", "material": "mdf", "x0": 0, "y0": 100, "x1": 600, "y1": 118},
+      {"id": "top",  "material": "corian", "x0": 0, "y0": 870, "x1": 600, "y1": 882}
+    ],
+    "levels": [{"y": 882, "label": "EL +0.88 COUNTER TOP"}],
+    "notes": [{"part": "top", "text": "12MM THK. SOLID SURFACE TOP"}],
+    "dimensions": [{"from": [0, 0], "to": [0, 100], "axis": "y"}],
+    "title": "SECTION A-A"
+  }
+}
+```
+
+- **Coordinates:** millimetres, x from the staff face (or any chosen datum), y up from the floor. The tool places the section at `origin`.
+- **Materials and drawing:** `mdf` ANSI31, `ply` ANSI32, `stone` ANSI36, `corian` solid, `steel` solid in grey (colour 8), `glass` and `outline` outline only. Anything else is refused rather than guessed.
+- **Checks:** at most 60 parts, ids unique (case-insensitive), each part at least 1 mm each way, parts may touch but not overlap, everything within 10 m. A note must name a part and, if it gives `y`, point inside it.
+- **Annotation:** notes run right from the part's right edge at its mid height unless `y` is given; vertical dimensions sit left (`axis` `y`), horizontal ones below (`axis` `x`), `chain` 1 to 4 steps outwards; overall width and height are added outside the last chain unless `overall_dimensions` is false; `floor` false drops the floor line. Levels sit left of the dimensions. `annotation`, `layout`, `view` and `level_block` work as for the reception template.
+- **Nothing is invented or verified.** Texts are as given (use the office style: capitals, thickness first). The result warns when no notes were given or parts have none. The generator does not compare the section with the pictures or any code, so show the interpretation list to the user before drawing and check the result against it.
+- Covered by 57 mock checks (including three deliberate breakages of the rules to prove the tests catch them). Not yet run in a live AutoCAD.
