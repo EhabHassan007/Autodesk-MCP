@@ -41,7 +41,7 @@ namespace SmartConnector
         private const int NoteGapDenominators = 5;   // notes closer than this many paper millimetres are reported
 
         // Layers, as in the office set, with this generator's own lineweights (hundredths of a millimetre).
-        private const string LCut = "A-DETL-WIDE", LOutline = "A-DETL", LThin = "A-DETL-THIN", LHatch = "A-DETL-GENF", LDim = "A-ANNO-DIMS", LText = "G-ANNO-TEXT";
+        private const string LCut = "A-DETL-WIDE", LOutline = "A-DETL", LThin = "A-DETL-THIN", LHatch = "A-DETL-GENF", LDim = "A-ANNO-DIMS", LText = "G-ANNO-TEXT", LLight = "A-DETL-LITE";
 
         private static readonly string[] Allowed =
         {
@@ -52,8 +52,16 @@ namespace SmartConnector
 
         private sealed class Part
         {
-            internal string Id, Material;
-            internal double X0, Y0, X1, Y1;
+            internal string Id, Material, Group;
+            internal double X0, Y0, X1, Y1;          // the rectangle, or the bounding box of Pts
+            internal List<double[]> Pts;             // a polygon part (custom_section); null for a rectangle
+            internal List<double[]> Visible;         // elevation/plan: the visible pieces {x0,y0,x1,y1} of a part partly hidden by nearer parts; null when fully visible
+            internal string HatchPattern;            // caller's hatch: pattern name, "none", or null for the view's default
+            internal double HatchScale = 1, HatchAngle;
+            internal List<double[]> Outline()
+            {
+                return Pts ?? new List<double[]> { new[] { X0, Y0 }, new[] { X1, Y0 }, new[] { X1, Y1 }, new[] { X0, Y1 } };
+            }
         }
 
         private static double Num(IDictionary<string, object> p, string key, double def, double min, double max)
@@ -126,15 +134,28 @@ namespace SmartConnector
 
             internal void Parts(List<Part> parts)
             {
-                foreach (Part b in parts)
-                    r.Items.Add(Json.Object("op", "polyline", "id", b.Id, "layer", LCut, "points", new object[] { P(b.X0, b.Y0), P(b.X1, b.Y0), P(b.X1, b.Y1), P(b.X0, b.Y1) }, "closed", true));
+                Parts(parts, true);
+            }
+
+            // cut: a section (heavy cut line, material hatch by default). Otherwise an elevation or plan (outline line, no hatch unless the part asks).
+            internal void Parts(List<Part> parts, bool cut)
+            {
                 foreach (Part b in parts)
                 {
+                    if (b.Visible != null) { foreach (double[] g in b.Visible) Line(g[0], g[1], g[2], g[3], LOutline); continue; }   // partly hidden: its visible lines only
+                    r.Items.Add(Json.Object("op", "polyline", "id", b.Id, "layer", cut ? LCut : LOutline, "points", b.Outline().Select(q => (object)P(q[0], q[1])).ToArray(), "closed", true));
+                }
+                foreach (Part b in parts)
+                {
+                    if (b.Visible != null) continue;                                                // no closed outline to hatch
                     string pattern; double factor; int color = 0;
-                    switch (b.Material)
+                    if (b.HatchPattern == "none") continue;
+                    if (b.HatchPattern != null) { pattern = b.HatchPattern; factor = pattern == "SOLID" ? 0 : b.HatchScale; }
+                    else if (!cut) continue;
+                    else switch (b.Material)
                     {
                         case "corian": pattern = "SOLID"; factor = 0; break;
-                        case "stone": pattern = "ANSI36"; factor = 0.5; break;
+                        case "stone": case "marble": pattern = "ANSI36"; factor = 0.5; break;
                         case "ply": pattern = "ANSI32"; factor = 0.3; break;
                         case "steel": pattern = "SOLID"; factor = 0; color = 8; break;
                         case "glass": case "outline": continue;                                   // outline only
@@ -142,9 +163,15 @@ namespace SmartConnector
                     }
                     Dictionary<string, object> hatch = Json.Object("op", "hatch", "layer", LHatch, "pattern", pattern, "boundary", b.Id);
                     if (factor > 0) hatch["scale"] = Math.Round(factor * d, 3);
+                    if (b.HatchPattern != null && b.HatchAngle != 0) hatch["angle"] = b.HatchAngle;
                     if (color > 0) hatch["color"] = color;
                     r.Items.Add(hatch);
                 }
+            }
+
+            internal void Line(double x0, double y0, double x1, double y1, string layer)
+            {
+                r.Items.Add(Json.Object("op", "line", "layer", layer, "start", P(x0, y0), "end", P(x1, y1)));
             }
 
             internal void Dim(double x0, double y0, double x1, double y1, double lx, double ly, double angle)
@@ -250,8 +277,115 @@ namespace SmartConnector
         }
 
 
-        private static readonly string[] CustomAllowed = { "parts", "levels", "notes", "dimensions", "title", "overall_dimensions", "floor" };
-        private static readonly string[] Materials = { "mdf", "ply", "stone", "corian", "steel", "glass", "outline" };
+        private static readonly string[] CustomAllowed = { "view", "parts", "lines", "levels", "notes", "dimensions", "title", "overall_dimensions", "floor", "hidden_lines" };
+        private static readonly string[] Materials = { "mdf", "ply", "stone", "marble", "corian", "steel", "glass", "outline" };
+        private const int MaxCustomParts = 200;
+
+        // ---- polygon geometry for custom parts ----
+        private static double Cross(double[] o, double[] a, double[] b) { return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]); }
+
+        private static bool SegmentsTouch(double[] a, double[] b, double[] c, double[] d)
+        {
+            double d1 = Cross(c, d, a), d2 = Cross(c, d, b), d3 = Cross(a, b, c), d4 = Cross(a, b, d);
+            if (((d1 > 1e-9 && d2 < -1e-9) || (d1 < -1e-9 && d2 > 1e-9)) && ((d3 > 1e-9 && d4 < -1e-9) || (d3 < -1e-9 && d4 > 1e-9))) return true;
+            Func<double[], double[], double[], bool> on = (p, q, x) => Math.Abs(Cross(p, q, x)) <= 1e-9 && x[0] >= Math.Min(p[0], q[0]) - 1e-9 && x[0] <= Math.Max(p[0], q[0]) + 1e-9 && x[1] >= Math.Min(p[1], q[1]) - 1e-9 && x[1] <= Math.Max(p[1], q[1]) + 1e-9;
+            return on(c, d, a) || on(c, d, b) || on(a, b, c) || on(a, b, d);
+        }
+
+        private static bool SegmentsCross(double[] a, double[] b, double[] c, double[] d)
+        {
+            double d1 = Cross(c, d, a), d2 = Cross(c, d, b), d3 = Cross(a, b, c), d4 = Cross(a, b, d);
+            return ((d1 > 1e-9 && d2 < -1e-9) || (d1 < -1e-9 && d2 > 1e-9)) && ((d3 > 1e-9 && d4 < -1e-9) || (d3 < -1e-9 && d4 > 1e-9));
+        }
+
+        private static double Area(List<double[]> p)
+        {
+            double a = 0;
+            for (int i = 0; i < p.Count; i++) { double[] u = p[i], v = p[(i + 1) % p.Count]; a += u[0] * v[1] - v[0] * u[1]; }
+            return a / 2.0;
+        }
+
+        // Strictly inside: not on an edge.
+        private static bool Inside(double[] x, List<double[]> p)
+        {
+            for (int i = 0; i < p.Count; i++)
+            {
+                double[] u = p[i], v = p[(i + 1) % p.Count];
+                if (Math.Abs(Cross(u, v, x)) <= 1e-9 && x[0] >= Math.Min(u[0], v[0]) - 1e-9 && x[0] <= Math.Max(u[0], v[0]) + 1e-9 && x[1] >= Math.Min(u[1], v[1]) - 1e-9 && x[1] <= Math.Max(u[1], v[1]) + 1e-9) return false;
+            }
+            bool c = false;
+            for (int i = 0, j = p.Count - 1; i < p.Count; j = i++)
+                if ((p[i][1] > x[1]) != (p[j][1] > x[1]) && x[0] < (p[j][0] - p[i][0]) * (x[1] - p[i][1]) / (p[j][1] - p[i][1]) + p[i][0]) c = !c;
+            return c;
+        }
+
+        // Two parts overlap when their interiors share area; touching edges and corners are fine.
+        private static bool Overlap(List<double[]> a, List<double[]> b)
+        {
+            for (int i = 0; i < a.Count; i++)
+                for (int j = 0; j < b.Count; j++)
+                    if (SegmentsCross(a[i], a[(i + 1) % a.Count], b[j], b[(j + 1) % b.Count])) return true;
+            Func<List<double[]>, List<double[]>, bool> probe = (p, q) =>
+            {
+                double cx = p.Average(v => v[0]), cy = p.Average(v => v[1]);
+                if (Inside(new[] { cx, cy }, q)) return true;
+                for (int i = 0; i < p.Count; i++)
+                {
+                    double[] u = p[i], v = p[(i + 1) % p.Count];
+                    if (Inside(u, q) || Inside(new[] { (u[0] + v[0]) / 2, (u[1] + v[1]) / 2 }, q)) return true;
+                }
+                return false;
+            };
+            return probe(a, b) || probe(b, a);
+        }
+
+        // Splits each segment where it crosses the outline q and drops the pieces inside q (strictly: pieces along q's edge stay).
+        private static List<double[]> HideBehind(List<double[]> segments, List<double[]> q, ref bool hid)
+        {
+            List<double[]> kept = new List<double[]>();
+            foreach (double[] g in segments)
+            {
+                double[] a = { g[0], g[1] }, b = { g[2], g[3] };
+                List<double> ts = new List<double> { 0, 1 };
+                for (int i = 0; i < q.Count; i++)
+                {
+                    double[] c = q[i], d = q[(i + 1) % q.Count];
+                    double den = (b[0] - a[0]) * (d[1] - c[1]) - (b[1] - a[1]) * (d[0] - c[0]);
+                    if (Math.Abs(den) < 1e-12) continue;
+                    double t = ((c[0] - a[0]) * (d[1] - c[1]) - (c[1] - a[1]) * (d[0] - c[0])) / den;
+                    double u = ((c[0] - a[0]) * (b[1] - a[1]) - (c[1] - a[1]) * (b[0] - a[0])) / den;
+                    if (t > 1e-9 && t < 1 - 1e-9 && u >= -1e-9 && u <= 1 + 1e-9) ts.Add(t);
+                }
+                ts.Sort();
+                for (int k = 0; k + 1 < ts.Count; k++)
+                {
+                    double t0 = ts[k], t1 = ts[k + 1];
+                    if (t1 - t0 < 1e-9) continue;
+                    double tm = (t0 + t1) / 2;
+                    if (Inside(new[] { a[0] + (b[0] - a[0]) * tm, a[1] + (b[1] - a[1]) * tm }, q)) { hid = true; continue; }
+                    double[] piece = { a[0] + (b[0] - a[0]) * t0, a[1] + (b[1] - a[1]) * t0, a[0] + (b[0] - a[0]) * t1, a[1] + (b[1] - a[1]) * t1 };
+                    double[] last = kept.Count > 0 ? kept[kept.Count - 1] : null;
+                    if (last != null && Math.Abs(last[2] - piece[0]) < 1e-9 && Math.Abs(last[3] - piece[1]) < 1e-9 && Math.Abs(Cross(new[] { last[0], last[1] }, new[] { last[2], last[3] }, new[] { piece[2], piece[3] })) < 1e-9)
+                    { last[2] = piece[2]; last[3] = piece[3]; }
+                    else kept.Add(piece);
+                }
+            }
+            return kept;
+        }
+
+        // The rightmost point of the outline at height y (where a note's leader starts); the bounding box edge if the line misses it.
+        private static double RightAt(Part part, double y)
+        {
+            List<double[]> p = part.Outline();
+            double best = Double.NegativeInfinity;
+            for (int i = 0; i < p.Count; i++)
+            {
+                double[] u = p[i], v = p[(i + 1) % p.Count];
+                if ((u[1] - y) * (v[1] - y) > 0 || u[1] == v[1]) { if (u[1] == y) best = Math.Max(best, Math.Max(u[0], v[0])); continue; }
+                best = Math.Max(best, u[0] + (y - u[1]) * (v[0] - u[0]) / (v[1] - u[1]));
+            }
+            return Double.IsInfinity(best) ? part.X1 : best;
+        }
         private static readonly System.Text.RegularExpressions.Regex PartId = new System.Text.RegularExpressions.Regex("^[A-Za-z0-9_-]{1,30}$");
 
         private static List<IDictionary<string, object>> Objects(IDictionary<string, object> input, string key, int max, bool required)
@@ -324,49 +458,177 @@ namespace SmartConnector
             DetailResult r = new DetailResult();
             r.Scale = scale; r.Annotation = place.Mode; r.Place = place; r.HeightUnit = place.Mode == "paper" ? 1 : scale;
 
+            // ---- view ----
+            string view = "section";
+            if (input.ContainsKey("view"))
+            {
+                view = Words(input, "view", "params", 20, true);
+                if (view != "section" && view != "elevation" && view != "plan") throw new ToolException("params.view must be section, elevation or plan.");
+            }
+            bool cut = view == "section";
+
             // ---- parts ----
             List<Part> parts = new List<Part>();
-            List<IDictionary<string, object>> given = Objects(input, "parts", 60, true);
+            List<IDictionary<string, object>> given = Objects(input, "parts", MaxCustomParts, true);
             for (int i = 0; i < given.Count; i++)
             {
                 string at = "params.parts[" + i + "]";
                 IDictionary<string, object> p = given[i];
-                OnlyKeys(p, at, "id", "material", "x0", "y0", "x1", "y1");
+                OnlyKeys(p, at, "id", "material", "x0", "y0", "x1", "y1", "points", "repeat", "hatch");
                 string id = Words(p, "id", at, 30, true);
                 if (!PartId.IsMatch(id)) throw new ToolException(at + ": id may use letters, digits, '_' and '-' only (up to 30).");
-                if (parts.Any(q => String.Equals(q.Id, id, StringComparison.OrdinalIgnoreCase))) throw new ToolException(at + ": id '" + id + "' is used twice.");
                 string material = Words(p, "material", at, 20, true);
                 if (Array.IndexOf(Materials, material) < 0) throw new ToolException(at + ": material must be one of: " + String.Join(", ", Materials) + ".");
-                Part part = new Part { Id = id, Material = material, X0 = Coord(p, "x0", at, -10000, 10000), Y0 = Coord(p, "y0", at, -10000, 10000), X1 = Coord(p, "x1", at, -10000, 10000), Y1 = Coord(p, "y1", at, -10000, 10000) };
-                if (part.X1 - part.X0 < 1 || part.Y1 - part.Y0 < 1) throw new ToolException(at + " ('" + id + "'): x1 must exceed x0 and y1 must exceed y0, each by at least 1 mm.");
-                parts.Add(part);
-            }
-            for (int i = 0; i < parts.Count; i++)
-                for (int j = i + 1; j < parts.Count; j++)
+
+                Part shape = new Part { Id = id, Material = material };
+                if (p.ContainsKey("points"))
                 {
-                    double w = Math.Min(parts[i].X1, parts[j].X1) - Math.Max(parts[i].X0, parts[j].X0);
-                    double h = Math.Min(parts[i].Y1, parts[j].Y1) - Math.Max(parts[i].Y0, parts[j].Y0);
-                    if (w > 0.01 && h > 0.01) throw new ToolException("The parts '" + parts[i].Id + "' and '" + parts[j].Id + "' overlap by " + Mm(w) + " x " + Mm(h) + " mm. Check the dimensions read from the pictures.");
+                    if (p.ContainsKey("x0") || p.ContainsKey("y0") || p.ContainsKey("x1") || p.ContainsKey("y1")) throw new ToolException(at + " ('" + id + "'): give either points or x0, y0, x1, y1, not both.");
+                    System.Collections.IEnumerable seq = p["points"] as System.Collections.IEnumerable;
+                    List<double[]> pts = new List<double[]>();
+                    if (seq != null && !(p["points"] is string)) foreach (object o in seq) { double[] q = Pair(o); if (q == null) { pts = null; break; } pts.Add(q); }
+                    if (pts == null || pts.Count < 3 || pts.Count > 100) throw new ToolException(at + " ('" + id + "'): points must be a list of 3 to 100 [x, y] points in mm (within 10 m).");
+                    if (pts.Count > 3 && Math.Abs(pts[0][0] - pts[pts.Count - 1][0]) < 1e-9 && Math.Abs(pts[0][1] - pts[pts.Count - 1][1]) < 1e-9) pts.RemoveAt(pts.Count - 1);   // closing point repeated
+                    for (int k = 0; k < pts.Count; k++)
+                        if (Math.Abs(pts[k][0] - pts[(k + 1) % pts.Count][0]) < 0.01 && Math.Abs(pts[k][1] - pts[(k + 1) % pts.Count][1]) < 0.01) throw new ToolException(at + " ('" + id + "'): point " + k + " repeats the next point.");
+                    for (int k = 0; k < pts.Count; k++)
+                        for (int m = k + 1; m < pts.Count; m++)
+                        {
+                            if (m == k + 1 || (k == 0 && m == pts.Count - 1)) continue;   // neighbouring edges share a point
+                            if (SegmentsTouch(pts[k], pts[(k + 1) % pts.Count], pts[m], pts[(m + 1) % pts.Count])) throw new ToolException(at + " ('" + id + "'): the outline crosses itself (edges " + k + " and " + m + ").");
+                        }
+                    if (Math.Abs(Area(pts)) < 1) throw new ToolException(at + " ('" + id + "'): the points enclose no area.");
+                    shape.Pts = pts;
+                    shape.X0 = pts.Min(q => q[0]); shape.X1 = pts.Max(q => q[0]); shape.Y0 = pts.Min(q => q[1]); shape.Y1 = pts.Max(q => q[1]);
                 }
+                else
+                {
+                    shape.X0 = Coord(p, "x0", at, -10000, 10000); shape.Y0 = Coord(p, "y0", at, -10000, 10000); shape.X1 = Coord(p, "x1", at, -10000, 10000); shape.Y1 = Coord(p, "y1", at, -10000, 10000);
+                    if (shape.X1 - shape.X0 < 1 || shape.Y1 - shape.Y0 < 1) throw new ToolException(at + " ('" + id + "'): x1 must exceed x0 and y1 must exceed y0, each by at least 1 mm.");
+                }
+
+                if (p.ContainsKey("hatch"))
+                {
+                    if (p["hatch"] is string)
+                    {
+                        if ((string)p["hatch"] != "none") throw new ToolException(at + ": hatch must be \"none\" or an object {pattern, scale?, angle?}.");
+                        shape.HatchPattern = "none";
+                    }
+                    else
+                    {
+                        IDictionary<string, object> h = p["hatch"] as IDictionary<string, object>;
+                        if (h == null) throw new ToolException(at + ": hatch must be \"none\" or an object {pattern, scale?, angle?}.");
+                        OnlyKeys(h, at + ".hatch", "pattern", "scale", "angle");
+                        shape.HatchPattern = Words(h, "pattern", at + ".hatch", 31, true).ToUpperInvariant();
+                        if (h.ContainsKey("scale")) shape.HatchScale = Coord(h, "scale", at + ".hatch", 0.001, 100);
+                        if (h.ContainsKey("angle")) shape.HatchAngle = Coord(h, "angle", at + ".hatch", -360, 360);
+                    }
+                }
+
+                int count = 1; double px = 0, py = 0;
+                if (p.ContainsKey("repeat"))
+                {
+                    IDictionary<string, object> rep = p["repeat"] as IDictionary<string, object>;
+                    if (rep == null) throw new ToolException(at + ": repeat must be an object {count, pitch_x?, pitch_y?}.");
+                    OnlyKeys(rep, at + ".repeat", "count", "pitch_x", "pitch_y");
+                    double c = Coord(rep, "count", at + ".repeat", 2, MaxCustomParts);
+                    if (Math.Truncate(c) != c) throw new ToolException(at + ".repeat: count must be a whole number.");
+                    count = (int)c;
+                    if (rep.ContainsKey("pitch_x")) px = Coord(rep, "pitch_x", at + ".repeat", -10000, 10000);
+                    if (rep.ContainsKey("pitch_y")) py = Coord(rep, "pitch_y", at + ".repeat", -10000, 10000);
+                    if (Math.Abs(px) < 1 && Math.Abs(py) < 1) throw new ToolException(at + ".repeat: give pitch_x or pitch_y of at least 1 mm.");
+                }
+                for (int k = 0; k < count; k++)
+                {
+                    string pid = count == 1 ? id : id + "-" + (k + 1);
+                    if (parts.Any(q => String.Equals(q.Id, pid, StringComparison.OrdinalIgnoreCase) || String.Equals(q.Group, pid, StringComparison.OrdinalIgnoreCase)) || (count > 1 && parts.Any(q => String.Equals(q.Id, id, StringComparison.OrdinalIgnoreCase))))
+                        throw new ToolException(at + ": id '" + pid + "' is used twice.");
+                    if (parts.Count >= MaxCustomParts) throw new ToolException("More than " + MaxCustomParts + " parts after repeats. Split the view into two calls.");
+                    double dx = px * k, dy = py * k;
+                    Part part = new Part
+                    {
+                        Id = pid, Group = count > 1 ? id : null, Material = material, HatchPattern = shape.HatchPattern, HatchScale = shape.HatchScale, HatchAngle = shape.HatchAngle,
+                        X0 = shape.X0 + dx, X1 = shape.X1 + dx, Y0 = shape.Y0 + dy, Y1 = shape.Y1 + dy,
+                        Pts = shape.Pts == null ? null : shape.Pts.Select(q => new[] { q[0] + dx, q[1] + dy }).ToList()
+                    };
+                    if (Math.Abs(part.X0) > 10000 || Math.Abs(part.X1) > 10000 || Math.Abs(part.Y0) > 10000 || Math.Abs(part.Y1) > 10000) throw new ToolException(at + ": repeat '" + pid + "' falls outside 10 m.");
+                    parts.Add(part);
+                }
+            }
+            if (cut)
+                for (int i = 0; i < parts.Count; i++)
+                    for (int j = i + 1; j < parts.Count; j++)
+                    {
+                        double w = Math.Min(parts[i].X1, parts[j].X1) - Math.Max(parts[i].X0, parts[j].X0);
+                        double h = Math.Min(parts[i].Y1, parts[j].Y1) - Math.Max(parts[i].Y0, parts[j].Y0);
+                        if (w <= 0.01 || h <= 0.01) continue;
+                        if (parts[i].Pts == null && parts[j].Pts == null)
+                            throw new ToolException("The parts '" + parts[i].Id + "' and '" + parts[j].Id + "' overlap by " + Mm(w) + " x " + Mm(h) + " mm. Check the dimensions read from the pictures.");
+                        if (Overlap(parts[i].Outline(), parts[j].Outline()))
+                            throw new ToolException("The parts '" + parts[i].Id + "' and '" + parts[j].Id + "' overlap. In a section, parts are cut and cannot overlap; check the points.");
+                    }
+            // elevation and plan: a part listed later is nearer the viewer and hides the lines of earlier parts behind it
+            bool hideLines = !cut;
+            object hiddenFlag;
+            if (input.TryGetValue("hidden_lines", out hiddenFlag)) { if (!(hiddenFlag is bool)) throw new ToolException("params.hidden_lines must be true or false."); hideLines = (bool)hiddenFlag && !cut; }
+            List<string> hiddenParts = new List<string>();
+            if (hideLines)
+                for (int i = 0; i < parts.Count; i++)
+                {
+                    List<double[]> o = parts[i].Outline();
+                    List<double[]> segs = new List<double[]>();
+                    for (int k = 0; k < o.Count; k++) segs.Add(new[] { o[k][0], o[k][1], o[(k + 1) % o.Count][0], o[(k + 1) % o.Count][1] });
+                    bool hid = false;
+                    for (int j = i + 1; j < parts.Count; j++)
+                    {
+                        if (Math.Min(parts[i].X1, parts[j].X1) - Math.Max(parts[i].X0, parts[j].X0) <= 0.01 || Math.Min(parts[i].Y1, parts[j].Y1) - Math.Max(parts[i].Y0, parts[j].Y0) <= 0.01) continue;
+                        segs = HideBehind(segs, parts[j].Outline(), ref hid);
+                    }
+                    if (!hid) continue;
+                    parts[i].Visible = segs;
+                    hiddenParts.Add(parts[i].Id);
+                    if (parts[i].HatchPattern != null && parts[i].HatchPattern != "none") r.Warnings.Add("The hatch of '" + parts[i].Id + "' was left out because nearer parts hide part of it.");
+                }
+
             double minX = parts.Min(q => q.X0), minY = Math.Min(0, parts.Min(q => q.Y0)), maxX = parts.Max(q => q.X1), maxY = parts.Max(q => q.Y1);
+            if (view == "plan") minY = parts.Min(q => q.Y0);
             double bx0 = minX, by0 = parts.Min(q => q.Y0);
             if (maxX - minX > 10000 || maxY - minY > 10000) throw new ToolException("The parts span more than 10 m; check the dimensions.");
+
+            // ---- lines (LED strips and other single lines that belong to the drawing, not to the annotation) ----
+            List<IDictionary<string, object>> lineSpecs = Objects(input, "lines", 100, false);
+            List<double[]> lineGeo = new List<double[]>();
+            List<string> lineLayers = new List<string>();
+            for (int i = 0; i < lineSpecs.Count; i++)
+            {
+                string at = "params.lines[" + i + "]";
+                OnlyKeys(lineSpecs[i], at, "from", "to", "kind");
+                double[] a = Pair(lineSpecs[i].ContainsKey("from") ? lineSpecs[i]["from"] : null), b = Pair(lineSpecs[i].ContainsKey("to") ? lineSpecs[i]["to"] : null);
+                if (a == null || b == null) throw new ToolException(at + ": 'from' and 'to' must be [x, y] points in mm (within 10 m).");
+                if (Math.Abs(a[0] - b[0]) < 0.01 && Math.Abs(a[1] - b[1]) < 0.01) throw new ToolException(at + ": 'from' and 'to' are the same point.");
+                string kind = lineSpecs[i].ContainsKey("kind") ? Words(lineSpecs[i], "kind", at, 10, true) : "line";
+                if (kind != "led" && kind != "line") throw new ToolException(at + ": kind must be led (lighting layer " + LLight + ") or line (outline layer " + LOutline + ").");
+                lineGeo.Add(new[] { a[0], a[1], b[0], b[1] });
+                lineLayers.Add(kind == "led" ? LLight : LOutline);
+            }
 
             // ---- the caller's annotation ----
             List<IDictionary<string, object>> levels = Objects(input, "levels", 12, false);
             List<IDictionary<string, object>> notes = Objects(input, "notes", 30, false);
             List<IDictionary<string, object>> dims = Objects(input, "dimensions", 30, false);
-            bool overall = true, floor = true;
+            bool overall = true, floor = view != "plan";
             object flag;
             if (input.TryGetValue("overall_dimensions", out flag)) { if (!(flag is bool)) throw new ToolException("params.overall_dimensions must be true or false."); overall = (bool)flag; }
             if (input.TryGetValue("floor", out flag)) { if (!(flag is bool)) throw new ToolException("params.floor must be true or false."); floor = (bool)flag; }
-            string titleText = "SECTION";
+            string titleText = view.ToUpperInvariant();
             if (input.ContainsKey("title")) titleText = Words(input, "title", "params", 80, true);
 
             Emitter em = new Emitter(r, ox, oy, scale, dimStyle, textStyle, dimScale);
             em.Layers();
+            if (lineLayers.Contains(LLight)) r.Items.Add(Json.Object("op", "layer", "name", LLight, "color", 2, "lineweight", 18));
             if (floor) em.Floor(minX - 26 * d, maxX + 12 * d);
-            em.Parts(parts);
+            em.Parts(parts, cut);
+            for (int i = 0; i < lineGeo.Count; i++) em.Line(lineGeo[i][0], lineGeo[i][1], lineGeo[i][2], lineGeo[i][3], lineLayers[i]);
 
             int maxChain = 0;
             for (int i = 0; i < dims.Count; i++)
@@ -409,16 +671,19 @@ namespace SmartConnector
                 OnlyKeys(notes[i], at, "part", "text", "y");
                 string partId = Words(notes[i], "part", at, 30, true);
                 Part target = parts.FirstOrDefault(q => String.Equals(q.Id, partId, StringComparison.OrdinalIgnoreCase));
+                List<Part> members = parts.Where(q => String.Equals(q.Group, partId, StringComparison.OrdinalIgnoreCase)).ToList();
+                if (target == null && members.Count > 0) target = members.OrderByDescending(q => q.X1).First();   // a group: its rightmost member, nearest the notes
                 if (target == null) throw new ToolException(at + ": part '" + partId + "' is not in params.parts.");
                 double y = notes[i].ContainsKey("y") ? Coord(notes[i], "y", at, target.Y0, target.Y1) : (target.Y0 + target.Y1) / 2.0;
-                em.Note(target.X1, y, Words(notes[i], "text", at, 120, true), noteX);
+                em.Note(RightAt(target, y), y, Words(notes[i], "text", at, 120, true), noteX);
                 noted.Add(target.Id);
+                foreach (Part m in members) noted.Add(m.Id);
             }
             em.CheckNoteGaps(r);
             if (notes.Count == 0) r.Warnings.Add("No notes were given: the materials and thicknesses are not annotated. Add params.notes from the specification.");
             else
             {
-                string[] bare = parts.Where(q => !noted.Contains(q.Id)).Select(q => q.Id).ToArray();
+                string[] bare = parts.Where(q => !noted.Contains(q.Id)).Select(q => q.Group ?? q.Id).Distinct().ToArray();
                 if (bare.Length > 0) r.Warnings.Add("Parts without a note: " + String.Join(", ", bare) + ". Add a note or confirm that they are covered by another.");
             }
 
@@ -428,15 +693,20 @@ namespace SmartConnector
 
             Place(r, place, scale, dimScale, bx0, by0, maxX, maxY, ox, oy);
             r.Summary["template"] = CustomSection;
+            r.Summary["view"] = view;
             r.Summary["annotation"] = place.Mode;
             r.Summary["scale"] = "1:" + scale;
-            r.Summary["parts"] = parts.Select(q => q.Id).ToArray();
+            r.Summary["parts"] = parts.Select(q => q.Group ?? q.Id).Distinct().ToArray();
+            r.Summary["part_count"] = parts.Count;
+            if (hiddenParts.Count > 0) r.Summary["partly_hidden_parts"] = hiddenParts.ToArray();
             r.Summary["materials"] = parts.Select(q => q.Material).Distinct().ToArray();
             r.Summary["overall_width"] = maxX - minX;
             r.Summary["overall_height"] = maxY - minY;
             r.Summary["units"] = "mm";
             r.Summary["note"] = "Every dimension, material and note is as given; the generator does not check the design against any code or against the pictures.";
             r.Summary["steps"] = r.Items.Count + r.PaperItems.Count;
+            if (r.Items.Count > AutoCadPlan.MaxItems || r.PaperItems.Count > AutoCadPlan.MaxItems)
+                throw new ToolException("This view needs " + Math.Max(r.Items.Count, r.PaperItems.Count) + " steps in one plan; the most is " + AutoCadPlan.MaxItems + ". Split it into two calls (for example half of the repeated parts each).");
             AutoCadPlan.Parse(r.Items.Cast<object>().ToArray());
             if (r.PaperItems.Count > 0) AutoCadPlan.Parse(r.PaperItems.Cast<object>().ToArray());
             return r;
