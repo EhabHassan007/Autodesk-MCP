@@ -16,6 +16,86 @@ namespace SmartConnector
         internal List<Dictionary<string, object>> PaperItems = new List<Dictionary<string, object>>();   // annotation for the layout (annotation = paper)
         internal double HeightUnit = 10;        // model millimetres per millimetre of text height: the scale in model space, 1 in paper space
         internal string Annotation = "model";   // model, paper or none
+        internal HashSet<object> Ann = new HashSet<object>();   // the plan items that are annotation (by reference), so placement never depends on a layer name
+    }
+
+    // One layer a detail can use: name and the settings it is created with when the drawing lacks it.
+    internal sealed class LayerSpec
+    {
+        internal string Name, Linetype;
+        internal int Color, Lineweight = -1;   // Lineweight in hundredths of a millimetre; -1 = leave the layer's default
+        internal bool GeneratorOwn;            // not a layer from the office sheets: the generator's own
+        internal LayerSpec(string name, int color, int lineweight) { Name = name; Color = color; Lineweight = lineweight; }
+    }
+
+    // What is known about the drawing a detail will be drawn into: its layers and blocks. null facts = not connected (a preview).
+    internal sealed class DrawingFacts
+    {
+        internal HashSet<string> Layers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        internal HashSet<string> Blocks = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    }
+
+    // The layers a detail uses for each role. generic: the generator's own set. ao: the layers of the office's counter sheets.
+    internal sealed class DetailScheme
+    {
+        internal string Name = "generic";
+        internal LayerSpec Cut, Outline, Thin, Hatch, Dim, Text, Light, Floor, Viewport, Level, Title;
+        internal bool FixedSix = true;   // generic: the six layers are always created, in this order, as before
+        internal Func<string, LayerSpec> CutByMaterial;
+        internal Func<string, bool, LayerSpec> HatchByMaterial;
+        internal LayerSpec CutFor(string material) { return CutByMaterial == null ? Cut : CutByMaterial(material); }
+        internal LayerSpec HatchFor(string material, bool cut) { return HatchByMaterial == null ? Hatch : HatchByMaterial(material, cut); }
+        internal static DetailScheme Generic()
+        {
+            return new DetailScheme
+            {
+                Cut = new LayerSpec("A-DETL-WIDE", 214, 50), Outline = new LayerSpec("A-DETL", 90, 25), Thin = new LayerSpec("A-DETL-THIN", 151, 13), Hatch = new LayerSpec("A-DETL-GENF", 92, 9),
+                Dim = new LayerSpec("A-ANNO-DIMS", 211, 13), Text = new LayerSpec("G-ANNO-TEXT", 231, 13), Light = new LayerSpec("A-DETL-LITE", 2, 18),
+                Viewport = new LayerSpec("G-ANNO-VPRT", 8, -1) { GeneratorOwn = true }
+            }.WithFloor();
+        }
+
+        private DetailScheme WithFloor() { Floor = Cut; Level = Text; Title = Text; return this; }
+
+        // The layers of the office's counter sheets, read from the reference DXFs: one section layer per material (colour and lineweight as there),
+        // hatches on the material's own layer, finish hatches on AO_N_HATCH, lighting on AO-N_LIGHTING, leader labels on AO_DIMZ, dimensions on 0_AO_DIMZ.
+        // A layer the sheets do not have for a material (stone, marble) is the generator's own and is reported as such.
+        internal static DetailScheme Ao(string view)
+        {
+            LayerSpec mdf = new LayerSpec("AO-MDF_SECTION_PLAN", 34, 25), corian = new LayerSpec("AO-CORIAN C-TOP", 43, 20), steel = new LayerSpec("AO-STAINLESS STEEL", 42, 20),
+                glass = new LayerSpec("AO-GLASS_SECTION_PLAN", 140, 25), stone = new LayerSpec("AO-STONE_SECTION_PLAN", 8, 25) { GeneratorOwn = true },
+                outline = view == "plan" ? new LayerSpec("AO-COUNTER", 4, 5) : new LayerSpec("AO_ELEVATION 3", 8, -1), hatch = new LayerSpec("AO_N_HATCH", 8, -1);
+            DetailScheme sc = new DetailScheme
+            {
+                Name = "ao", FixedSix = false, Cut = mdf, Outline = outline, Thin = new LayerSpec("AO_DIMZ", 1, -1), Hatch = hatch, Dim = new LayerSpec("0_AO_DIMZ", 1, 0),
+                Text = new LayerSpec("AO_DRAWING TITLE BASE", 7, -1), Light = new LayerSpec("AO-N_LIGHTING", 51, -1), Floor = outline, Viewport = new LayerSpec("AO-MV", 8, -1),
+                Level = new LayerSpec("AO-Z.Lvl", 181, -1), Title = new LayerSpec("0", 7, -1)
+            };
+            sc.CutByMaterial = m =>
+            {
+                switch (m)
+                {
+                    case "corian": return corian;
+                    case "steel": return steel;
+                    case "glass": return glass;
+                    case "stone": case "marble": return stone;
+                    case "outline": return outline;
+                    default: return mdf;      // mdf, ply: joinery boards share the MDF section layer
+                }
+            };
+            sc.HatchByMaterial = (m, cut) =>
+            {
+                if (!cut) return hatch;
+                switch (m)
+                {
+                    case "corian": return corian;     // the sheets hatch section materials on the material's own layer
+                    case "steel": return steel;
+                    case "mdf": case "ply": return mdf;
+                    default: return hatch;            // stone, marble, glass and finishes: AO_N_HATCH
+                }
+            };
+            return sc;
+        }
     }
 
     // Where the annotation goes. model: in model space at the detail scale (the original behaviour). paper: dimensions, notes, levels and titles
@@ -25,8 +105,12 @@ namespace SmartConnector
         internal string Mode = "model";
         internal double[] PaperCentre;          // paper position the detail's centre is shown at (centre of the viewport)
         internal double[] ModelCentre;          // model point at that centre; null = the centre of the parts
-        internal string LevelBlock, LevelTag = "LEVEL";
-        internal double LevelBlockScale = 1;
+        internal string LevelBlock, LeaderBlock, TitleBlock;   // block names to use instead of the office ones (level indicator, Multiple Leader Lab, DWG-VIEWTITLE)
+        internal double LevelBlockScale = 0;     // 0 = the office level block's own scale (0.015984), 1 for any other block
+        internal double NoteWidth = 45;          // paper millimetres a leader label wraps to
+        internal string SheetProject, SheetNo, ViewNo;   // the view title block's TOP-TITLE, SHEET-NO and KY, when given
+        internal string Scheme = "auto";        // auto, generic or ao: which layer set the detail uses
+        internal DrawingFacts Facts;            // the drawing's layers and blocks, when known
     }
 
     // Detail Generator. A brief (a template name and a few parameters) becomes an apply_plan plan. No AutoCAD calls happen
@@ -41,7 +125,6 @@ namespace SmartConnector
         private const int NoteGapDenominators = 5;   // notes closer than this many paper millimetres are reported
 
         // Layers, as in the office set, with this generator's own lineweights (hundredths of a millimetre).
-        private const string LCut = "A-DETL-WIDE", LOutline = "A-DETL", LThin = "A-DETL-THIN", LHatch = "A-DETL-GENF", LDim = "A-ANNO-DIMS", LText = "G-ANNO-TEXT", LLight = "A-DETL-LITE";
 
         private static readonly string[] Allowed =
         {
@@ -116,11 +199,53 @@ namespace SmartConnector
             private readonly double ox, oy, d, dimScale;
             private readonly int scale;
             private readonly string dimStyle, textStyle;
+            internal readonly DetailScheme S;
+            private readonly List<LayerSpec> used = new List<LayerSpec>();
             internal readonly List<double> NoteYs = new List<double>();
+            private readonly string levelBlock, leaderBlock, titleBlock;   // office blocks to use (paper mode), or null
+            private readonly bool paper;
+            private readonly List<NoteSpec> notes = new List<NoteSpec>();
 
-            internal Emitter(DetailResult result, double originX, double originY, int detailScale, string dimensionStyle, string textStyleName, double dimensionScale)
+            private sealed class NoteSpec { internal double TargetX, TargetY, NoteX; internal string Text; }
+
+            internal Emitter(DetailResult result, double originX, double originY, int detailScale, string dimensionStyle, string textStyleName, double dimensionScale, DetailScheme scheme)
             {
-                r = result; ox = originX; oy = originY; scale = detailScale; d = detailScale; dimStyle = dimensionStyle; textStyle = textStyleName; dimScale = dimensionScale;
+                r = result; ox = originX; oy = originY; scale = detailScale; d = detailScale; dimStyle = dimensionStyle; textStyle = textStyleName; dimScale = dimensionScale; S = scheme;
+                DetailAnnotation place = result.Place ?? new DetailAnnotation();
+                paper = place.Mode == "paper";
+                levelBlock = BlockFor(place, place.LevelBlock, OfficeLevelBlock, result);
+                leaderBlock = BlockFor(place, place.LeaderBlock, OfficeLeaderBlock, result);
+                titleBlock = BlockFor(place, place.TitleBlock, OfficeTitleBlock, result);
+            }
+
+            private LayerSpec Use(LayerSpec spec)
+            {
+                if (spec.Name != "0" && !used.Any(u => u.Name == spec.Name)) used.Add(spec);   // layer 0 always exists and is never changed
+                return spec;
+            }
+
+            private Dictionary<string, object> Ann(Dictionary<string, object> item)
+            {
+                r.Items.Add(item);
+                r.Ann.Add(item);
+                return item;
+            }
+
+            // Puts a layer step for every layer used at the front of the plan, in order of first use.
+            internal void Finish()
+            {
+                List<Dictionary<string, object>> steps = new List<Dictionary<string, object>>();
+                foreach (LayerSpec u in used)
+                {
+                    Dictionary<string, object> step = Json.Object("op", "layer", "name", u.Name, "color", u.Color);
+                    if (u.Lineweight >= 0) step["lineweight"] = u.Lineweight;
+                    if (u.Linetype != null) step["linetype"] = u.Linetype;
+                    steps.Add(step);
+                }
+                r.Items.InsertRange(0, steps);
+                r.Summary["layer_scheme"] = S.Name;
+                string[] own = used.Where(u => u.GeneratorOwn).Select(u => u.Name).ToArray();
+                if (own.Length > 0) r.Summary["generator_layers"] = own;
             }
 
             internal double TextH { get { return 2.5 * d; } }                         // notes and levels: the reference sheets use 2.5 mm leader text
@@ -128,13 +253,13 @@ namespace SmartConnector
 
             internal void Layers()
             {
-                Action<string, int, int> layer = (name, color, lw) => r.Items.Add(Json.Object("op", "layer", "name", name, "color", color, "lineweight", lw));
-                layer(LCut, 214, 50); layer(LOutline, 90, 25); layer(LThin, 151, 13); layer(LHatch, 92, 9); layer(LDim, 211, 13); layer(LText, 231, 13);
+                if (!S.FixedSix) return;
+                Use(S.Cut); Use(S.Outline); Use(S.Thin); Use(S.Hatch); Use(S.Dim); Use(S.Text);
             }
 
             internal void Floor(double fromX, double toX)
             {
-                r.Items.Add(Json.Object("op", "line", "layer", LCut, "start", P(fromX, 0), "end", P(toX, 0)));
+                r.Items.Add(Json.Object("op", "line", "layer", Use(S.Floor).Name, "start", P(fromX, 0), "end", P(toX, 0)));
             }
 
             internal void Parts(List<Part> parts)
@@ -147,9 +272,9 @@ namespace SmartConnector
             {
                 foreach (Part b in parts)
                 {
-                    if (b.Visible != null) { foreach (double[] g in b.Visible) Line(g[0], g[1], g[2], g[3], LOutline); continue; }   // partly hidden: its visible lines only
+                    if (b.Visible != null) { foreach (double[] g in b.Visible) Line(g[0], g[1], g[2], g[3], S.Outline); continue; }   // partly hidden: its visible lines only
                     List<double[]> drawn = b.Pts ?? b.Outline();
-                    Dictionary<string, object> poly = Json.Object("op", "polyline", "id", b.Id, "layer", cut ? LCut : LOutline, "points", drawn.Select(q => (object)P(q[0], q[1])).ToArray(), "closed", true);
+                    Dictionary<string, object> poly = Json.Object("op", "polyline", "id", b.Id, "layer", Use(cut ? S.CutFor(b.Material) : S.Outline).Name, "points", drawn.Select(q => (object)P(q[0], q[1])).ToArray(), "closed", true);
                     if (b.Bulges != null) poly["bulges"] = b.Bulges.Select(v => (object)Math.Round(v, 9)).ToArray();
                     r.Items.Add(poly);
                 }
@@ -169,7 +294,7 @@ namespace SmartConnector
                         case "glass": case "outline": continue;                                   // outline only
                         default: pattern = "ANSI31"; factor = 0.6; break;
                     }
-                    Dictionary<string, object> hatch = Json.Object("op", "hatch", "layer", LHatch, "pattern", pattern, "boundary", b.Id);
+                    Dictionary<string, object> hatch = Json.Object("op", "hatch", "layer", Use(S.HatchFor(b.Material, cut)).Name, "pattern", pattern, "boundary", b.Id);
                     if (factor > 0) hatch["scale"] = Math.Round(factor * d, 3);
                     if (b.HatchPattern != null && b.HatchAngle != 0) hatch["angle"] = b.HatchAngle;
                     if (color > 0) hatch["color"] = color;
@@ -177,47 +302,116 @@ namespace SmartConnector
                 }
             }
 
-            internal void Line(double x0, double y0, double x1, double y1, string layer)
+            internal void Line(double x0, double y0, double x1, double y1, LayerSpec layer)
             {
-                r.Items.Add(Json.Object("op", "line", "layer", layer, "start", P(x0, y0), "end", P(x1, y1)));
+                r.Items.Add(Json.Object("op", "line", "layer", Use(layer).Name, "start", P(x0, y0), "end", P(x1, y1)));
             }
 
             internal void Dim(double x0, double y0, double x1, double y1, double lx, double ly, double angle)
             {
-                Dictionary<string, object> s = Json.Object("op", "dim_rotated", "layer", LDim, "from", P(x0, y0), "to", P(x1, y1), "location", P(lx, ly), "angle", angle);
+                Dictionary<string, object> s = Json.Object("op", "dim_rotated", "layer", Use(S.Dim).Name, "from", P(x0, y0), "to", P(x1, y1), "location", P(lx, ly), "angle", angle);
                 if (dimStyle != null) s["style"] = dimStyle;
                 s["scale"] = dimScale > 0 ? dimScale : (double)scale;
-                r.Items.Add(s);
+                Ann(s);
             }
 
             internal void Text(double x, double y, string text, double height)
             {
-                Dictionary<string, object> t = Json.Object("op", "text", "layer", LText, "point", P(x, y), "text", text, "height", height);
+                Dictionary<string, object> t = Json.Object("op", "text", "layer", Use(S.Text).Name, "point", P(x, y), "text", text, "height", height);
                 if (textStyle != null) t["style"] = textStyle;
-                r.Items.Add(t);
+                Ann(t);
             }
 
-            internal void Level(double y, string label, double markX)
+            // A level marker: the office level block with the elevation and the description as its attributes (paper mode), else a drawn marker and text.
+            internal void Level(double y, string elevation, string description, double markX)
             {
-                r.Items.Add(Json.Object("op", "line", "layer", LThin, "start", P(markX, y), "end", P(-30 * d, y)));
-                if (r.Place != null && r.Place.LevelBlock != null)
+                if (levelBlock != null)
                 {
-                    // the office level block carries the text in an attribute; it stands where the drawn marker and text would be
-                    r.Items.Add(Json.Object("op", "insert", "layer", LText, "name", r.Place.LevelBlock, "point", P(markX, y), "scale", r.Place.LevelBlockScale,
-                        "attributes", Json.Object(r.Place.LevelTag, label)));
+                    DetailAnnotation place = r.Place;
+                    double sc = place.LevelBlockScale > 0 ? place.LevelBlockScale : (String.Equals(levelBlock, OfficeLevelBlock, StringComparison.OrdinalIgnoreCase) ? OfficeLevelScale : 1);
+                    Dictionary<string, object> attributes = Json.Object("@elevation", elevation);
+                    if (!String.IsNullOrEmpty(description)) attributes["@description"] = description;
+                    Ann(Json.Object("op", "insert", "layer", Use(S.Level).Name, "name", levelBlock, "point", P(markX, y), "scale", sc, "attributes", attributes));
                     return;
                 }
-                r.Items.Add(Json.Object("op", "line", "layer", LThin, "start", P(markX, y), "end", P(markX - 2 * d, y + 3 * d)));
-                r.Items.Add(Json.Object("op", "line", "layer", LThin, "start", P(markX - 2 * d, y + 3 * d), "end", P(markX + 2 * d, y + 3 * d)));
-                r.Items.Add(Json.Object("op", "line", "layer", LThin, "start", P(markX + 2 * d, y + 3 * d), "end", P(markX, y)));
+                string label = String.IsNullOrEmpty(description) ? elevation : elevation + " " + description;
+                string thin = Use(S.Thin).Name;
+                Ann(Json.Object("op", "line", "layer", thin, "start", P(markX, y), "end", P(-30 * d, y)));
+                Ann(Json.Object("op", "line", "layer", thin, "start", P(markX, y), "end", P(markX - 2 * d, y + 3 * d)));
+                Ann(Json.Object("op", "line", "layer", thin, "start", P(markX - 2 * d, y + 3 * d), "end", P(markX + 2 * d, y + 3 * d)));
+                Ann(Json.Object("op", "line", "layer", thin, "start", P(markX + 2 * d, y + 3 * d), "end", P(markX, y)));
                 Text(markX + 4 * d, y + 1 * d, label, TextH);
             }
 
+            // The view title: the office DWG-VIEWTITLE block (paper mode), else two lines of text.
+            internal void Title(double x, double y, string title, int denominator)
+            {
+                if (titleBlock != null)
+                {
+                    DetailAnnotation place = r.Place;
+                    Dictionary<string, object> attributes = Json.Object("BOTTOM-TITLE", title, "SCALE", "1:" + denominator.ToString(CultureInfo.InvariantCulture) + " M.");   // the sheets write the scale as 1:10 M.
+                    if (!String.IsNullOrEmpty(place.SheetProject)) attributes["TOP-TITLE"] = place.SheetProject;
+                    if (!String.IsNullOrEmpty(place.SheetNo)) attributes["SHEET-NO"] = place.SheetNo;
+                    if (!String.IsNullOrEmpty(place.ViewNo)) attributes["KY"] = place.ViewNo;
+                    Ann(Json.Object("op", "insert", "layer", Use(S.Title).Name, "name", titleBlock, "point", P(x, y), "scale", 1.0, "attributes", attributes));
+                    return;
+                }
+                Text(x, y, title, 3.5 * d);
+                Text(x, y - 6 * d, "SCALE 1:" + denominator.ToString(CultureInfo.InvariantCulture), 2.5 * d);
+            }
+
+            // A note. In paper mode a leader (the office label block, or a native leader), placed with the others in FlushNotes; in model space a line and text.
             internal void Note(double targetX, double y, string text, double noteX)
             {
-                r.Items.Add(Json.Object("op", "line", "layer", LThin, "start", P(targetX, y), "end", P(noteX - 2 * d, y)));
+                if (paper) { notes.Add(new NoteSpec { TargetX = targetX, TargetY = y, NoteX = noteX, Text = text }); NoteYs.Add(y); return; }
+                Ann(Json.Object("op", "line", "layer", Use(S.Thin).Name, "start", P(targetX, y), "end", P(noteX - 2 * d, y)));
                 Text(noteX, y - 1 * d, text, TextH);
                 NoteYs.Add(y);
+            }
+
+            private static int Lines(string text, int perLine)
+            {
+                int lines = 1, length = 0;
+                foreach (string word in text.Split(' '))
+                {
+                    if (length > 0 && length + 1 + word.Length > perLine) { lines++; length = word.Length; }
+                    else length += (length > 0 ? 1 : 0) + word.Length;
+                }
+                return lines;
+            }
+
+            // Paper mode: the labels, top to bottom, each level with its target unless that would overlap the label above; a label is as tall as its
+            // wrapped lines (about 4 mm a line at 2.5 mm text, about 1.64 mm a character). Then the leaders are emitted in the order the notes were given.
+            internal void FlushNotes(DetailResult result)
+            {
+                if (!paper)
+                {
+                    CheckNoteGaps(result);
+                    return;
+                }
+                double width = (r.Place ?? new DetailAnnotation()).NoteWidth;
+                int perLine = Math.Max(8, (int)Math.Floor(width / 1.64));
+                Dictionary<NoteSpec, double> anchorY = new Dictionary<NoteSpec, double>();
+                double limit = Double.PositiveInfinity;
+                foreach (NoteSpec n in notes.OrderByDescending(n => n.TargetY))
+                {
+                    double h = Lines(n.Text, perLine) * 4.0 * d, gap = 2.5 * d;
+                    double y = Math.Min(n.TargetY, limit - h / 2);
+                    anchorY[n] = y;
+                    limit = y - h / 2 - gap;
+                }
+                foreach (NoteSpec n in notes)
+                {
+                    Dictionary<string, object> leader = Json.Object("op", "leader", "layer", Use(S.Thin).Name, "point", P(n.NoteX, anchorY[n]), "target", P(n.TargetX, n.TargetY), "text", n.Text, "width", width);
+                    if (leaderBlock != null)
+                    {
+                        leader["block"] = leaderBlock;
+                        if (String.Equals(leaderBlock, OfficeLeaderBlock, StringComparison.OrdinalIgnoreCase)) leader["visibility"] = "1 arrow";
+                    }
+                    else leader["height"] = 2.5;
+                    Ann(leader);
+                }
+                notes.Clear();
             }
 
             internal void CheckNoteGaps(DetailResult result)
@@ -254,7 +448,7 @@ namespace SmartConnector
                 foreach (Dictionary<string, object> item in items)
                 {
                     string op = Json.GetString(item, "op"), lay = Json.GetString(item, "layer");
-                    bool annotation = op != "layer" && (lay == LDim || lay == LText || lay == LThin);
+                    bool annotation = r.Ann.Contains(item);
                     if (!annotation) { outItems.Add(item); continue; }
                     if (place.Mode == "none") continue;
                     switch (op)
@@ -262,6 +456,7 @@ namespace SmartConnector
                         case "line": item["start"] = map(item["start"]); item["end"] = map(item["end"]); break;
                         case "text": item["point"] = map(item["point"]); item["height"] = Math.Round((double)item["height"] / d, 3); break;
                         case "insert": item["point"] = map(item["point"]); break;
+                        case "leader": item["point"] = map(item["point"]); item["target"] = map(item["target"]); break;   // landing, width and height are paper millimetres already
                         case "dim_rotated":
                             item["from"] = map(item["from"]); item["to"] = map(item["to"]); item["location"] = map(item["location"]);
                             if (dimScale > 0) item["scale"] = dimScale; else item.Remove("scale");   // the style's own paper size applies in paper space
@@ -706,9 +901,9 @@ namespace SmartConnector
                 if (a == null || b == null) throw new ToolException(at + ": 'from' and 'to' must be [x, y] points in mm (within 10 m).");
                 if (Math.Abs(a[0] - b[0]) < 0.01 && Math.Abs(a[1] - b[1]) < 0.01) throw new ToolException(at + ": 'from' and 'to' are the same point.");
                 string kind = lineSpecs[i].ContainsKey("kind") ? Words(lineSpecs[i], "kind", at, 10, true) : "line";
-                if (kind != "led" && kind != "line") throw new ToolException(at + ": kind must be led (lighting layer " + LLight + ") or line (outline layer " + LOutline + ").");
+                if (kind != "led" && kind != "line") throw new ToolException(at + ": kind must be led (the scheme's lighting layer) or line (its outline layer).");
                 lineGeo.Add(new[] { a[0], a[1], b[0], b[1] });
-                lineLayers.Add(kind == "led" ? LLight : LOutline);
+                lineLayers.Add(kind);
             }
 
             // ---- the caller's annotation ----
@@ -722,12 +917,12 @@ namespace SmartConnector
             string titleText = view.ToUpperInvariant();
             if (input.ContainsKey("title")) titleText = Words(input, "title", "params", 80, true);
 
-            Emitter em = new Emitter(r, ox, oy, scale, dimStyle, textStyle, dimScale);
+            DetailScheme scheme = ResolveScheme(place, view);
+            Emitter em = new Emitter(r, ox, oy, scale, dimStyle, textStyle, dimScale, scheme);
             em.Layers();
-            if (lineLayers.Contains(LLight)) r.Items.Add(Json.Object("op", "layer", "name", LLight, "color", 2, "lineweight", 18));
             if (floor) em.Floor(minX - 26 * d, maxX + 12 * d);
             em.Parts(parts, cut);
-            for (int i = 0; i < lineGeo.Count; i++) em.Line(lineGeo[i][0], lineGeo[i][1], lineGeo[i][2], lineGeo[i][3], lineLayers[i]);
+            for (int i = 0; i < lineGeo.Count; i++) em.Line(lineGeo[i][0], lineGeo[i][1], lineGeo[i][2], lineGeo[i][3], lineLayers[i] == "led" ? scheme.Light : scheme.Outline);
 
             int maxChain = 0;
             for (int i = 0; i < dims.Count; i++)
@@ -758,8 +953,13 @@ namespace SmartConnector
             for (int i = 0; i < levels.Count; i++)
             {
                 string at = "params.levels[" + i + "]";
-                OnlyKeys(levels[i], at, "y", "label");
-                em.Level(Coord(levels[i], "y", at, -10000, 20000), Words(levels[i], "label", at, 80, true), markX);
+                OnlyKeys(levels[i], at, "y", "label", "elevation", "description");
+                bool hasLabel = levels[i].ContainsKey("label"), hasElevation = levels[i].ContainsKey("elevation");
+                if (hasLabel == hasElevation) throw new ToolException(at + ": give either 'label' (one line of text) or 'elevation' with an optional 'description' (the office level block's two lines).");
+                if (levels[i].ContainsKey("description") && !hasElevation) throw new ToolException(at + ": 'description' goes with 'elevation'.");
+                double ly = Coord(levels[i], "y", at, -10000, 20000);
+                if (hasLabel) em.Level(ly, Words(levels[i], "label", at, 80, true), null, markX);
+                else em.Level(ly, Words(levels[i], "elevation", at, 40, true), levels[i].ContainsKey("description") ? Words(levels[i], "description", at, 40, true) : null, markX);
             }
 
             double noteX = maxX + 34 * d;
@@ -778,7 +978,7 @@ namespace SmartConnector
                 noted.Add(target.Id);
                 foreach (Part m in members) noted.Add(m.Id);
             }
-            em.CheckNoteGaps(r);
+            em.FlushNotes(r);
             if (notes.Count == 0) r.Warnings.Add("No notes were given: the materials and thicknesses are not annotated. Add params.notes from the specification.");
             else
             {
@@ -787,9 +987,9 @@ namespace SmartConnector
             }
 
             double ty = minY - 40 * d;
-            em.Text(minX, ty, titleText, 3.5 * d);
-            em.Text(minX, ty - 6 * d, "SCALE 1:" + scale, 2.5 * d);
+            em.Title(minX, ty, titleText, scale);
 
+            em.Finish();
             Place(r, place, scale, dimScale, bx0, by0, maxX, maxY, ox, oy);
             r.Summary["template"] = CustomSection;
             r.Summary["view"] = view;
@@ -809,6 +1009,39 @@ namespace SmartConnector
             AutoCadPlan.Parse(r.Items.Cast<object>().ToArray());
             if (r.PaperItems.Count > 0) AutoCadPlan.Parse(r.PaperItems.Cast<object>().ToArray());
             return r;
+        }
+
+        internal const string OfficeLeaderBlock = "Multiple Leader Lab", OfficeLevelBlock = "level indicator", OfficeTitleBlock = "DWG-VIEWTITLE";
+        private const double OfficeLevelScale = 0.015984;   // the office level indicator is inserted at this scale on the counter sheets
+
+        // The block to use for a kind of annotation, or null. Only in paper mode. With the drawing known, a block is used when the drawing has it
+        // (a requested block that is missing is reported); in a preview, asking for the office layers or naming a block takes it as present.
+        private static string BlockFor(DetailAnnotation place, string requested, string office, DetailResult r)
+        {
+            if (place.Mode != "paper") return null;
+            string name = requested ?? office;
+            if (place.Facts != null)
+            {
+                if (place.Facts.Blocks.Contains(name)) return name;
+                if (requested != null) r.Warnings.Add("Block '" + requested + "' is not in the drawing, so the plain annotation is used instead.");
+                return null;
+            }
+            return (requested != null || place.Scheme == "ao") ? name : null;
+        }
+
+        // Which layer set a detail uses. auto picks the office counter-sheet set (ao) when the drawing already has its layers, otherwise the
+        // generator's own set; without a drawing (a preview) auto is the generator's own set. generic and ao force a set.
+        internal static string SchemeName(DetailAnnotation place)
+        {
+            if (place.Scheme == "generic" || place.Scheme == "ao") return place.Scheme;
+            if (place.Facts != null && new[] { "AO_DIMZ", "0_AO_DIMZ", "AO-Z.Lvl", "AO-MDF_SECTION_PLAN", "AO-CORIAN C-TOP" }.Any(n => place.Facts.Layers.Contains(n))) return "ao";
+            return "generic";
+        }
+
+        internal static DetailScheme ResolveScheme(DetailAnnotation place, string view)
+        {
+            if (place.Scheme != "auto" && place.Scheme != "generic" && place.Scheme != "ao") throw new ToolException("layer_scheme must be auto, generic or ao.");
+            return SchemeName(place) == "ao" ? DetailScheme.Ao(view) : DetailScheme.Generic();
         }
 
         // Builds the plan. scale is the detail scale denominator (10 for 1:10); origin is where the floor line meets the staff face.
@@ -936,7 +1169,7 @@ namespace SmartConnector
                 }
 
             // ---- steps ----
-            Emitter em = new Emitter(r, ox, oy, scale, dimStyle, textStyle, dimScale);
+            Emitter em = new Emitter(r, ox, oy, scale, dimStyle, textStyle, dimScale, ResolveScheme(place, "section"));
             List<Dictionary<string, object>> items = r.Items;
             Func<double, double, object[]> P = em.P;
             em.Layers();
@@ -962,10 +1195,10 @@ namespace SmartConnector
 
             // levels on the left, with a thin reference line stopping before the dimension chains
             double markX = -80 * d;
-            Action<double, string> level = (y, label) => em.Level(y, label, markX);
-            level(0, "EL +0.00 F.F.L.");
-            level(H, Level(H) + (accessible ? " ACCESSIBLE COUNTER TOP" : " COUNTER TOP"));
-            if (bar) level(barTop, Level(barTop) + " BAR TOP");
+            Action<double, string, string> level = (y, elevation, description) => em.Level(y, elevation, description, markX);
+            level(0, "EL +0.00", "F.F.L.");
+            level(H, Level(H), accessible ? "ACCESSIBLE COUNTER TOP" : "COUNTER TOP");
+            if (bar) level(barTop, Level(barTop), "BAR TOP");
 
             // notes with horizontal leaders on the customer side
             double noteX = topEndX + 34 * d;
@@ -980,14 +1213,14 @@ namespace SmartConnector
             if (accessible) note(boxDepth, carcassY, Mm(T) + "MM THK. MDF CARCASS IN MELAMINE FINISH");
             else note(D, carcassY, Mm(T) + "MM THK. MDF CARCASS IN MELAMINE FINISH");
             if (PH > FG) note(accessible ? boxDepth - PS : D - PS, plinthY, Mm(T) + "MM THK. MDF PLINTH ON ADJUSTABLE LEGS");
-            em.CheckNoteGaps(r);
+            em.FlushNotes(r);
 
             // titles
             string title = accessible ? "SECTION X3 - ACCESSIBLE COUNTER" : (bar ? "SECTION X1 - RAISED BAR COUNTER" : "SECTION X2 - RECEPTION COUNTER");
-            em.Text(0, -40 * d, title, 3.5 * d);
-            em.Text(0, -46 * d, "SCALE 1:" + scale, 2.5 * d);
+            em.Title(0, -40 * d, title, scale);
             if (accessible) em.Text(0, -52 * d, "ACCESSIBLE COUNTER: HEIGHT AND KNEE CLEARANCE PER " + code.ToUpperInvariant() + " (TO BE VERIFIED)", textH);
 
+            em.Finish();
             Place(r, place, scale, dimScale, boards.Select(x => x.X0).Min(), boards.Select(x => x.Y0).Min(), boards.Select(x => x.X1).Max(), boards.Select(x => x.Y1).Max(), ox, oy);
             r.Summary["annotation"] = place.Mode;
 

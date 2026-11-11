@@ -67,14 +67,16 @@ namespace SmartConnector
                             "code", Json.Object("type", "string", "minLength", 1, "maxLength", AutoCadScript.MaxCodeLength),
                             "timeout_seconds", Json.Object("type", "integer", "minimum", 1, "maximum", 300)),
                         new[] { "expected_drawing", "execution_mode", "allow_model_changes", "code" }, false),
-                    Schema.Tool("generate_detail", "Detail Generator: build a draft construction detail from a short brief, and optionally draw it. Two templates. custom_section draws a section from parts the caller read off pictures and plans: params.parts [{id, material (mdf, ply, stone, corian, steel, glass, outline), x0, y0, x1, y1}] in mm with x from the staff face and y up from the floor, optional levels [{y, label}], notes [{part, text, y?}], dimensions [{from, to, axis x|y, chain?}], title, overall_dimensions, floor; every number and wording is the caller's and nothing is invented or checked against a code. reception_counter_section is a vertical section through a reception counter, in millimetres only: boards, plinth, top (corian by default, or stone), optional shelf, optional raised bar, or a wheelchair-accessible section (params.section = accessible; it needs accessible_height, knee_clearance_height, knee_clearance_depth and code_reference from the code you adopt, none are built in). params holds the design parameters in mm, all with defaults except the accessible ones. scale is the detail scale denominator (10 = 1:10); origin is where the floor meets the staff face. With apply=false (the default) AutoCAD is not contacted: you get a summary, warnings and, with return_plan, the steps. With apply=true (expected_drawing required) the drawing must be in millimetres, the plan is checked against it and drawn like apply_plan; dry_run defaults to true. Existing layers are left as they are unless update_layers. Unless dimension_style or text_style is given (or use_reference_styles is false), the drawing's reference styles are used when present: dimension style na1, text style EN-S for notes and levels, EN-SCB for titles; if one is missing the result says so. annotation says where dimensions, notes, levels and titles go: model (default, drawn in model space at the detail scale), paper (drawn in the layout named by layout at true paper size, text 2.5 mm, dimensions reading the model size; view.paper_centre [x,y] is where the detail sits on the sheet, optional view.model_centre; the layout needs a viewport at scale 1:scale centred on the model centre, which the result states), or none (geometry only). With create_viewport (paper mode) the tool makes that viewport itself on layer G-ANNO-VPRT (not plotted): centred on the sheet at view.paper_centre (default with apply: the centre of the layout's sheet), sized to the parts plus a 10 mm margin or view.viewport_size [w,h] in paper mm, at 1:scale, view centred on the model centre and locked. level_block (with level_tag, default LEVEL, and level_block_scale) uses an office block with an attribute for level markers in paper mode. Every result is a draft for a designer's review.",
+                    Schema.Tool("generate_detail", "Detail Generator: build a draft construction detail from a short brief, and optionally draw it. Two templates. custom_section draws a section from parts the caller read off pictures and plans: params.parts [{id, material (mdf, ply, stone, corian, steel, glass, outline), x0, y0, x1, y1}] in mm with x from the staff face and y up from the floor, optional levels [{y, label}], notes [{part, text, y?}], dimensions [{from, to, axis x|y, chain?}], title, overall_dimensions, floor; every number and wording is the caller's and nothing is invented or checked against a code. reception_counter_section is a vertical section through a reception counter, in millimetres only: boards, plinth, top (corian by default, or stone), optional shelf, optional raised bar, or a wheelchair-accessible section (params.section = accessible; it needs accessible_height, knee_clearance_height, knee_clearance_depth and code_reference from the code you adopt, none are built in). params holds the design parameters in mm, all with defaults except the accessible ones. scale is the detail scale denominator (10 = 1:10); origin is where the floor meets the staff face. With apply=false (the default) AutoCAD is not contacted: you get a summary, warnings and, with return_plan, the steps. With apply=true (expected_drawing required) the drawing must be in millimetres, the plan is checked against it and drawn like apply_plan; dry_run defaults to true. Existing layers are left as they are unless update_layers. Unless dimension_style or text_style is given (or use_reference_styles is false), the drawing's reference styles are used when present: dimension style na1, text style EN-S for notes and levels, EN-SCB for titles; if one is missing the result says so. annotation says where dimensions, notes, levels and titles go: model (default, drawn in model space at the detail scale), paper (drawn in the layout named by layout at true paper size, text 2.5 mm, dimensions reading the model size; view.paper_centre [x,y] is where the detail sits on the sheet, optional view.model_centre; the layout needs a viewport at scale 1:scale centred on the model centre, which the result states), or none (geometry only). With create_viewport (paper mode) the tool makes that viewport itself on layer G-ANNO-VPRT (not plotted): centred on the sheet at view.paper_centre (default with apply: the centre of the layout's sheet), sized to the parts plus a 10 mm margin or view.viewport_size [w,h] in paper mm, at 1:scale, view centred on the model centre and locked. In paper mode notes are leaders, levels the office level indicator and view titles the office DWG-VIEWTITLE block, whenever the drawing has those blocks (leader_block, level_block and title_block name other blocks; level_block_scale and note_width, in paper mm, adjust them; sheet {project, sheet_no, view_no} fills the title block). Without the office leader block a native AutoCAD multileader is used, never a bare line. layer_scheme chooses the layers: ao uses the office counter-sheet layers (one section layer per material, AO_N_HATCH, AO-N_LIGHTING, 0_AO_DIMZ, AO-MV for the viewport), generic the generator's own A-DETL set, and auto (default) uses ao when the drawing already has the office layers. Layers the drawing already has are never changed. Every result is a draft for a designer's review.",
                         Json.Object("expected_drawing", target(), "template", Json.Object("type", "string", "enum", new object[] { AutoCadDetail.ReceptionCounterSection, AutoCadDetail.CustomSection }),
                             "params", Json.Object("type", "object"), "scale", Json.Object("type", "integer", "minimum", 1, "maximum", 200), "origin", point(),
                             "dimension_style", str(), "text_style", str(), "dimension_scale", Json.Object("type", "number", "exclusiveMinimum", 0),
                             "apply", Json.Object("type", "boolean"), "dry_run", Json.Object("type", "boolean"), "update_layers", Json.Object("type", "boolean"), "use_reference_styles", Json.Object("type", "boolean"), "return_plan", Json.Object("type", "boolean"),
                             "annotation", Json.Object("type", "string", "enum", new object[] { "model", "paper", "none" }), "layout", str(), "view", Json.Object("type", "object"),
-                            "level_block", str(), "level_tag", str(), "level_block_scale", Json.Object("type", "number", "exclusiveMinimum", 0),
-                            "create_viewport", Json.Object("type", "boolean")),
+                            "level_block", str(), "leader_block", str(), "title_block", str(), "level_block_scale", Json.Object("type", "number", "exclusiveMinimum", 0),
+                            "note_width", Json.Object("type", "number", "minimum", 15, "maximum", 150), "sheet", Json.Object("type", "object"),
+                            "create_viewport", Json.Object("type", "boolean"),
+                            "layer_scheme", Json.Object("type", "string", "enum", new object[] { "auto", "generic", "ao" })),
                         new[] { "template" }, false),
                     Schema.Tool("save_drawing", "Explicitly save the expected drawing to its EXISTING path. Invoke only when saving is requested; no Save As.", Json.Object("expected_drawing", target()), new[] { "expected_drawing" }, false)
                 };
@@ -355,6 +357,8 @@ namespace SmartConnector
         }
 
         // Fills the block's attributes by tag (case-insensitive). A tag the block does not have fails the step, so a wrong tag is never silent.
+        // A key written @elevation or @description is a role, not a tag: the office level block has used LEVEL = the elevation and Area = the
+        // description, and an older one ELEVATION = the elevation and LEVEL = the description, so the role is resolved from the tags this block has.
         private static void SetAttributes(object blockSource, PlanItem p)
         {
             dynamic block = blockSource;
@@ -362,13 +366,86 @@ namespace SmartConnector
             if ((bool)block.HasAttributes)
                 foreach (dynamic attribute in (System.Collections.IEnumerable)block.GetAttributes())
                     found[Convert.ToString(attribute.TagString)] = attribute;
+            string where = "items[" + p.Index.ToString(System.Globalization.CultureInfo.InvariantCulture) + "]: block '" + p.BlockName + "'";
             foreach (KeyValuePair<string, string> pair in p.Attributes)
             {
+                string tag = pair.Key;
+                if (tag.StartsWith("@"))
+                {
+                    bool elevation = String.Equals(tag, "@elevation", StringComparison.OrdinalIgnoreCase), description = String.Equals(tag, "@description", StringComparison.OrdinalIgnoreCase);
+                    if (!elevation && !description) throw new ToolException(where + ": unknown attribute role '" + tag + "' (use @elevation or @description).");
+                    if (found.ContainsKey("Area")) tag = elevation ? "LEVEL" : "Area";
+                    else if (found.ContainsKey("ELEVATION")) tag = elevation ? "ELEVATION" : "LEVEL";
+                    else if (elevation) tag = "LEVEL";
+                    else continue;   // a one-line level block has no place for a description
+                }
                 dynamic attribute;
-                if (!found.TryGetValue(pair.Key, out attribute)) throw new ToolException("items[" + p.Index.ToString(System.Globalization.CultureInfo.InvariantCulture) + "]: block '" + p.BlockName + "' has no attribute '" + pair.Key + "'.");
+                if (!found.TryGetValue(tag, out attribute)) throw new ToolException(where + " has no attribute '" + tag + "'.");
                 attribute.TextString = pair.Value;
-                if (Convert.ToString(attribute.TextString) != pair.Value) throw new ToolException("items[" + p.Index.ToString(System.Globalization.CultureInfo.InvariantCulture) + "]: attribute '" + pair.Key + "' did not take the text.");
+                if (Convert.ToString(attribute.TextString) != pair.Value) throw new ToolException(where + ": attribute '" + tag + "' did not take the text.");
             }
+        }
+
+        // Sets one dynamic property of a block reference. The block is fetched again by its handle before every property, because setting a
+        // property (visibility especially) invalidates the property wrappers (as the counter-sheet script found live). A missing or read-only
+        // property fails the step.
+        private static void SetDynamicProperty(object docSource, string handle, string name, object value, PlanItem p)
+        {
+            dynamic doc = docSource;
+            dynamic reference = doc.HandleToObject(handle);
+            foreach (dynamic property in (System.Collections.IEnumerable)reference.GetDynamicBlockProperties())
+            {
+                if (!String.Equals(Convert.ToString(property.PropertyName), name, StringComparison.OrdinalIgnoreCase) || (bool)property.ReadOnly) continue;
+                if (Convert.ToString(property.Value, System.Globalization.CultureInfo.InvariantCulture) != Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture)) property.Value = value;
+                return;
+            }
+            throw new ToolException("items[" + p.Index.ToString(System.Globalization.CultureInfo.InvariantCulture) + "]: block '" + p.BlockName + "' has no writable dynamic property '" + name + "'.");
+        }
+
+        // A note with a leader. With a block (the office "Multiple Leader Lab"): the block goes at the label anchor, its LABEL attribute takes the
+        // text wrapped to the width, and its dynamic Distance1 (landing), Distance2 (leader length) and Angle1 draw the leader to the target, as
+        // the counter-sheet script does. Without a block: a native AutoCAD multileader with an arrowhead. Either way a real leader, never a bare line.
+        private static dynamic CreateLeader(object spaceSource, PlanItem p)
+        {
+            dynamic space = spaceSource;
+            string at = "items[" + p.Index.ToString(System.Globalization.CultureInfo.InvariantCulture) + "]: ";
+            if (p.BlockName == null)
+            {
+                double[] points = { p.End[0], p.End[1], 0, p.Point[0] - p.Landing, p.Point[1], 0 };
+                int index = 0;
+                dynamic multi = space.AddMLeader(points, ref index);
+                try
+                {
+                    multi.TextString = p.Text;
+                    if (p.Height > 0) multi.TextHeight = p.Height;
+                }
+                catch (Exception) { try { multi.Delete(); } catch (Exception) { } throw; }
+                return multi;
+            }
+            dynamic block = space.InsertBlock(new double[] { p.Point[0], p.Point[1], 0 }, p.BlockName, 1.0, 1.0, 1.0, 0.0);
+            try
+            {
+                block.Layer = p.Layer;
+                bool taken = false;
+                if ((bool)block.HasAttributes)
+                    foreach (dynamic attribute in (System.Collections.IEnumerable)block.GetAttributes())
+                        if (String.Equals(Convert.ToString(attribute.TagString), p.Tag, StringComparison.OrdinalIgnoreCase))
+                        {
+                            attribute.TextString = p.Text;
+                            try { attribute.MTextBoundaryWidth = p.Width; } catch (Exception) { }   // only a multi-line attribute has a boundary width
+                            taken = true;
+                        }
+                if (!taken) throw new ToolException(at + "block '" + p.BlockName + "' has no attribute '" + p.Tag + "' for the text.");
+                double dx = p.End[0] - (p.Point[0] - p.Landing), dy = p.End[1] - p.Point[1];
+                string handle = Convert.ToString(block.Handle);
+                object document = space.Document;
+                if (p.Visibility != null) SetDynamicProperty(document, handle, "Visibility1", p.Visibility, p);
+                SetDynamicProperty(document, handle, "Distance1", p.Landing, p);
+                SetDynamicProperty(document, handle, "Distance2", Math.Sqrt(dx * dx + dy * dy), p);
+                SetDynamicProperty(document, handle, "Angle1", Math.Atan2(dy, dx) - Math.PI, p);
+            }
+            catch (Exception) { try { block.Delete(); } catch (Exception) { } throw; }
+            return block;
         }
 
         private static dynamic CreateItem(object spaceSource, PlanItem p)
@@ -415,6 +492,7 @@ namespace SmartConnector
                         }
                         return block;
                     }
+                case "leader": return CreateLeader((object)space, p);
                 case "dim_aligned": return space.AddDimAligned(p.Point, p.End, p.Location);
                 case "dim_rotated": return space.AddDimRotated(p.Point, p.End, p.Location, p.Rotation * toRadians);
             }
@@ -436,7 +514,7 @@ namespace SmartConnector
             dynamic layerTable = doc.Layers;
             int layerCount = Convert.ToInt32(layerTable.Count);
             for (int i = 0; i < layerCount; i++) { dynamic item = layerTable.Item(i); layers[Convert.ToString(item.Name)] = (bool)item.Lock; }
-            bool needsLinetypes = plan.Any(p => p.Linetype != null), needsStyles = plan.Any(p => p.TextStyle != null), needsBlocks = plan.Any(p => p.Op == "insert"), needsDimStyles = plan.Any(p => p.DimStyle != null);
+            bool needsLinetypes = plan.Any(p => p.Linetype != null), needsStyles = plan.Any(p => p.TextStyle != null), needsBlocks = plan.Any(p => p.Op == "insert" || (p.Op == "leader" && p.BlockName != null)), needsDimStyles = plan.Any(p => p.DimStyle != null);
             HashSet<string> linetypes = needsLinetypes ? Names((object)doc.Linetypes) : new HashSet<string>();
             HashSet<string> styles = needsStyles ? Names((object)doc.TextStyles) : new HashSet<string>();
             HashSet<string> blocks = needsBlocks ? Names((object)doc.Blocks) : new HashSet<string>();
@@ -663,9 +741,27 @@ namespace SmartConnector
                     a["__viewport_size"] = size;
                 }
             }
+            if (a.ContainsKey("layer_scheme")) place.Scheme = Json.GetString(a, "layer_scheme");
             if (a.ContainsKey("level_block")) place.LevelBlock = Json.GetString(a, "level_block");
-            if (a.ContainsKey("level_tag")) place.LevelTag = Json.GetString(a, "level_tag");
-            if (a.ContainsKey("level_block_scale")) place.LevelBlockScale = Convert.ToDouble(a["level_block_scale"], System.Globalization.CultureInfo.InvariantCulture);
+            if (a.ContainsKey("leader_block")) place.LeaderBlock = Json.GetString(a, "leader_block");
+            if (a.ContainsKey("title_block")) place.TitleBlock = Json.GetString(a, "title_block");
+            if (a.ContainsKey("note_width")) place.NoteWidth = Convert.ToDouble(a["note_width"], System.Globalization.CultureInfo.InvariantCulture);
+            if (a.ContainsKey("sheet"))
+            {
+                IDictionary<string, object> sheet = a["sheet"] as IDictionary<string, object>;
+                if (sheet == null) throw new ToolException("sheet must be an object.");
+                foreach (string key in sheet.Keys) if (key != "project" && key != "sheet_no" && key != "view_no") throw new ToolException("Unknown sheet field: " + key + ". Allowed: project, sheet_no, view_no.");
+                Func<string, string> text = key =>
+                {
+                    if (!sheet.ContainsKey(key)) return null;
+                    string v = sheet[key] as string;
+                    if (v == null || v.Length > 80 || v.IndexOf('\n') >= 0) throw new ToolException("sheet." + key + " must be one line of text of up to 80 characters.");
+                    return v;
+                };
+                place.SheetProject = text("project"); place.SheetNo = text("sheet_no"); place.ViewNo = text("view_no");
+            }
+            if (place.Mode != "paper" && (place.LeaderBlock != null || place.TitleBlock != null || place.LevelBlock != null || a.ContainsKey("sheet") || a.ContainsKey("note_width")))
+                throw new ToolException("level_block, leader_block, title_block, note_width and sheet are used with annotation paper only.");            if (a.ContainsKey("level_block_scale")) place.LevelBlockScale = Convert.ToDouble(a["level_block_scale"], System.Globalization.CultureInfo.InvariantCulture);
             if (place.Mode == "paper" && apply0(a) && Json.GetString(a, "layout").Length == 0) throw new ToolException("annotation paper needs layout: the name of the layout to annotate.");
             if (place.Mode != "paper" && a.ContainsKey("layout")) throw new ToolException("layout is used with annotation paper only.");
             bool createViewport = a.ContainsKey("create_viewport") && (bool)a["create_viewport"];
@@ -684,15 +780,31 @@ namespace SmartConnector
                 centreSource = "the centre of the sheet of layout '" + Json.GetString(a, "layout") + "' (approximate: printer margins can move it a few millimetres)";
             }
             DetailResult built = AutoCadDetail.Build(Json.GetString(a, "template"), parameters, scale, ox, oy, dimStyle, textStyle, dimScale, place);
+            bool apply = a.ContainsKey("apply") && (bool)a["apply"];
+            if (apply)
+            {
+                // The brief is valid. Now the drawing's own layers and blocks decide which layer set is used, so read them and build again.
+                if (Json.GetString(a, "expected_drawing").Length == 0) throw new ToolException("expected_drawing is required when apply is true.");
+                if (doc == null) doc = ActiveDrawing();
+                place.Facts = ReadFacts((object)doc);
+                built = AutoCadDetail.Build(Json.GetString(a, "template"), parameters, scale, ox, oy, dimStyle, textStyle, dimScale, place);
+            }
 
             Dictionary<string, object> generated = Json.Object("summary", built.Summary, "warnings", built.Warnings);
             if (centreSource != null) generated["paper_centre_source"] = centreSource;
             if (a.ContainsKey("return_plan") && (bool)a["return_plan"]) { generated["items"] = built.Items; if (built.PaperItems.Count > 0) generated["paper_items"] = built.PaperItems; }
-            bool apply = a.ContainsKey("apply") && (bool)a["apply"];
             if (!apply) return Json.Object("applied", false, "generated", generated);
-            if (Json.GetString(a, "expected_drawing").Length == 0) throw new ToolException("expected_drawing is required when apply is true.");
-            if (doc == null) doc = ActiveDrawing();
             return ApplyGenerated((object)doc, a, built, generated);
+        }
+
+        // The layers and blocks the drawing already has.
+        private static DrawingFacts ReadFacts(object docSource)
+        {
+            dynamic doc = docSource;
+            DrawingFacts facts = new DrawingFacts();
+            facts.Layers = Names((object)doc.Layers);
+            facts.Blocks = Names((object)doc.Blocks);
+            return facts;
         }
 
         private static dynamic ActiveDrawing()
@@ -846,7 +958,6 @@ namespace SmartConnector
             }
         }
 
-        internal const string ViewportLayer = "G-ANNO-VPRT";
         private const double ViewportMargin = 10;   // paper millimetres around the parts
 
         internal sealed class ViewportPlan
@@ -855,9 +966,10 @@ namespace SmartConnector
             internal double Width, Height;
             internal int Scale;
             internal bool LayerExists;
+            internal string LayerName = "G-ANNO-VPRT";
             internal Dictionary<string, object> Describe()
             {
-                return Json.Object("layer", ViewportLayer, "plotted", false, "centre", new object[] { Centre[0], Centre[1] }, "size", new object[] { Width, Height },
+                return Json.Object("layer", LayerName, "plotted", false, "centre", new object[] { Centre[0], Centre[1] }, "size", new object[] { Width, Height },
                     "scale", "1:" + Scale.ToString(System.Globalization.CultureInfo.InvariantCulture), "view_centre", new object[] { ViewCentre[0], ViewCentre[1] },
                     "layer_to_create", !LayerExists);
             }
@@ -883,9 +995,13 @@ namespace SmartConnector
             dynamic layers = doc.Layers;
             int count = Convert.ToInt32(layers.Count);
             for (int i = 0; i < count; i++) { dynamic l = layers.Item(i); locks[Convert.ToString(l.Name)] = (bool)l.Lock; }
+            // The viewport goes on the drawing's own not-plotted viewport layer: the scheme's, else AO-MV (counter sheets), else G-ANNO-NPLT
+            // (kitchen library sheets); only when the drawing has none is one created, not plotted.
+            string preferred = built.Summary.ContainsKey("layer_scheme") && (string)built.Summary["layer_scheme"] == "ao" ? "AO-MV" : "G-ANNO-VPRT";
+            v.LayerName = new[] { preferred, "AO-MV", "G-ANNO-NPLT" }.FirstOrDefault(n => locks.ContainsKey(n)) ?? preferred;
             bool locked;
-            v.LayerExists = locks.TryGetValue(ViewportLayer, out locked);
-            if (v.LayerExists && locked) throw new ToolException("Layer " + ViewportLayer + " is locked, so the viewport cannot be placed on it. Unlock it and run again. Nothing was drawn.");
+            v.LayerExists = locks.TryGetValue(v.LayerName, out locked);
+            if (v.LayerExists && locked) throw new ToolException("Layer " + v.LayerName + " is locked, so the viewport cannot be placed on it. Unlock it and run again. Nothing was drawn.");
             return v;
         }
 
@@ -944,7 +1060,7 @@ namespace SmartConnector
                 {
                     if (!v.LayerExists)
                     {
-                        dynamic layer = doc.Layers.Add(ViewportLayer);
+                        dynamic layer = doc.Layers.Add(v.LayerName);
                         layerCreated = true;
                         layer.Color = 8;
                         layer.Plottable = false;
@@ -953,7 +1069,7 @@ namespace SmartConnector
                     try { doc.ActiveSpace = 0; } catch (Exception) { }
                     try { doc.Regen(1); } catch (Exception) { }
                     viewport = sheet.Block.AddPViewport(new double[] { v.Centre[0], v.Centre[1], 0 }, v.Width, v.Height);
-                    viewport.Layer = ViewportLayer;
+                    viewport.Layer = v.LayerName;
                     viewport.Display(true);
                     string handle = Convert.ToString(viewport.Handle);
                     string method, zoomError = null;
@@ -1002,7 +1118,7 @@ namespace SmartConnector
                     if (Math.Abs(custom * v.Scale - 1.0) > 1e-6) throw new ToolException("the viewport scale read back as " + custom.ToString(System.Globalization.CultureInfo.InvariantCulture) + " instead of 1:" + v.Scale.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".");
                     if (!(bool)viewport.DisplayLocked) throw new ToolException("the viewport display did not lock.");
                     try { doc.Regen(1); } catch (Exception) { }
-                    Dictionary<string, object> result = Json.Object("handle", handle, "method", method, "layer", ViewportLayer, "layer_created", layerCreated, "custom_scale", custom, "display_locked", true,
+                    Dictionary<string, object> result = Json.Object("handle", handle, "method", method, "layer", v.LayerName, "layer_created", layerCreated, "custom_scale", custom, "display_locked", true,
                         "centre", new object[] { v.Centre[0], v.Centre[1] }, "size", new object[] { v.Width, v.Height }, "view_centre_read_back", readBack);
                     if (readBack) { result["view_centre"] = new object[] { Math.Round(cx, 3), Math.Round(cy, 3) }; result["view_centre_corrected"] = corrected; }
                     else result["note"] = "AutoCAD did not answer the view read-back, so the centre is not proven: check that the section sits in the middle of the viewport.";
@@ -1013,7 +1129,7 @@ namespace SmartConnector
                 {
                     try { doc.MSpace = false; } catch (Exception) { }
                     if (viewport != null) { try { viewport.Delete(); } catch (Exception) { } }
-                    if (layerCreated) { try { doc.Layers.Item(ViewportLayer).Delete(); } catch (Exception) { } }
+                    if (layerCreated) { try { doc.Layers.Item(v.LayerName).Delete(); } catch (Exception) { } }
                     throw;
                 }
             }

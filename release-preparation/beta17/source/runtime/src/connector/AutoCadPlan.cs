@@ -27,6 +27,8 @@ namespace SmartConnector
         internal double LinearFactor;          // dimensions in paper space: the measured value is multiplied by this (DIMLFAC), so a dimension of model geometry reads true; 0 = the style decides
         internal List<KeyValuePair<string, string>> Attributes;   // insert: attribute tag and value
         internal List<double> Bulges;          // polyline: bulge of the segment that starts at each point (0 = straight); null = all straight
+        internal double Landing = 4;           // leader: the label's landing, drawn to the left of its anchor (the label block's Distance1)
+        internal string Tag = "LABEL", Visibility;   // leader block: the attribute that takes the text; its visibility state, if the block has one
     }
 
     // The pure part of apply_plan: it checks a plan before AutoCAD is contacted, and checks it against the drawing's
@@ -52,6 +54,7 @@ namespace SmartConnector
             { "text", new[] { "op", "id", "layer", "point", "text", "height", "rotation", "style" } },
             { "mtext", new[] { "op", "id", "layer", "point", "width", "text", "height", "rotation", "style" } },
             { "insert", new[] { "op", "id", "layer", "name", "point", "scale", "rotation", "attributes" } },
+            { "leader", new[] { "op", "id", "layer", "point", "target", "text", "block", "tag", "visibility", "landing", "width", "height" } },
             { "hatch", new[] { "op", "id", "layer", "pattern", "boundary", "holes", "scale", "angle", "color" } },
             { "dim_aligned", new[] { "op", "id", "layer", "from", "to", "location", "style", "scale", "linear_factor" } },
             { "dim_rotated", new[] { "op", "id", "layer", "from", "to", "location", "angle", "style", "scale", "linear_factor" } }
@@ -175,6 +178,21 @@ namespace SmartConnector
                             }
                         }
                         break;
+                    case "leader":
+                        p.Layer = NameField(d, "layer", i, true);
+                        p.Point = Point(d, "point", i);
+                        p.End = Point(d, "target", i);
+                        p.Text = TextField(d, "text", i, 500);
+                        if (p.Text.IndexOf('\n') >= 0) throw Fail(i, "a leader's text is one line; the block wraps it to its width.");
+                        if (Math.Abs(p.Point[0] - p.End[0]) < 0.001 && Math.Abs(p.Point[1] - p.End[1]) < 0.001) throw Fail(i, "'point' and 'target' must differ.");
+                        if (d.ContainsKey("block")) p.BlockName = NameField(d, "block", i, true);
+                        if (d.ContainsKey("tag")) p.Tag = NameField(d, "tag", i, true);
+                        if (d.ContainsKey("visibility")) p.Visibility = NameField(d, "visibility", i, true);
+                        if (d.ContainsKey("landing")) { p.Landing = Number(d, "landing", i); if (p.Landing < 0 || p.Landing > 100) throw Fail(i, "landing must be from 0 to 100."); }
+                        p.Width = d.ContainsKey("width") ? Positive(d, "width", i) : 45;
+                        if (d.ContainsKey("height")) p.Height = Positive(d, "height", i);
+                        if (p.BlockName != null && d.ContainsKey("height")) throw Fail(i, "height is for a native leader (no block); a block has its own text size.");
+                        break;
                     case "hatch":
                         p.Layer = NameField(d, "layer", i, true);
                         p.Pattern = PatternName(d, i);
@@ -246,7 +264,7 @@ namespace SmartConnector
                     if (!known.TryGetValue(p.Layer, out locked)) errors.Add(at + "layer '" + p.Layer + "' does not exist; add a layer step before it.");
                     else if (locked) errors.Add(at + "layer '" + p.Layer + "' is locked.");
                     if (p.TextStyle != null && !st.Contains(p.TextStyle)) errors.Add(at + "text style '" + p.TextStyle + "' does not exist in the drawing.");
-                    if (p.Op == "insert" && !bl.Contains(p.BlockName)) errors.Add(at + "block '" + p.BlockName + "' is not defined in the drawing.");
+                    if ((p.Op == "insert" || (p.Op == "leader" && p.BlockName != null)) && !bl.Contains(p.BlockName)) errors.Add(at + "block '" + p.BlockName + "' is not defined in the drawing.");
                     if (p.DimStyle != null && !ds.Contains(p.DimStyle)) errors.Add(at + "dimension style '" + p.DimStyle + "' does not exist in the drawing.");
                 }
                 if (errors.Count >= MaxErrors) { errors.Add("(more problems not listed)"); break; }
