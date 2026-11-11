@@ -152,6 +152,17 @@ try {
         @('document_info', @{}, 'Revit 2024 MCP session is not available.*'),
         @('no_such_tool', @{}, 'Unknown Autodesk MCP tool: no_such_tool')
     )
+    # The Revit model tools refuse to run until get_revit_rules has been called; list_sessions and connection_status do not need it.
+    foreach ($gated in 'document_info', 'list_levels', 'list_selected', 'get_element', 'set_parameter', 'execute_csharp') {
+        $blocked = Invoke-Tool $gated @{}
+        Assert ($blocked.isError -and $blocked.content[0].text -like 'Call get_revit_rules first*') "$gated must be refused until get_revit_rules has been called: $($blocked.content[0].text)"
+    }
+    Assert (-not (Invoke-Tool 'list_sessions').isError -or (Invoke-Tool 'list_sessions').content[0].text -notlike 'Call get_revit_rules first*') 'list_sessions must not need the Revit rules'
+    $rules = Invoke-Tool 'get_revit_rules'
+    $rulesData = $rules.content[0].text | ConvertFrom-Json
+    Assert (-not $rules.isError -and $rulesData.must_follow -and $null -ne $rulesData.count -and $null -ne $rulesData.rules) "get_revit_rules failed: $($rules.content[0].text)"
+    Assert ((Invoke-Tool 'document_info').content[0].text -notlike 'Call get_revit_rules first*') 'The Revit tools must run once the rules have been read'
+    'PASS: Revit model tools are refused until get_revit_rules is called, then run'
     foreach ($check in $checks) {
         $result = Invoke-Tool $check[0] $check[1]
         Assert ($result.isError -and $result.content[0].text -like $check[2]) ("{0}: expected '{1}', got '{2}'" -f $check[0], $check[2], $result.content[0].text)

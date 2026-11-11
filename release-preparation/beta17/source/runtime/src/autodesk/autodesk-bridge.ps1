@@ -45,6 +45,7 @@ $revitTools = @(Get-RevitMcpTools | ForEach-Object {
 $workflowTools = @(
     @{name='list_skill_workflows';description='List shared workflow guidance available through this connector, each with its category (revit, autocad, 3ds-max, other-software, linkedin-marketing, branding-ci, general). Read the relevant workflow before a task.';inputSchema=@{type='object';properties=@{}};annotations=@{readOnlyHint=$true}},
     @{name='read_skill_workflow';description='Read a shared Autodesk workflow or its supporting text file. This returns guidance and does not execute code or modify a model.';inputSchema=@{type='object';properties=@{name=@{type='string';description='Skill folder name from list_skill_workflows'};file=@{type='string';description='Relative text file within the skill; defaults to SKILL.md'}};required=@('name')};annotations=@{readOnlyHint=$true}}
+    @{name='get_revit_rules';description='Get the team''s Revit rules: decisions, lessons and rejected approaches, by category. Call this FIRST before any Revit work and follow every rule returned; the Revit model tools refuse to run until it has been called in the session. Returns guidance only and does not touch a model.';inputSchema=@{type='object';properties=@{}};annotations=@{readOnlyHint=$true}}
 )
 $toolList = @($autoCadTools + $revitTools + $workflowTools)
 $autoCadToolNames = @($autoCadTools | ForEach-Object { [string]$_['name'] })
@@ -137,6 +138,29 @@ function Invoke-WithWriteLock {
     }
 }
 
+# Every Revit model tool needs the Revit rules to have been read in this session, and again after two hours.
+$script:RevitRulesReadAt = [DateTime]::MinValue
+$revitRulesFresh = [TimeSpan]::FromHours(2)
+$revitRulesFirst = 'Call get_revit_rules first and follow every rule it returns, then repeat this call. The Revit rules are read once per session and again after two hours.'
+
+# The team's Revit rules (revit-rules/rules.json in the shipped or approved skill library), returned by get_revit_rules.
+function Get-RevitRules {
+    try { $text = (Read-SharedWorkflow -Name 'revit-rules' -File 'rules.json').content }
+    catch { throw 'The Revit rules are not installed (revit-rules/rules.json). Reinstall the connector or run Skills Sync, then call get_revit_rules again.' }
+    try { $parsed = $text.TrimStart([char]0xFEFF) | ConvertFrom-Json }
+    catch { throw 'The Revit rules file (revit-rules/rules.json) is not valid JSON. Run Skills Sync or reinstall, then call get_revit_rules again.' }
+    $rules = @(@($parsed.rules) | Where-Object { $null -ne $_ } | ForEach-Object {
+        @{id=[string]$_.id;title=[string]$_.title;category=[string]$_.category;decided_on=[string]$_.decided_on;instruction=[string]$_.instruction}
+    } | Sort-Object { $_['category'] })
+    @{
+        must_follow = 'These rules apply to every Revit task. Follow every rule. If a rule conflicts with a skill or the request, say so and ask; never use a rejected approach. Report any rule you cannot follow.'
+        count = $rules.Count
+        updated = [string]$parsed.updated
+        rules = $rules
+        to_add_a_rule = 'Only when the user asks after a finished task: read skill revit-rules (read_skill_workflow) for how to draft and save a rule.'
+    }
+}
+
 function Get-AutodeskMcpTools {
     @($toolList)
 }
@@ -176,7 +200,7 @@ function Invoke-AutodeskMcpRequest {
                 protocolVersion = $protocol
                 capabilities = @{tools=@{}}
                 serverInfo = @{name='Smart Connector';version=$connectorVersion}
-                instructions = 'Use list_skill_workflows and read_skill_workflow to load relevant shared guidance before CAD/BIM tasks; no separate skill upload is required to read this guidance. Authenticated Autodesk connector for Codex and Claude with AutoCAD and Revit tools. Model-changing calls are serialized across AI clients. For AutoCAD, read drawing_info before edits and save only when explicitly requested. For Revit, call list_sessions when multiple sessions may be open, read document_info before writes, pass expected_document, and verify every write with a separate read.'
+                instructions = 'Before any Revit work call get_revit_rules and follow every rule it returns; the Revit model tools refuse to run until it has been called. Use list_skill_workflows and read_skill_workflow to load relevant shared guidance before CAD/BIM tasks; no separate skill upload is required to read this guidance. Authenticated Autodesk connector for Codex and Claude with AutoCAD and Revit tools. Model-changing calls are serialized across AI clients. For AutoCAD, read drawing_info before edits and save only when explicitly requested. For Revit, call list_sessions when multiple sessions may be open, read document_info before writes, pass expected_document, and verify every write with a separate read.'
             }
         }
         'ping' { $response.result = @{} }
@@ -190,6 +214,10 @@ function Invoke-AutodeskMcpRequest {
                 elseif ($name -eq 'read_skill_workflow') {
                     $data = Read-SharedWorkflow -Name ([string]$Request.params.arguments.name) -File ([string]$Request.params.arguments.file)
                 }
+                elseif ($name -eq 'get_revit_rules') {
+                    $data = Get-RevitRules
+                    $script:RevitRulesReadAt = [DateTime]::UtcNow
+                }
                 elseif ($name -eq 'connection_status') {
                     $data = Get-AutodeskConnectionStatus $Request.params.arguments
                 }
@@ -197,6 +225,7 @@ function Invoke-AutodeskMcpRequest {
                     $data = Invoke-WithWriteLock $name { Invoke-AutoCadMcpTool $name $Request.params.arguments }
                 }
                 elseif ($name -in $revitToolNames) {
+                    if ($name -ne 'list_sessions' -and ([DateTime]::UtcNow - $script:RevitRulesReadAt) -gt $revitRulesFresh) { throw $revitRulesFirst }
                     $data = Invoke-WithWriteLock $name { Invoke-RevitMcpTool $name $Request.params.arguments }
                 }
                 else { throw "Unknown Autodesk MCP tool: $name" }

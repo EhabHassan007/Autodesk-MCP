@@ -220,8 +220,13 @@ namespace SmartConnector
     internal static class McpServer
     {
         private static readonly string[] Protocols = { "2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25", "2026-07-28" };
-        private const string Instructions = "Use list_skill_workflows and read_skill_workflow to load relevant shared guidance before CAD/BIM tasks; no separate skill upload is required to read this guidance. Authenticated Autodesk connector for Codex and Claude with AutoCAD and Revit tools. Model-changing calls are serialized across AI clients. For AutoCAD, read drawing_info before edits and save only when explicitly requested. For Revit, call list_sessions when multiple sessions may be open, read document_info before writes, pass expected_document, and verify every write with a separate read.";
+        private const string Instructions = "Before any Revit work call get_revit_rules and follow every rule it returns; the Revit model tools refuse to run until it has been called. Use list_skill_workflows and read_skill_workflow to load relevant shared guidance before CAD/BIM tasks; no separate skill upload is required to read this guidance. Authenticated Autodesk connector for Codex and Claude with AutoCAD and Revit tools. Model-changing calls are serialized across AI clients. For AutoCAD, read drawing_info before edits and save only when explicitly requested. For Revit, call list_sessions when multiple sessions may be open, read document_info before writes, pass expected_document, and verify every write with a separate read.";
         private const string CombinedStatus = "Check whether the Smart Connector can reach AutoCAD and Revit. Reports AutoCAD (running full AutoCAD over COM, version, active drawing) and Revit (add-in sessions, active document, last error) separately. Succeeds when either product is reachable; a product that is closed is reported, not an error. Optional session_id selects a Revit session.";
+
+        // Every Revit model tool needs the Revit rules to have been read in this session, and again after two hours.
+        private static DateTime _revitRulesReadAt = DateTime.MinValue;
+        private static readonly TimeSpan RevitRulesFresh = TimeSpan.FromHours(2);
+        internal const string RevitRulesFirst = "Call get_revit_rules first and follow every rule it returns, then repeat this call. The Revit rules are read once per session and again after two hours.";
 
         private static List<Dictionary<string, object>> _tools;
         private static readonly Dictionary<string, bool> ReadOnly = new Dictionary<string, bool>();
@@ -257,6 +262,10 @@ namespace SmartConnector
                             "name", Json.Object("type", "string", "description", "Skill folder name from list_skill_workflows"),
                             "file", Json.Object("type", "string", "description", "Relative text file within the skill; defaults to SKILL.md")),
                         "required", new object[] { "name" }),
+                    "annotations", Json.Object("readOnlyHint", true)));
+                tools.Add(Json.Object("name", "get_revit_rules",
+                    "description", "Get the team's Revit rules: decisions, lessons and rejected approaches, by category. Call this FIRST before any Revit work and follow every rule returned; the Revit model tools refuse to run until it has been called in the session. Returns guidance only and does not touch a model.",
+                    "inputSchema", Json.Object("type", "object", "properties", Json.Object()),
                     "annotations", Json.Object("readOnlyHint", true)));
                 foreach (Dictionary<string, object> tool in tools)
                 {
@@ -332,9 +341,14 @@ namespace SmartConnector
                 object data;
                 if (name == "list_skill_workflows") data = Json.Object("skills", Workflows.ListAll());
                 else if (name == "read_skill_workflow") data = Workflows.Read(Json.GetString(arguments, "name"), Json.GetString(arguments, "file"));
+                else if (name == "get_revit_rules") { data = RevitRules.Get(); _revitRulesReadAt = DateTime.UtcNow; }
                 else if (name == "connection_status") data = ConnectionStatus(arguments);
                 else if (AutoCadNames.Contains(name)) data = WithWriteLock(name, delegate { return AutoCadBridge.Invoke(name, arguments); });
-                else if (RevitNames.Contains(name)) data = WithWriteLock(name, delegate { return RevitBridge.Invoke(name, arguments); });
+                else if (RevitNames.Contains(name))
+                {
+                    if (name != "list_sessions" && DateTime.UtcNow - _revitRulesReadAt > RevitRulesFresh) throw new ToolException(RevitRulesFirst);
+                    data = WithWriteLock(name, delegate { return RevitBridge.Invoke(name, arguments); });
+                }
                 else throw new ToolException("Unknown Autodesk MCP tool: " + name);
                 Dictionary<string, object> result = Json.Object(
                     "content", new object[] { Json.Object("type", "text", "text", Json.Serializer.Serialize(data)) },
@@ -381,6 +395,43 @@ namespace SmartConnector
                 try { return operation(); }
                 finally { mutex.ReleaseMutex(); }
             }
+        }
+    }
+
+    // The team's Revit rules (revit-rules/rules.json in the shipped or approved skill library), returned by get_revit_rules.
+    internal static class RevitRules
+    {
+        internal static Dictionary<string, object> Get()
+        {
+            string text;
+            try { text = Json.GetString(Workflows.Read("revit-rules", "rules.json"), "content"); }
+            catch (ToolException) { throw new ToolException("The Revit rules are not installed (revit-rules/rules.json). Reinstall the connector or run Skills Sync, then call get_revit_rules again."); }
+            object parsed;
+            try { parsed = Json.Serializer.DeserializeObject(text.TrimStart('\uFEFF')); }
+            catch (Exception) { throw new ToolException("The Revit rules file (revit-rules/rules.json) is not valid JSON. Run Skills Sync or reinstall, then call get_revit_rules again."); }
+            List<Dictionary<string, object>> rules = new List<Dictionary<string, object>>();
+            object listed = Json.Get(parsed, "rules");
+            IEnumerable items = listed as IEnumerable;
+            if (items != null && !(listed is string))
+            {
+                foreach (object item in items)
+                {
+                    if (!(item is IDictionary<string, object>)) continue;
+                    rules.Add(Json.Object(
+                        "id", Json.GetString(item, "id"),
+                        "title", Json.GetString(item, "title"),
+                        "category", Json.GetString(item, "category"),
+                        "decided_on", Json.GetString(item, "decided_on"),
+                        "instruction", Json.GetString(item, "instruction")));
+                }
+            }
+            List<object> ordered = rules.OrderBy(r => (string)r["category"], StringComparer.CurrentCultureIgnoreCase).Cast<object>().ToList();
+            return Json.Object(
+                "must_follow", "These rules apply to every Revit task. Follow every rule. If a rule conflicts with a skill or the request, say so and ask; never use a rejected approach. Report any rule you cannot follow.",
+                "count", ordered.Count,
+                "updated", Json.GetString(parsed, "updated"),
+                "rules", ordered,
+                "to_add_a_rule", "Only when the user asks after a finished task: read skill revit-rules (read_skill_workflow) for how to draft and save a rule.");
         }
     }
 
