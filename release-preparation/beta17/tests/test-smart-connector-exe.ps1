@@ -131,6 +131,8 @@ try {
         @('generate_detail', @{ template = 'reception_counter_section'; apply = $true }, 'expected_drawing is required when apply is true.'),
         @('generate_detail', @{ template = 'reception_counter_section'; apply = $true; expected_drawing = 'a.dwg' }, 'No running full AutoCAD instance was found*'),
         @('generate_detail', @{ template = 'custom_section' }, 'params.parts is required.'),
+        @('generate_detail', @{ template = 'custom_section'; params = @{ parts = @(@{ id = 'a'; material = 'mdf'; points = @(@{ x = 0; y = 0; radius = 40 }, @(100, 0), @(0, 100)) }) } }, 'params.parts`[0`] (''a'') point 0: radius 40 is smaller than half the chord*'),
+        @('apply_plan', @{ expected_drawing = 'a.dwg'; items = @(@{ op = 'polyline'; layer = 'A'; points = @(@(0, 0), @(100, 0)); bulges = @(11, 0) }) }, 'items`[0`]: each bulge must be a number from -10 to 10*'),
         @('generate_detail', @{ template = 'custom_section'; params = @{ view = 'side'; parts = @(@{ id = 'a'; material = 'mdf'; x0 = 0; y0 = 0; x1 = 10; y1 = 10 }) } }, 'params.view must be section, elevation or plan.'),
         @('generate_detail', @{ template = 'custom_section'; params = @{ parts = @(@{ id = 'a'; material = 'mdf'; points = @(@(0, 0), @(100, 100), @(100, 0), @(0, 100)) }) } }, 'params.parts`[0`] (''a''): the outline crosses itself*'),
         @('generate_detail', @{ template = 'custom_section'; params = @{ parts = @(@{ id = 'a'; material = 'oak'; x0 = 0; y0 = 0; x1 = 10; y1 = 10 }) } }, 'params.parts`[0`]: material must be one of*'),
@@ -158,6 +160,8 @@ try {
     Assert (-not $paper.isError -and $paper.content[0].text -like '*"paper_items"*' -and $paper.content[0].text -like '*linear_factor*' -and $paper.content[0].text -like '*viewport_setup*') 'generate_detail paper mode must return the geometry plan, the layout plan and the viewport set-up without AutoCAD'
     $custom = Invoke-Tool 'generate_detail' @{ template = 'custom_section'; params = @{ parts = @(@{ id = 'top'; material = 'corian'; x0 = 0; y0 = 870; x1 = 600; y1 = 882 }); notes = @(@{ part = 'top'; text = '12MM THK. SOLID SURFACE TOP' }) }; return_plan = $true }
     Assert (-not $custom.isError -and $custom.content[0].text -like '*12MM THK. SOLID SURFACE TOP*' -and $custom.content[0].text -like '*custom_section*') 'generate_detail custom_section must return a plan without AutoCAD'
+    $curve = Invoke-Tool 'generate_detail' @{ template = 'custom_section'; scale = 20; params = @{ view = 'plan'; parts = @(@{ id = 'c'; material = 'corian'; points = @(@{ x = 1200; y = 0; radius = 800 }, @(2000, 800), @{ x = 1400; y = 800; radius = -200 }, @(1200, 600)) }) }; return_plan = $true }
+    Assert (-not $curve.isError -and $curve.content[0].text -like '*"bulges"*') 'generate_detail must return a curved part with bulges without AutoCAD'
     $none = Invoke-Tool 'generate_detail' @{ template = 'reception_counter_section'; annotation = 'none'; return_plan = $true }
     Assert (-not $none.isError -and $none.content[0].text -notlike '*dim_rotated*') 'generate_detail geometry-only mode must draw no dimensions'
     $gen = Invoke-Tool 'generate_detail' @{ template = 'reception_counter_section'; return_plan = $true }
