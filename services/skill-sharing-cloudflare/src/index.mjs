@@ -125,6 +125,10 @@ export async function applyDecision(env, gh, data) {
   if (!item || item.head_sha !== head_sha || item.key !== key || item.approved_key !== approved_key)
     throw new HTTPError(409,'This upload or the approved copy changed, or it was already handled. Refresh and review it again.');
   if (decision === 'approve' && item.checks.blocked.length) throw new HTTPError(422,'This upload fails a required check and cannot be approved.');
+  // The skill must declare the category of the folder it is placed in, or the repository checks fail.
+  const declared = item.checks.declared;
+  if (decision === 'approve' && declared && declared !== category)
+    throw new HTTPError(422,`This skill says "category: ${CATEGORIES.has(declared) ? declared : 'another category'}". Choose that category, or fix the line first, so the repository checks pass.`);
   if (decision === 'approve' && item.checks.flags.length && data.accept_flags !== true) throw new HTTPError(422,'Confirm that you checked the flagged lines before approving.');
   const claimed = await env.DB.prepare(`INSERT INTO review_decisions(pr,skill,head_sha,content_key,decision,category,at) VALUES(?,?,?,?,?,?,?)
     ON CONFLICT(pr,skill) DO NOTHING RETURNING pr`).bind(pr,skill,head_sha,key,decision,decision === 'approve' ? category : null,now()).first();

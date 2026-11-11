@@ -4,7 +4,8 @@ import assert from 'node:assert/strict';
 import { GitHub } from '../src/github.mjs';
 import { compareSkill, groupReviews, lineDiff, reviewChecks, reviewSummary, undecided } from '../src/review.mjs';
 
-const manifest = (name, extra = '') => `---\nname: ${name}\ndescription: Does a thing.\n${extra}---\nSteps.`;
+// The category line is part of every approved skill; pass extra "category: x" to override it.
+const manifest = (name, extra = '', category = 'autocad') => `---\nname: ${name}\ndescription: Does a thing.\n${/^category:/m.test(extra) ? '' : `category: ${category}\n`}${extra}---\nSteps.`;
 const item = (pr, name, category, extra = {}) => ({pr, pr_url:`https://github.com/owner/repo/pull/${pr}`, name, category, key:'k-'+name, submitted_at:pr*10, ...extra});
 
 test('pending uploads group by category in library order, then by skill, oldest upload first',()=>{
@@ -46,7 +47,7 @@ test('a skill is new, changed, moved or unchanged versus the approved copy, with
   assert.deepEqual(r.files.map(f=>[f.path,f.status]), [['SKILL.md','modified'],['refs/keep.md','unchanged'],['refs/new.md','added'],['refs/old.md','removed']]);
   assert.equal(r.files[0].before, approved['SKILL.md']);
   assert.equal(r.files[0].after, uploaded['SKILL.md']);
-  assert.deepEqual(r.checks, {blocked:[], flags:[]});
+  assert.deepEqual(r.checks, {blocked:[], flags:[], declared:'autocad'});
   assert.equal(compareSkill('acad-x', folder('autocad/acad-x', approved), null, texts(approved)).status, 'new');
   assert.equal(compareSkill('acad-x', folder('general/acad-x', approved), folder('autocad/acad-x', approved), texts(approved), approved).status, 'moved');
   assert.equal(compareSkill('acad-x', folder('autocad/acad-x', approved), folder('autocad/acad-x', approved), texts(approved), approved).status, 'unchanged');
@@ -57,14 +58,14 @@ test('required checks block approval; secrets, personal paths and client data ar
   const after = {'SKILL.md':before['SKILL.md']+'\napi_key = abc\nOpen C:\\Users\\ahmed\\Desktop\nLink acc://project/1\nShare \\\\server\\jobs'};
   const r = reviewChecks('acad-x', 'autocad', after, before);
   assert.deepEqual(r.blocked, []);
-  assert.deepEqual(r.flags.map(f=>[f.kind,f.line]), [['secret',7],['personal-path',8],['client-data',9],['personal-path',10]], 'the approved email line is not flagged again');
+  assert.deepEqual(r.flags.map(f=>[f.kind,f.line]), [['secret',8],['personal-path',9],['client-data',10],['personal-path',11]], 'the approved email line is not flagged again');
   // Double-encoded UTF-8 as seen in intake PR #24: an em dash arriving as mojibake. Real non-ASCII text is not flagged.
   const twice = Buffer.from(Buffer.from('—','utf8').toString('latin1'),'utf8').toString('latin1');
   const once = text => Buffer.from(text,'utf8').toString('latin1');
   const encoded = reviewChecks('acad-x','autocad',{'SKILL.md':manifest('acad-x')+'\nStep one '+twice+' read.\nAlso â€” here.\nArabic مرحبا, café — fine.'
     // One Latin-1 layer, as stored on main before PR #30: "—", "→" and "“" each become "â" plus C1 controls.
     +'\nOne layer '+once('—')+' dash.\nArrow '+once('→')+' and '+once('“quoted”')+'.\nPrices in £ or €, “” → — and ôa stay unflagged.'});
-  assert.deepEqual(encoded.flags.map(f=>[f.kind,f.line]), [['encoding',6],['encoding',7],['encoding',9],['encoding',10]]);
+  assert.deepEqual(encoded.flags.map(f=>[f.kind,f.line]), [['encoding',7],['encoding',8],['encoding',10],['encoding',11]]);
   assert.match(reviewChecks('acad-x','autocad',{'SKILL.md':'---\nname: other\ndescription: x\n---'}).blocked[0], /structure check/);
   assert.ok(reviewChecks('acad-x','autocad',{'SKILL.md':'---\nname: acad-x\n---'}).blocked.some(b=>/description/.test(b)));
   assert.ok(reviewChecks('acad-x','autocad',{'SKILL.md':manifest('acad-x','category: revit\n')}).blocked.some(b=>/category "revit"/.test(b)));
@@ -185,4 +186,12 @@ test('closing an upload comments and closes the PR; it never merges',async()=>{
   await gh.closeIntake(9, 'summary');
   assert.deepEqual(calls.map(c=>[c.method,c.path]), [['POST','/repos/owner/repo/issues/9/comments'],['PATCH','/repos/owner/repo/pulls/9']]);
   assert.deepEqual(calls[1].body, {state:'closed'});
+});
+
+test('a skill without a category line is blocked, because the repository checks fail once it is approved',()=>{
+  const none = '---\nname: acad-x\ndescription: Does a thing.\n---\nSteps.';
+  const r = reviewChecks('acad-x','autocad',{'SKILL.md':none});
+  assert.ok(r.blocked.some(b=>/no "category:" line/.test(b)), r.blocked.join(' | '));
+  assert.equal(r.declared, undefined);
+  assert.deepEqual(reviewChecks('acad-x','autocad',{'SKILL.md':manifest('acad-x')}).blocked, [], 'with the line it passes');
 });

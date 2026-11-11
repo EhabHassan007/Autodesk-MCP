@@ -29,6 +29,9 @@ export function reviewChecks(name, category, files, before = {}, problems = []) 
   if (!/^description:\s*\S.+$/m.test(manifest)) blocked.push('SKILL.md has no "description:" line.');
   const declared = /^category:\s*(\S+)\s*$/m.exec(manifest)?.[1];
   if (declared && category && declared !== category) blocked.push(`SKILL.md says category "${declared}" but the upload is in "${category}".`);
+  // The repository's own checks require every approved skill to declare the category of its folder, so a skill
+  // without the line would break them the moment it is approved.
+  if (!declared) blocked.push('SKILL.md has no "category:" line. Add one that names its folder, for example "category: revit", and send it again; without it the repository checks fail once it is approved.');
   // Scan only lines the upload adds, as the intake workflow does, so approved text is not flagged again.
   const flags = [];
   for (const [path, text] of Object.entries(texts)) {
@@ -39,7 +42,7 @@ export function reviewChecks(name, category, files, before = {}, problems = []) 
         if (pattern.test(line)) { flags.push({kind, path, line:index+1, text:line.trim().slice(0,160)}); break; }
     });
   }
-  return {blocked, flags};
+  return {blocked, flags, ...(declared ? {declared} : {})};
 }
 
 // Compares one uploaded skill folder with the approved copy on main.
