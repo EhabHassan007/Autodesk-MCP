@@ -26,6 +26,7 @@ namespace SmartConnector
         internal double DimScale;              // dimensions: overall scale of sizes (DIMSCALE for this dimension); 0 = the style decides
         internal double LinearFactor;          // dimensions in paper space: the measured value is multiplied by this (DIMLFAC), so a dimension of model geometry reads true; 0 = the style decides
         internal List<KeyValuePair<string, string>> Attributes;   // insert: attribute tag and value
+        internal List<double> Bulges;          // polyline: bulge of the segment that starts at each point (0 = straight); null = all straight
     }
 
     // The pure part of apply_plan: it checks a plan before AutoCAD is contacted, and checks it against the drawing's
@@ -47,7 +48,7 @@ namespace SmartConnector
             { "line", new[] { "op", "id", "layer", "start", "end" } },
             { "circle", new[] { "op", "id", "layer", "center", "radius" } },
             { "arc", new[] { "op", "id", "layer", "center", "radius", "start_angle", "end_angle" } },
-            { "polyline", new[] { "op", "id", "layer", "points", "closed" } },
+            { "polyline", new[] { "op", "id", "layer", "points", "closed", "bulges" } },
             { "text", new[] { "op", "id", "layer", "point", "text", "height", "rotation", "style" } },
             { "mtext", new[] { "op", "id", "layer", "point", "width", "text", "height", "rotation", "style" } },
             { "insert", new[] { "op", "id", "layer", "name", "point", "scale", "rotation", "attributes" } },
@@ -130,6 +131,18 @@ namespace SmartConnector
                         p.Vertices = Vertices(d, "points", i);
                         if (d.ContainsKey("closed")) { if (!(d["closed"] is bool)) throw Fail(i, "closed must be true or false."); p.Closed = (bool)d["closed"]; }
                         if (p.Closed && p.Vertices.Count < 3) throw Fail(i, "a closed polyline needs at least 3 points.");
+                        if (d.ContainsKey("bulges"))
+                        {
+                            object[] bulges = AsArray(d["bulges"]);
+                            if (bulges == null || bulges.Length != p.Vertices.Count) throw Fail(i, "'bulges' must be a list with one number per point (the arc of the segment that starts there; 0 = straight).");
+                            p.Bulges = new List<double>();
+                            foreach (object b in bulges)
+                            {
+                                double v;
+                                if (!Schema.TryNumber(b, out v) || Math.Abs(v) > 10) throw Fail(i, "each bulge must be a number from -10 to 10 (1 = half circle).");
+                                p.Bulges.Add(v);
+                            }
+                        }
                         break;
                     case "text":
                     case "mtext":

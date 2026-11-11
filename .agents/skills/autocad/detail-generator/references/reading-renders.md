@@ -39,7 +39,7 @@ These are observed values for cross-checking estimates. They are not code requir
 ## What the tool can and cannot draw yet
 
 - **Straight counters, any section, elevations and plans with slats, shaped (polygon) panels and LED lines:** yes, with `custom_section` (`view`, `points`, `repeat`, `lines`).
-- **Curved fronts and S-shaped plans:** not yet. Parts are straight-edged polygons. Until arc segments exist, draw curved plans with `apply_plan` arcs, and keep sections (which are straight through a curved counter) in `custom_section`.
+- **Curved fronts and S-shaped plans:** yes, with arcs in `points` (`bulge`, `radius` or `rise`). Plan the S as straight runs plus quarter curves; give a catalogue chord as `rise` or work out the radius first. Sections through a curved counter are straight and need no arcs. The S-shaped reception below is drawn as: left run 1200, a quarter curve up (centreline radius 500, so 200 inside and 800 outside), a quarter curve back, then the right run to 4600, 1600 across the S.
 - **Factory products** (moulded LED furniture, ready-made desks): layout views only, with the maker's references in the notes.
 
 ## Worked readings (generic, no brand names)

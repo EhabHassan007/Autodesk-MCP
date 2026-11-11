@@ -20,7 +20,7 @@ Use `apply_plan` when a task needs more than a handful of objects (details, layo
 | `line` | `layer`, `start`, `end` |
 | `circle` | `layer`, `center`, `radius` |
 | `arc` | `layer`, `center`, `radius`, `start_angle`, `end_angle` (degrees, counter-clockwise) |
-| `polyline` | `layer`, `points` as `[[x,y],...]`, `closed` |
+| `polyline` | `layer`, `points` as `[[x,y],...]`, `closed`, `bulges` (one number per point: the arc of the segment that starts there; 0 straight, 1 half circle, 0.41421 a quarter, positive anticlockwise) |
 | `text` | `layer`, `point`, `text` (one line), `height`, `rotation`, `style` |
 | `mtext` | `layer`, `point`, `width`, `text` (`\P` starts a new line), `height`, `rotation`, `style` |
 | `insert` | `layer`, `name` (block already in the drawing), `point`, `scale`, `rotation`, `attributes` (object of attribute tag to one-line text; a tag the block does not have fails the step and the block is removed again) |

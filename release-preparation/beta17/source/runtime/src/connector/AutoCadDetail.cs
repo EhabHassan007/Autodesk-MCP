@@ -58,9 +58,14 @@ namespace SmartConnector
             internal List<double[]> Visible;         // elevation/plan: the visible pieces {x0,y0,x1,y1} of a part partly hidden by nearer parts; null when fully visible
             internal string HatchPattern;            // caller's hatch: pattern name, "none", or null for the view's default
             internal double HatchScale = 1, HatchAngle;
+            internal List<double> Bulges;            // arc of the segment starting at each point of Pts (0 = straight); null = all straight
+            private List<double[]> flat;
+            // The outline as straight segments: arcs are flattened to within 0.2 mm for overlap, hidden-line and leader checks.
             internal List<double[]> Outline()
             {
-                return Pts ?? new List<double[]> { new[] { X0, Y0 }, new[] { X1, Y0 }, new[] { X1, Y1 }, new[] { X0, Y1 } };
+                if (Pts == null) return new List<double[]> { new[] { X0, Y0 }, new[] { X1, Y0 }, new[] { X1, Y1 }, new[] { X0, Y1 } };
+                if (Bulges == null) return Pts;
+                return flat ?? (flat = Flatten(Pts, Bulges));
             }
         }
 
@@ -143,7 +148,10 @@ namespace SmartConnector
                 foreach (Part b in parts)
                 {
                     if (b.Visible != null) { foreach (double[] g in b.Visible) Line(g[0], g[1], g[2], g[3], LOutline); continue; }   // partly hidden: its visible lines only
-                    r.Items.Add(Json.Object("op", "polyline", "id", b.Id, "layer", cut ? LCut : LOutline, "points", b.Outline().Select(q => (object)P(q[0], q[1])).ToArray(), "closed", true));
+                    List<double[]> drawn = b.Pts ?? b.Outline();
+                    Dictionary<string, object> poly = Json.Object("op", "polyline", "id", b.Id, "layer", cut ? LCut : LOutline, "points", drawn.Select(q => (object)P(q[0], q[1])).ToArray(), "closed", true);
+                    if (b.Bulges != null) poly["bulges"] = b.Bulges.Select(v => (object)Math.Round(v, 9)).ToArray();
+                    r.Items.Add(poly);
                 }
                 foreach (Part b in parts)
                 {
@@ -280,6 +288,31 @@ namespace SmartConnector
         private static readonly string[] CustomAllowed = { "view", "parts", "lines", "levels", "notes", "dimensions", "title", "overall_dimensions", "floor", "hidden_lines" };
         private static readonly string[] Materials = { "mdf", "ply", "stone", "marble", "corian", "steel", "glass", "outline" };
         private const int MaxCustomParts = 200;
+
+        // ---- arcs: AutoCAD bulge = tan(sweep / 4), positive anticlockwise ----
+        internal static List<double[]> Flatten(List<double[]> pts, List<double> bulges)
+        {
+            List<double[]> o = new List<double[]>();
+            for (int i = 0; i < pts.Count; i++)
+            {
+                double[] a = pts[i], b = pts[(i + 1) % pts.Count];
+                o.Add(a);
+                double bulge = bulges[i];
+                if (bulge == 0) continue;
+                double dx = b[0] - a[0], dy = b[1] - a[1], k = (1 - bulge * bulge) / (4 * bulge);
+                double cx = (a[0] + b[0]) / 2 - k * dy, cy = (a[1] + b[1]) / 2 + k * dx;
+                double radius = Math.Sqrt((a[0] - cx) * (a[0] - cx) + (a[1] - cy) * (a[1] - cy));
+                double sweep = 4 * Math.Atan(bulge), start = Math.Atan2(a[1] - cy, a[0] - cx);
+                double step = radius > 0.2 ? 2 * Math.Acos(1 - 0.2 / radius) : Math.PI / 8;
+                int n = Math.Max(2, Math.Min(720, (int)Math.Ceiling(Math.Abs(sweep) / step)));
+                for (int k2 = 1; k2 < n; k2++)
+                {
+                    double t = start + sweep * k2 / n;
+                    o.Add(new[] { cx + radius * Math.Cos(t), cy + radius * Math.Sin(t) });
+                }
+            }
+            return o;
+        }
 
         // ---- polygon geometry for custom parts ----
         private static double Cross(double[] o, double[] a, double[] b) { return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]); }
@@ -421,6 +454,45 @@ namespace SmartConnector
             return n.Count == 2 ? n.ToArray() : null;
         }
 
+        // One outline point: [x, y], [x, y, bulge], or {x, y, bulge | radius | rise}; the arc is that of the segment to the next point.
+        private static double[] Vertex(object o, double[] next, string where)
+        {
+            IDictionary<string, object> d = o as IDictionary<string, object>;
+            if (d == null)
+            {
+                System.Collections.IEnumerable seq = o as System.Collections.IEnumerable;
+                if (o == null || o is string || seq == null) return null;
+                List<double> n = new List<double>();
+                foreach (object v in seq) { double x; if (!Schema.TryNumber(v, out x)) return null; n.Add(x); }
+                if (n.Count < 2 || n.Count > 3 || Math.Abs(n[0]) > 10000 || Math.Abs(n[1]) > 10000) return null;
+                if (n.Count == 3 && Math.Abs(n[2]) > 10) throw new ToolException(where + ": a bulge must be from -10 to 10 (1 = half circle).");
+                return new[] { n[0], n[1], n.Count == 3 ? n[2] : 0 };
+            }
+            OnlyKeys(d, where, "x", "y", "bulge", "radius", "rise");
+            double px = Coord(d, "x", where, -10000, 10000), py = Coord(d, "y", where, -10000, 10000), bulge = 0;
+            int ways = (d.ContainsKey("bulge") ? 1 : 0) + (d.ContainsKey("radius") ? 1 : 0) + (d.ContainsKey("rise") ? 1 : 0);
+            if (ways > 1) throw new ToolException(where + ": give one of bulge, radius or rise.");
+            if (ways == 0) return new[] { px, py, 0.0 };
+            if (next == null) throw new ToolException(where + ": radius and rise need the next point; use bulge on the last point instead.");
+            double chord = Math.Sqrt((next[0] - px) * (next[0] - px) + (next[1] - py) * (next[1] - py));
+            if (chord < 0.01) throw new ToolException(where + ": the arc's two ends are the same point.");
+            if (d.ContainsKey("bulge")) { bulge = Coord(d, "bulge", where, -10, 10); }
+            else if (d.ContainsKey("rise"))
+            {
+                double rise = Coord(d, "rise", where, -10000, 10000);   // height of the arc from its chord; positive: anticlockwise, so the arc bows out to the right of the direction of travel
+                bulge = 2 * rise / chord;
+            }
+            else
+            {
+                double radius = Coord(d, "radius", where, -100000, 100000);   // positive: anticlockwise (the arc bows out to the right of the direction of travel); always the shorter arc
+                if (Math.Abs(radius) < chord / 2 - 1e-9) throw new ToolException(where + ": radius " + Mm(Math.Abs(radius)) + " is smaller than half the chord (" + Mm(chord / 2) + ").");
+                double half = Math.Asin(Math.Min(1, chord / (2 * Math.Abs(radius))));
+                bulge = Math.Sign(radius) * Math.Tan(half / 2);
+            }
+            if (Math.Abs(bulge) > 10) throw new ToolException(where + ": that arc is too large (bulge over 10).");
+            return new[] { px, py, bulge };
+        }
+
         private static void OnlyKeys(IDictionary<string, object> d, string where, params string[] allowed)
         {
             foreach (string k in d.Keys)
@@ -485,21 +557,47 @@ namespace SmartConnector
                 {
                     if (p.ContainsKey("x0") || p.ContainsKey("y0") || p.ContainsKey("x1") || p.ContainsKey("y1")) throw new ToolException(at + " ('" + id + "'): give either points or x0, y0, x1, y1, not both.");
                     System.Collections.IEnumerable seq = p["points"] as System.Collections.IEnumerable;
+                    List<object> rawPts = new List<object>();
+                    if (seq != null && !(p["points"] is string)) foreach (object o in seq) rawPts.Add(o);
+                    if (rawPts.Count < 3 || rawPts.Count > 100) throw new ToolException(at + " ('" + id + "'): points must be a list of 3 to 100 [x, y] points in mm (within 10 m).");
+                    // first pass for plain coordinates (radius and rise need the next point)
+                    List<double[]> plain = new List<double[]>();
+                    foreach (object o in rawPts)
+                    {
+                        IDictionary<string, object> od = o as IDictionary<string, object>;
+                        double px2, py2;
+                        if (od != null && od.ContainsKey("x") && od.ContainsKey("y") && Schema.TryNumber(od["x"], out px2) && Schema.TryNumber(od["y"], out py2)) { plain.Add(new[] { px2, py2 }); continue; }
+                        double[] v0 = od == null ? Vertex(o, null, at + " ('" + id + "')") : null;
+                        plain.Add(v0 == null ? null : new[] { v0[0], v0[1] });
+                    }
+                    if (plain.Any(q => q == null)) throw new ToolException(at + " ('" + id + "'): points must be a list of 3 to 100 [x, y] points in mm (within 10 m).");
+                    bool closingRepeated = plain.Count > 3 && Math.Abs(plain[0][0] - plain[plain.Count - 1][0]) < 1e-9 && Math.Abs(plain[0][1] - plain[plain.Count - 1][1]) < 1e-9;
+                    int count0 = closingRepeated ? plain.Count - 1 : plain.Count;
                     List<double[]> pts = new List<double[]>();
-                    if (seq != null && !(p["points"] is string)) foreach (object o in seq) { double[] q = Pair(o); if (q == null) { pts = null; break; } pts.Add(q); }
-                    if (pts == null || pts.Count < 3 || pts.Count > 100) throw new ToolException(at + " ('" + id + "'): points must be a list of 3 to 100 [x, y] points in mm (within 10 m).");
-                    if (pts.Count > 3 && Math.Abs(pts[0][0] - pts[pts.Count - 1][0]) < 1e-9 && Math.Abs(pts[0][1] - pts[pts.Count - 1][1]) < 1e-9) pts.RemoveAt(pts.Count - 1);   // closing point repeated
+                    List<double> bulges = new List<double>();
+                    for (int k = 0; k < count0; k++)
+                    {
+                        double[] v = Vertex(rawPts[k], plain[(k + 1) % count0], at + " ('" + id + "') point " + k);
+                        if (v == null) throw new ToolException(at + " ('" + id + "'): points must be a list of 3 to 100 [x, y] points in mm (within 10 m).");
+                        pts.Add(new[] { v[0], v[1] });
+                        bulges.Add(v[2]);
+                    }
+                    if (closingRepeated && rawPts[plain.Count - 1] is IDictionary<string, object> && ((IDictionary<string, object>)rawPts[plain.Count - 1]).Keys.Any(key => key != "x" && key != "y"))
+                        throw new ToolException(at + " ('" + id + "'): put the arc on the point where it starts, not on the repeated closing point.");
+                    if (bulges.Any(b => b != 0)) shape.Bulges = bulges;
                     for (int k = 0; k < pts.Count; k++)
                         if (Math.Abs(pts[k][0] - pts[(k + 1) % pts.Count][0]) < 0.01 && Math.Abs(pts[k][1] - pts[(k + 1) % pts.Count][1]) < 0.01) throw new ToolException(at + " ('" + id + "'): point " + k + " repeats the next point.");
-                    for (int k = 0; k < pts.Count; k++)
-                        for (int m = k + 1; m < pts.Count; m++)
+                    List<double[]> fl = shape.Bulges == null ? pts : Flatten(pts, shape.Bulges);
+                    for (int k = 0; k < fl.Count; k++)
+                        for (int m = k + 1; m < fl.Count; m++)
                         {
-                            if (m == k + 1 || (k == 0 && m == pts.Count - 1)) continue;   // neighbouring edges share a point
-                            if (SegmentsTouch(pts[k], pts[(k + 1) % pts.Count], pts[m], pts[(m + 1) % pts.Count])) throw new ToolException(at + " ('" + id + "'): the outline crosses itself (edges " + k + " and " + m + ").");
+                            if (m == k + 1 || (k == 0 && m == fl.Count - 1)) continue;   // neighbouring edges share a point
+                            if (SegmentsTouch(fl[k], fl[(k + 1) % fl.Count], fl[m], fl[(m + 1) % fl.Count]))
+                                throw new ToolException(at + " ('" + id + "'): the outline crosses itself" + (shape.Bulges == null ? " (edges " + k + " and " + m + ")." : " (check the arcs)."));
                         }
-                    if (Math.Abs(Area(pts)) < 1) throw new ToolException(at + " ('" + id + "'): the points enclose no area.");
+                    if (Math.Abs(Area(fl)) < 1) throw new ToolException(at + " ('" + id + "'): the points enclose no area.");
                     shape.Pts = pts;
-                    shape.X0 = pts.Min(q => q[0]); shape.X1 = pts.Max(q => q[0]); shape.Y0 = pts.Min(q => q[1]); shape.Y1 = pts.Max(q => q[1]);
+                    shape.X0 = fl.Min(q => q[0]); shape.X1 = fl.Max(q => q[0]); shape.Y0 = fl.Min(q => q[1]); shape.Y1 = fl.Max(q => q[1]);
                 }
                 else
                 {
@@ -549,7 +647,8 @@ namespace SmartConnector
                     {
                         Id = pid, Group = count > 1 ? id : null, Material = material, HatchPattern = shape.HatchPattern, HatchScale = shape.HatchScale, HatchAngle = shape.HatchAngle,
                         X0 = shape.X0 + dx, X1 = shape.X1 + dx, Y0 = shape.Y0 + dy, Y1 = shape.Y1 + dy,
-                        Pts = shape.Pts == null ? null : shape.Pts.Select(q => new[] { q[0] + dx, q[1] + dy }).ToList()
+                        Pts = shape.Pts == null ? null : shape.Pts.Select(q => new[] { q[0] + dx, q[1] + dy }).ToList(),
+                        Bulges = shape.Bulges
                     };
                     if (Math.Abs(part.X0) > 10000 || Math.Abs(part.X1) > 10000 || Math.Abs(part.Y0) > 10000 || Math.Abs(part.Y1) > 10000) throw new ToolException(at + ": repeat '" + pid + "' falls outside 10 m.");
                     parts.Add(part);
