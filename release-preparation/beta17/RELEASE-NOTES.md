@@ -28,4 +28,4 @@ Lean core: Smart Connector now runs nothing in the background. This removes the 
 - The Revit add-in is now compiled in the automated tests with the same Windows compiler the PCs use, against the Revit 2024 API reference assemblies.
 - Detail Generator, paper mode: notes are now leaders (the office Multiple Leader Lab block, or a native multileader), levels use the level indicator block with elevation and description, view titles use DWG-VIEWTITLE, and `layer_scheme` uses the office counter-sheet layers when the drawing has them. Notes follow the office wording (`18mm THK MDF ...`). Not yet run in AutoCAD.
 
-SHA-256: 23C50880AB4C3ADCD1B49C3E22B22099F090647BDCEFDE0760279F4DB9E246D4
+SHA-256: A514C393564205D04CB859F2CE5BAF686128D5844B1ECBD64EB6B2AFAEEDC492
