@@ -331,7 +331,7 @@ namespace SmartConnector
             string revitInstallPath = Path.Combine(Env.ProgramFiles, "Autodesk", "Revit " + revitVersion);
             string revitApi = Path.Combine(revitInstallPath, "RevitAPI.dll"), revitUiApi = Path.Combine(revitInstallPath, "RevitAPIUI.dll");
             string addin = Path.Combine(root, "src", "revit", "addin");
-            string[] sources = { Path.Combine(addin, "RevitMcpApplication.cs"), Path.Combine(addin, "AdvancedControl.cs"), Path.Combine(addin, "ConnectorUi.cs") };
+            string[] sources = { Path.Combine(addin, "RevitMcpApplication.cs"), Path.Combine(addin, "AdvancedControl.cs"), Path.Combine(addin, "RequestJobs.cs"), Path.Combine(addin, "RevisionClouds.cs"), Path.Combine(addin, "ConnectorUi.cs") };
             string windir = Env.Get("WINDIR", Environment.SpecialFolder.Windows);
             string framework = Path.Combine(windir, "Microsoft.NET", "Framework64", "v4.0.30319");
             string compiler = Path.Combine(framework, "csc.exe");

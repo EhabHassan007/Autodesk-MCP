@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
@@ -15,6 +16,14 @@ namespace SmartConnector
     internal static class RevitBridge
     {
         internal const string Version = "2024";
+
+        // What execute_csharp promises. The PowerShell fallback bridge carries the same text.
+        internal const string ExecuteDescription = "Execute controlled Revit 2024 C# against the active document. Use read for inspection, transaction for writes inside one automatic transaction, and manual only for workflows that must manage their own transactions or family documents. Read document_info first. Code must return a string. Model changes require allow_model_changes=true. Does not save or synchronize unless the supplied manual code explicitly does so. " +
+            "RUNNER: your code is the body of Run(UIApplication application, Document document, string parametersJson); those three are the only variables (no doc, no uidoc: use application.ActiveUIDocument). Language level is C# 5: no ?. , no string interpolation, no nameof, no expression-bodied members, no out var. Namespaces already imported: System, System.Collections.Generic, System.Globalization, System.IO, System.Linq, System.Text, Autodesk.Revit.DB, Autodesk.Revit.UI; use full names for any other. " +
+            "ERRORS come typed as [compile_error], [runtime_error], [commit_failed], [document_changed] or [busy]: a typed error is a problem in the code or in Revit, not a lost connection. " +
+            "TIME: the call waits wait_seconds (default 60). If Revit is still working it returns completed=false and a job_id: do NOT run the code again, call get_job. background=true returns the job_id at once. If Revit never started the request it returns [busy] and nothing ran. " +
+            "dry_run=true (transaction mode only) runs the code, rolls everything back and returns change counts; in a workshared model Revit may keep elements checked out until the next synchronise. " +
+            "Keep writes small: about 40 creations per call, regenerate once per call, never delete and recreate everything in one transaction. A long script can report progress with McpProgress.Report(done, total, note).";
         private static List<Dictionary<string, object>> _tools;
 
         internal static List<Dictionary<string, object>> Tools
@@ -35,14 +44,29 @@ namespace SmartConnector
                     Schema.Tool("set_parameter", "Set one writable element parameter in a Revit transaction. Numeric values use Revit internal units. Does not save or synchronize.",
                         Json.Object("session_id", session(), "expected_document", str(), "element_id", str(), "parameter", str(), "value", Json.Object("type", "string")),
                         new[] { "expected_document", "element_id", "parameter", "value" }, false),
-                    Schema.Tool("execute_csharp", "Execute controlled Revit 2024 C# against the active document. Use read for inspection, transaction for writes inside one automatic transaction, and manual only for workflows that must manage their own transactions or family documents. Read document_info first. Code must return a string. Model changes require allow_model_changes=true. Does not save or synchronize unless the supplied manual code explicitly does so.",
+                    Schema.Tool("execute_csharp", ExecuteDescription,
                         Json.Object("session_id", session(), "expected_document", str(),
                             "execution_mode", Json.Object("type", "string", "enum", new object[] { "read", "transaction", "manual" }),
                             "allow_model_changes", Json.Object("type", "boolean"),
                             "code", Json.Object("type", "string", "minLength", 1, "maxLength", 100000),
                             "parameters_json", Json.Object("type", "string"),
-                            "transaction_name", str()),
-                        new[] { "expected_document", "execution_mode", "allow_model_changes", "code", "parameters_json", "transaction_name" }, false)
+                            "transaction_name", str(),
+                            "dry_run", Json.Object("type", "boolean"),
+                            "background", Json.Object("type", "boolean"),
+                            "wait_seconds", Json.Object("type", "integer", "minimum", 1, "maximum", 110)),
+                        new[] { "expected_document", "execution_mode", "allow_model_changes", "code", "parameters_json", "transaction_name" }, false),
+                    Schema.Tool("get_job", "Follow a Revit request that outlived its call: state (queued, running, completed, failed, cancelled), elapsed time, progress when the script reported it, and the result or error once it finished. Without job_id it lists the recent jobs. cancel=true drops a job Revit has not started; a running job cannot be stopped. Answers even while Revit is busy. Jobs are kept for 60 minutes and are lost when Revit closes.",
+                        Json.Object("session_id", session(), "job_id", str(), "cancel", Json.Object("type", "boolean")), new string[0], true),
+                    Schema.Tool("revision_cloud_info", "Read the revisions (id, number, issued), the types in the Revision Cloud Tags category with likely_tag (a model family placed in that category by mistake is not a tag; when likely_tag_types is 0 no real cloud tag family is loaded, so ask whether to use text notes or load one), and for each view_id given whether it is a dependent view and which primary view holds its annotations.",
+                        Json.Object("session_id", session(), "view_ids", Json.Object("type", "array", "items", Json.Object("type", "string"), "description", "View ids to resolve to their primary view.")), new string[0], true),
+                    Schema.Tool("create_revision_clouds", "Create revision clouds in one PLAN view: one rectangle per item from a box in model-space millimetres (x_min_mm, y_min_mm, x_max_mm, y_max_mm), each with an optional Comments value and an optional text note beside it. One transaction, at most 40 items per call: send more in further calls. A dependent view is resolved to its primary view, because annotations belong there. The revision must not be issued. Call revision_cloud_info first. dry_run=true creates, counts and rolls back. Does not save or synchronize; verify with a separate read.",
+                        Json.Object("session_id", session(), "expected_document", str(), "revision_id", str(), "view_id", str(),
+                            "items", Json.Object("type", "array", "minItems", 1, "maxItems", 40, "items", Json.Object("type", "object"), "description", "Objects with x_min_mm, y_min_mm, x_max_mm, y_max_mm and optional comment and note."),
+                            "note_type_id", str(),
+                            "note_side", Json.Object("type", "string", "enum", new object[] { "right", "left" }),
+                            "gap_mm", Json.Object("type", "number", "minimum", 0),
+                            "dry_run", Json.Object("type", "boolean")),
+                        new[] { "expected_document", "revision_id", "view_id", "items" }, false)
                 };
                 return _tools;
             }
@@ -67,11 +91,19 @@ namespace SmartConnector
                     string[] answer = line.Split(new[] { '\t' }, 2);
                     if (answer.Length != 2) throw new ToolException("Revit add-in returned an invalid response.");
                     string payload = Encoding.UTF8.GetString(Convert.FromBase64String(answer[1]));
-                    if (answer[0] == "ERR") throw new ToolException(payload);
+                    if (answer[0] == "ERR") throw new RevitAddInException(payload);
                     if (answer[0] != "OK") throw new ToolException("Revit add-in returned an unknown response.");
                     return Json.Serializer.DeserializeObject(payload);
                 }
             }
+        }
+
+        // The add-in answered, and the answer is an error: a typed message such as "[compile_error] ...". It is the add-in's
+        // own message and must reach the AI client as it is, not as a lost connection.
+        private sealed class RevitAddInException : ToolException
+        {
+            internal RevitAddInException(string message)
+                : base(Regex.IsMatch(message ?? "", @"^\[[a-z_]+\] ") ? message : "[revit_error] " + message) { }
         }
 
         private sealed class Session
@@ -106,21 +138,33 @@ namespace SmartConnector
             return Json.Object("session_id", id, "process_id", processId, "revit_version", Version,
                 "document_id", Json.GetString(status, "document_id"), "online", status != null,
                 "recent_client", true.Equals(Json.Get(status, "recent_client")),
+                "busy", true.Equals(Json.Get(status, "busy")), "busy_state", Json.GetString(status, "busy_state"),
                 "last_operation", Json.GetString(status, "last_operation"),
                 "last_error", status != null ? Json.GetString(status, "last_error") : error);
         }
 
-        private static List<Dictionary<string, object>> Sessions()
+        // statuses receives each online session's own status answer by session id, so a caller need not ask again.
+        private static List<Dictionary<string, object>> Sessions(Dictionary<string, object> statuses)
         {
             List<Dictionary<string, object>> results = new List<Dictionary<string, object>>();
             foreach (Session session in RegisteredSessions())
             {
-                try { results.Add(SessionEntry(session.Id, session.ProcessId, Pipe(session.PipeName, "connection_status", new string[0], 500), "")); }
+                try
+                {
+                    object status = Pipe(session.PipeName, "connection_status", new string[0], 500);
+                    statuses[session.Id] = status;
+                    results.Add(SessionEntry(session.Id, session.ProcessId, status, ""));
+                }
                 catch (Exception exception) { results.Add(SessionEntry(session.Id, session.ProcessId, null, exception.Message)); }
             }
             if (results.Count == 0)
             {
-                try { results.Add(SessionEntry("legacy-" + Version, "", Pipe(LegacyPipe, "connection_status", new string[0], 250), "")); }
+                try
+                {
+                    object status = Pipe(LegacyPipe, "connection_status", new string[0], 250);
+                    statuses["legacy-" + Version] = status;
+                    results.Add(SessionEntry("legacy-" + Version, "", status, ""));
+                }
                 catch (Exception) { }
             }
             return results;
@@ -146,6 +190,7 @@ namespace SmartConnector
         {
             string pipe = ResolvePipe(sessionId);
             try { return Pipe(pipe, operation, fields, 1500); }
+            catch (RevitAddInException) { throw; }
             catch (Exception exception) { throw new ToolException("Revit " + Version + " MCP session is not available. Start Revit or call list_sessions. " + exception.Message); }
         }
 
@@ -156,7 +201,12 @@ namespace SmartConnector
             return processes.Length > 0;
         }
 
-        // Read-only Revit part of the combined connection_status. Never throws; reports why Revit is unavailable.
+        private static string BusyText(object status)
+        {
+            return Json.GetString(status, "busy_reason") + " Wait, then call connection_status again; do not send the last request again, and use get_job for a request that is still running.";
+        }
+
+        // Read-only Revit part of the combined connection_status. Never throws; reports why Revit is unavailable, and whether it is busy.
         internal static Dictionary<string, object> ConnectionStatus(object arguments)
         {
             IDictionary<string, object> values = Schema.Check(Tools, "connection_status", arguments, true);
@@ -167,25 +217,86 @@ namespace SmartConnector
                 try
                 {
                     object status = Pipe(ResolvePipe(sessionId), "connection_status", new string[0], 1000);
-                    return Json.Object("available", true, "running", true, "revit_version", Version, "status", status, "summary", "Revit " + Version + " session " + sessionId + " is connected.");
+                    bool busy = true.Equals(Json.Get(status, "busy"));
+                    return Json.Object("available", true, "running", true, "revit_version", Version, "busy", busy, "busy_state", Json.GetString(status, "busy_state"), "status", status,
+                        "summary", "Revit " + Version + " session " + sessionId + (busy ? " is connected but busy: " + BusyText(status) : " is connected."));
                 }
                 catch (Exception exception)
                 {
                     return Json.Object("available", false, "running", running, "revit_version", Version, "summary", "Revit " + Version + " session " + sessionId + " is not available: " + exception.Message);
                 }
             }
-            List<Dictionary<string, object>> sessions = Sessions();
+            Dictionary<string, object> statuses = new Dictionary<string, object>();
+            List<Dictionary<string, object>> sessions = Sessions(statuses);
             List<Dictionary<string, object>> online = sessions.Where(s => true.Equals(s["online"])).ToList();
             Dictionary<string, object> result = Json.Object("available", online.Count > 0, "running", running || online.Count > 0, "revit_version", Version, "sessions", sessions);
+            object only = null;
             if (online.Count == 1)
             {
-                try { result["status"] = Pipe(ResolvePipe((string)online[0]["session_id"]), "connection_status", new string[0], 500); } catch (Exception) { }
+                statuses.TryGetValue((string)online[0]["session_id"], out only);
+                result["status"] = only;
             }
-            result["summary"] = online.Count == 1 ? "Revit " + Version + " is connected (session " + online[0]["session_id"] + ")."
-                : online.Count > 1 ? "Revit " + Version + " is connected with " + online.Count + " sessions; pass session_id to choose one."
-                : sessions.Count > 0 || running ? "Revit is running, but the Revit " + Version + " add-in is not answering; it may still be loading or busy."
+            bool onlyBusy = only != null && true.Equals(Json.Get(only, "busy"));
+            if (online.Count > 0) { result["busy"] = online.Any(s => true.Equals(s["busy"])); if (onlyBusy) result["busy_state"] = Json.GetString(only, "busy_state"); }
+            result["summary"] = online.Count == 1 ? "Revit " + Version + " is connected (session " + online[0]["session_id"] + ")" + (onlyBusy ? " but busy: " + BusyText(only) : ".")
+                : online.Count > 1 ? "Revit " + Version + " is connected with " + online.Count + " sessions; pass session_id to choose one." + (online.Any(s => true.Equals(s["busy"])) ? " At least one is busy." : "")
+                : sessions.Count > 0 || running ? "Revit is running, but the Revit " + Version + " add-in is not answering; it may still be loading, or it is an older add-in that cannot report a busy state. Wait and ask again."
                 : "Revit is not running.";
             return result;
+        }
+
+        // The extra field of execute_csharp, only when an option is set: "dry_run=true;background=true;wait_seconds=N".
+        private static string RunOptionsText(IDictionary<string, object> a)
+        {
+            List<string> options = new List<string>();
+            if (a.ContainsKey("dry_run") && (bool)a["dry_run"]) options.Add("dry_run=true");
+            if (a.ContainsKey("background") && (bool)a["background"]) options.Add("background=true");
+            if (a.ContainsKey("wait_seconds")) options.Add("wait_seconds=" + Convert.ToInt32(a["wait_seconds"], CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture));
+            return String.Join(";", options.ToArray());
+        }
+
+        private static string[] Strings(object value)
+        {
+            object[] items = value as object[];
+            if (items == null)
+            {
+                ArrayList list = value as ArrayList;
+                if (list != null) items = list.ToArray();
+            }
+            return items == null ? new string[0] : items.Select(item => Convert.ToString(item, CultureInfo.InvariantCulture)).ToArray();
+        }
+
+        private static string ElementIdText(string value, string name)
+        {
+            if (!Regex.IsMatch(value ?? "", @"^-?\d{1,18}$")) throw new ToolException(name + " must be an integer element id.");
+            return value;
+        }
+
+        private static double Number(IDictionary<string, object> item, string key, int index)
+        {
+            double number;
+            if (!item.ContainsKey(key) || !Schema.TryNumber(item[key], out number)) throw new ToolException("items[" + index + "] needs a number for " + key + ".");
+            return number;
+        }
+
+        // One cloud as the add-in reads it: "xmin;ymin;xmax;ymax;base64(comment);base64(note)", millimetres.
+        private static string CloudField(object entry, int index)
+        {
+            IDictionary<string, object> item = (IDictionary<string, object>)entry;
+            foreach (string key in item.Keys)
+                if (key != "x_min_mm" && key != "y_min_mm" && key != "x_max_mm" && key != "y_max_mm" && key != "comment" && key != "note") throw new ToolException("items[" + index + "] has an unknown field: " + key);
+            double xMin = Number(item, "x_min_mm", index), yMin = Number(item, "y_min_mm", index), xMax = Number(item, "x_max_mm", index), yMax = Number(item, "y_max_mm", index);
+            if (xMax <= xMin || yMax <= yMin) throw new ToolException("items[" + index + "] needs x_max_mm > x_min_mm and y_max_mm > y_min_mm.");
+            Func<string, string> text = key =>
+            {
+                if (!item.ContainsKey(key)) return "";
+                string value = item[key] as string;
+                if (value == null) throw new ToolException("items[" + index + "]." + key + " must be a string.");
+                if (value.Contains("\n") || value.Contains("\r") || value.Length > 500) throw new ToolException("items[" + index + "]." + key + " must be one line of at most 500 characters.");
+                return Convert.ToBase64String(Encoding.UTF8.GetBytes(value));
+            };
+            Func<double, string> n = v => v.ToString("R", CultureInfo.InvariantCulture);
+            return String.Join(";", new[] { n(xMin), n(yMin), n(xMax), n(yMax), text("comment"), text("note") });
         }
 
         internal static object Invoke(string name, object arguments)
@@ -194,14 +305,43 @@ namespace SmartConnector
             string sessionId = Json.GetString(a, "session_id");
             switch (name)
             {
-                case "list_sessions": return Json.Object("sessions", Sessions());
+                case "list_sessions": return Json.Object("sessions", Sessions(new Dictionary<string, object>()));
                 case "get_element": return Call("get_element", new[] { Json.GetString(a, "element_id") }, sessionId);
                 case "set_parameter":
                     return Call("set_parameter", new[] { Json.GetString(a, "expected_document"), Json.GetString(a, "element_id"), Json.GetString(a, "parameter"), Json.GetString(a, "value") }, sessionId);
                 case "execute_csharp":
-                    // allow_model_changes is sent as "True"/"False", as the add-in has always received it.
-                    return Call("execute_csharp", new[] { Json.GetString(a, "expected_document"), Json.GetString(a, "execution_mode"),
-                        ((bool)a["allow_model_changes"]) ? "True" : "False", Json.GetString(a, "code"), Json.GetString(a, "parameters_json"), Json.GetString(a, "transaction_name") }, sessionId);
+                {
+                    if (a.ContainsKey("dry_run") && (bool)a["dry_run"] && !String.Equals(Json.GetString(a, "execution_mode"), "transaction", StringComparison.OrdinalIgnoreCase))
+                        throw new ToolException("dry_run needs execution_mode transaction: only the automatic transaction can be rolled back.");
+                    // allow_model_changes is sent as "True"/"False", as the add-in has always received it. The seventh field (options) only when one is set.
+                    List<string> fields = new List<string> { Json.GetString(a, "expected_document"), Json.GetString(a, "execution_mode"),
+                        ((bool)a["allow_model_changes"]) ? "True" : "False", Json.GetString(a, "code"), Json.GetString(a, "parameters_json"), Json.GetString(a, "transaction_name") };
+                    string options = RunOptionsText(a);
+                    if (options.Length > 0) fields.Add(options);
+                    return Call("execute_csharp", fields.ToArray(), sessionId);
+                }
+                case "get_job":
+                    return Call("get_job", new[] { Json.GetString(a, "job_id"), a.ContainsKey("cancel") && (bool)a["cancel"] ? "True" : "False" }, sessionId);
+                case "revision_cloud_info":
+                    return Call("revision_cloud_info", Strings(a.ContainsKey("view_ids") ? a["view_ids"] : null).Select(id => ElementIdText(id, "view_ids")).ToArray(), sessionId);
+                case "create_revision_clouds":
+                {
+                    object[] entries = a["items"] as object[];
+                    if (entries == null) { ArrayList list = a["items"] as ArrayList; entries = list == null ? new object[0] : list.ToArray(); }
+                    List<string> fields = new List<string> { Json.GetString(a, "expected_document"), ElementIdText(Json.GetString(a, "revision_id"), "revision_id"), ElementIdText(Json.GetString(a, "view_id"), "view_id") };
+                    List<string> options = new List<string>();
+                    if (a.ContainsKey("note_type_id")) options.Add("note_type_id=" + ElementIdText(Json.GetString(a, "note_type_id"), "note_type_id"));
+                    if (a.ContainsKey("note_side")) options.Add("note_side=" + Json.GetString(a, "note_side").ToLowerInvariant());
+                    if (a.ContainsKey("gap_mm")) options.Add("gap_mm=" + Convert.ToDouble(a["gap_mm"], CultureInfo.InvariantCulture).ToString("R", CultureInfo.InvariantCulture));
+                    if (a.ContainsKey("dry_run") && (bool)a["dry_run"]) options.Add("dry_run=true");
+                    fields.Add(String.Join(";", options.ToArray()));
+                    for (int i = 0; i < entries.Length; i++)
+                    {
+                        if (!(entries[i] is IDictionary<string, object>)) throw new ToolException("items[" + i + "] must be an object.");
+                        fields.Add(CloudField(entries[i], i));
+                    }
+                    return Call("create_revision_clouds", fields.ToArray(), sessionId);
+                }
                 default: return Call(name, new string[0], sessionId);
             }
         }

@@ -808,10 +808,10 @@ class StubCompiler {
     $api = Join-Path $s.Programs 'Autodesk\Revit 2024'
     foreach ($argument in "/reference:$api\RevitAPI.dll", "/reference:$api\RevitAPIUI.dll", "/reference:$fakeFramework\WPF\WindowsBase.dll", "/reference:$fakeFramework\WPF\PresentationCore.dll",
         "/reference:$fakeFramework\Microsoft.CSharp.dll", "/reference:$fakeFramework\System.Windows.Forms.dll", "/reference:$fakeFramework\System.Drawing.dll") { Assert ($compilerArguments -contains $argument) "The compiler was not given $argument" }
-    foreach ($source in 'RevitMcpApplication.cs', 'AdvancedControl.cs', 'ConnectorUi.cs') { Assert ($compilerArguments -contains (Join-Parts $revitCopy @('src', 'revit', 'addin', $source))) "$source was not compiled" }
+    foreach ($source in 'RevitMcpApplication.cs', 'AdvancedControl.cs', 'RequestJobs.cs', 'RevisionClouds.cs', 'ConnectorUi.cs') { Assert ($compilerArguments -contains (Join-Parts $revitCopy @('src', 'revit', 'addin', $source))) "$source was not compiled" }
     # The same references and sources as src\revit\build-revit-addin.ps1.
     $psBuild = Get-Content (Join-Path $runtime 'src\revit\build-revit-addin.ps1') -Raw
-    foreach ($needle in "'addin\RevitMcpApplication.cs'", "'addin\AdvancedControl.cs'", "'addin\ConnectorUi.cs'", '/target:library', '/optimize+', '/platform:anycpu') { Assert ($psBuild.Contains($needle)) "build-revit-addin.ps1 no longer has $needle" }
+    foreach ($needle in "'addin\RevitMcpApplication.cs'", "'addin\AdvancedControl.cs'", "'addin\RequestJobs.cs'", "'addin\RevisionClouds.cs'", "'addin\ConnectorUi.cs'", '/target:library', '/optimize+', '/platform:anycpu') { Assert ($psBuild.Contains($needle)) "build-revit-addin.ps1 no longer has $needle" }
     # Without Revit: skipped, no compiler needed.
     $run = Invoke-Engine -State (New-State 'revit-absent') -Arguments @('--action', 'Install', '--repository-path', $root, '--skills', 'Off', '--ai-clients', 'Codex', '--product', 'Revit')
     Assert ((Has-Line $run '^\[RESULT\] revit=skipped Revit 2024 is not installed$') -and $run.Code -eq 0) (Show-Run $run)

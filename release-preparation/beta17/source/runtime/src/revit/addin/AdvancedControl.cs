@@ -29,6 +29,7 @@ namespace BimCadMcp.Revit
         internal long RequestCount;
         internal string LastOperation;
         internal string LastError;
+        internal string DocumentId;
     }
 
     internal static class ConnectionState
@@ -48,6 +49,12 @@ namespace BimCadMcp.Revit
                 State.StartedUtc = DateTime.UtcNow;
                 State.LastError = String.Empty;
             }
+        }
+
+        // The active document as last seen on Revit's thread, so a status answer can still name it while Revit is busy.
+        internal static void SetDocumentId(string documentId)
+        {
+            lock (Gate) State.DocumentId = documentId ?? String.Empty;
         }
 
         internal static void MarkServerStopped()
@@ -98,7 +105,8 @@ namespace BimCadMcp.Revit
                     LastRequestUtc = State.LastRequestUtc,
                     RequestCount = State.RequestCount,
                     LastOperation = State.LastOperation,
-                    LastError = State.LastError
+                    LastError = State.LastError,
+                    DocumentId = State.DocumentId ?? String.Empty
                 };
             }
         }
@@ -201,11 +209,12 @@ namespace BimCadMcp.Revit
 
     internal static class AdvancedControl
     {
-        internal static string ConnectionStatus(UIApplication application)
+        // Answered on the pipe thread. documentId is null when Revit's thread did not answer (busy): the last known one is used.
+        internal static string ConnectionStatus(string documentId, string busyState, string busyReason, List<Job> activeJobs)
         {
             ConnectionSnapshot state = ConnectionState.Read();
-            UIDocument uiDocument = application.ActiveUIDocument;
-            string documentId = uiDocument == null ? String.Empty : RevitOperations.DocumentId(uiDocument.Document);
+            bool stale = documentId == null;
+            string shownDocument = stale ? state.DocumentId : documentId;
             bool recent = state.LastClientUtc != DateTime.MinValue && DateTime.UtcNow - state.LastClientUtc <= TimeSpan.FromMinutes(2);
             return "{" +
                 Json.Property("server_running", state.ServerRunning) + "," +
@@ -214,12 +223,22 @@ namespace BimCadMcp.Revit
                 Json.Property("process_id", state.ProcessId.ToString(CultureInfo.InvariantCulture)) + "," +
                 Json.Property("revit_version", state.RevitVersion) + "," +
                 Json.Property("pipe_name", state.PipeName) + "," +
-                Json.Property("document_id", documentId) + "," +
+                Json.Property("document_id", shownDocument) + "," +
+                Json.Property("document_id_stale", stale) + "," +
+                Json.Property("busy", busyState != "idle") + "," +
+                Json.Property("busy_state", busyState) + "," +
+                Json.Property("busy_reason", busyReason) + "," +
+                "\"active_jobs\":[" + String.Join(",", activeJobs.Select(j => Jobs.ToJson(j, false)).ToArray()) + "]," +
                 Json.Property("request_count", state.RequestCount.ToString(CultureInfo.InvariantCulture)) + "," +
                 Json.Property("last_operation", state.LastOperation) + "," +
                 Json.Property("last_error", state.LastError) +
                 "}";
         }
+
+        // Said in the compile errors and in the execute_csharp tool description.
+        private const string RunnerContract = "Runner contract: the code is the body of Run(UIApplication application, Document document, string parametersJson) and must return a string; those three are the only variables (there is no doc, uidoc or commandData). " +
+            "Language level is C# 5: no ?. , no $\"\" interpolation, no nameof, no expression-bodied members, no out var, no pattern matching. " +
+            "Namespaces already imported: System, System.Collections.Generic, System.Globalization, System.IO, System.Linq, System.Text, Autodesk.Revit.DB, Autodesk.Revit.UI; any other namespace needs its full name.";
 
         internal static string ExecuteCSharp(
             UIApplication application,
@@ -229,26 +248,31 @@ namespace BimCadMcp.Revit
             string allowModelChanges,
             string code,
             string parametersJson,
-            string transactionName)
+            string transactionName,
+            string optionsText)
         {
             if (!String.Equals(RevitOperations.DocumentId(document), expectedDocument, StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException("Active Revit document changed. Read document_info again.");
-            if (document.IsReadOnly) throw new InvalidOperationException("The active Revit document is read-only.");
-            if (String.IsNullOrWhiteSpace(code)) throw new InvalidOperationException("C# code is required.");
-            if (code.Length > 100000) throw new InvalidOperationException("C# code exceeds the 100,000 character limit.");
+                throw new McpException("document_changed", "Active Revit document changed. Read document_info again.");
+            if (document.IsReadOnly) throw new McpException("document_read_only", "The active Revit document is read-only.");
+            if (String.IsNullOrWhiteSpace(code)) throw new McpException("invalid_request", "C# code is required.");
+            if (code.Length > 100000) throw new McpException("invalid_request", "C# code exceeds the 100,000 character limit.");
 
             string mode = (executionMode ?? String.Empty).Trim().ToLowerInvariant();
             if (mode != "read" && mode != "transaction" && mode != "manual")
-                throw new InvalidOperationException("execution_mode must be read, transaction, or manual.");
+                throw new McpException("invalid_request", "execution_mode must be read, transaction, or manual.");
             bool allowChanges;
             if (!Boolean.TryParse(allowModelChanges, out allowChanges))
-                throw new InvalidOperationException("allow_model_changes must be true or false.");
+                throw new McpException("invalid_request", "allow_model_changes must be true or false.");
             if ((mode == "transaction" || mode == "manual") && !allowChanges)
-                throw new InvalidOperationException("Model-changing execution requires allow_model_changes=true.");
+                throw new McpException("invalid_request", "Model-changing execution requires allow_model_changes=true.");
             if (mode == "read" && allowChanges)
-                throw new InvalidOperationException("Read execution requires allow_model_changes=false.");
+                throw new McpException("invalid_request", "Read execution requires allow_model_changes=false.");
+            RunOptions options = RunOptions.Parse(optionsText, 60);
+            if (options.DryRun && mode != "transaction")
+                throw new McpException("invalid_request", "dry_run needs execution_mode transaction: only the automatic transaction can be rolled back.");
             if (String.IsNullOrWhiteSpace(transactionName)) transactionName = "Execute controlled C#";
 
+            ProgressSlot.Install();
             string source =
                 "using System;\n" +
                 "using System.Collections.Generic;\n" +
@@ -258,6 +282,13 @@ namespace BimCadMcp.Revit
                 "using System.Text;\n" +
                 "using Autodesk.Revit.DB;\n" +
                 "using Autodesk.Revit.UI;\n" +
+                "public static class McpProgress {\n" +
+                "  public static void Report(int done, int total, string note) {\n" +
+                "    Action<int, int, string> report = AppDomain.CurrentDomain.GetData(\"BimCadMcp.Progress\") as Action<int, int, string>;\n" +
+                "    if (report != null) report(done, total, note);\n" +
+                "  }\n" +
+                "  public static void Report(int done, int total) { Report(done, total, \"\"); }\n" +
+                "}\n" +
                 "public static class BimCadMcpDynamicEntry {\n" +
                 "  public static string Run(UIApplication application, Document document, string parametersJson) {\n" +
                 "#line 1 \"mcp_code.cs\"\n" + code + "\n#line default\n" +
@@ -284,40 +315,17 @@ namespace BimCadMcp.Revit
             {
                 results = provider.CompileAssemblyFromSource(compilerParameters, source);
             }
-            if (results.Errors.HasErrors)
-            {
-                StringBuilder errors = new StringBuilder("C# compilation failed:");
-                foreach (CompilerError error in results.Errors)
-                {
-                    if (error.IsWarning) continue;
-                    errors.Append("\nLine ").Append(error.Line.ToString(CultureInfo.InvariantCulture)).Append(": ").Append(error.ErrorText);
-                }
-                throw new InvalidOperationException(errors.ToString());
-            }
+            if (results.Errors.HasErrors) throw new McpException("compile_error", CompileMessage(results, code));
 
             Type entry = results.CompiledAssembly.GetType("BimCadMcpDynamicEntry", true);
             MethodInfo run = entry.GetMethod("Run", BindingFlags.Public | BindingFlags.Static);
-            if (run == null) throw new InvalidOperationException("Compiled C# entry point was not found.");
+            if (run == null) throw new McpException("compile_error", "Compiled C# entry point was not found.");
 
             string resultText;
+            string changesJson = "";
             if (mode == "transaction")
             {
-                using (Transaction transaction = new Transaction(document, "Smart Connector: " + transactionName))
-                {
-                    transaction.Start();
-                    try
-                    {
-                        resultText = Invoke(run, application, document, parametersJson);
-                        TransactionStatus status = transaction.Commit();
-                        if (status != TransactionStatus.Committed)
-                            throw new InvalidOperationException("Revit did not commit the transaction. Status: " + status.ToString());
-                    }
-                    catch
-                    {
-                        if (transaction.GetStatus() == TransactionStatus.Started) transaction.RollBack();
-                        throw;
-                    }
-                }
+                resultText = Changes.Run(document, "Smart Connector: " + transactionName, options.DryRun, delegate { return Invoke(run, application, document, parametersJson); }, out changesJson);
             }
             else
             {
@@ -327,8 +335,28 @@ namespace BimCadMcp.Revit
             return "{" +
                 Json.Property("document_id", RevitOperations.DocumentId(document)) + "," +
                 Json.Property("execution_mode", mode) + "," +
+                (options.DryRun ? Json.Property("dry_run", true) + "," + Json.Property("rolled_back", true) + ",\"changes\":" + changesJson + "," : "") +
                 Json.Property("result", resultText ?? String.Empty) +
                 "}";
+        }
+
+        // The compiler errors with the user's own line numbers, and a hint for the mistakes this runner has seen most.
+        private static string CompileMessage(CompilerResults results, string code)
+        {
+            StringBuilder errors = new StringBuilder("C# compilation failed (your code did not run and nothing was changed):");
+            bool unknownName = false;
+            foreach (CompilerError error in results.Errors)
+            {
+                if (error.IsWarning) continue;
+                errors.Append("\nLine ").Append(error.Line.ToString(CultureInfo.InvariantCulture)).Append(": ").Append(error.ErrorText);
+                if (error.ErrorNumber == "CS0103") unknownName = true;
+            }
+            if (unknownName) errors.Append("\nHint: the Revit document variable is called document (not doc); there is no uidoc, so use application.ActiveUIDocument.");
+            if (code.Contains("?.") || code.Contains("?[")) errors.Append("\nHint: ?. and ?[ are not available at this language level; test for null explicitly.");
+            if (code.Contains("$\"")) errors.Append("\nHint: $\"...\" string interpolation is not available; use String.Format or concatenation.");
+            if (code.Contains("nameof(")) errors.Append("\nHint: nameof is not available; use a string.");
+            errors.Append("\n").Append(RunnerContract);
+            return errors.ToString();
         }
 
         private static string Invoke(MethodInfo run, UIApplication application, Document document, string parametersJson)
@@ -341,7 +369,7 @@ namespace BimCadMcp.Revit
             catch (TargetInvocationException exception)
             {
                 Exception inner = exception.InnerException ?? exception;
-                throw new InvalidOperationException("C# execution failed: " + inner.Message, inner);
+                throw new McpException("runtime_error", "C# execution failed (the code compiled and ran, then threw): " + inner.GetType().Name + ": " + inner.Message, inner);
             }
         }
 
