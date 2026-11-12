@@ -1,6 +1,6 @@
 # Live check of the Detail Generator (paper space and custom_section)
 
-Run in a **disposable millimetre drawing** (template `acadiso.dwt`) with AutoCAD 2024 open. Nothing here has been run live yet; every line below is something to confirm.
+Run in a **disposable millimetre drawing**: first the blank template `acadiso.dwt`, then, for the office-standard checks 9 to 12, a copy of a reference counter sheet or the office template (it has the office layers and the `Multiple Leader Lab`, `level indicator` and `DWG-VIEWTITLE` blocks) with AutoCAD 2024 open. Nothing here has been run live yet; every line below is something to confirm.
 
 ## Set-up
 
@@ -21,6 +21,10 @@ Run in a **disposable millimetre drawing** (template `acadiso.dwt`) with AutoCAD
 | 6 | `custom_section` with the example in `reception-counter-section.md` (model-space annotation) | Parts, hatches (glass outline only), notes and dimensions as given |
 | 7 | Same with `annotation: "paper"` and `create_viewport: true` | Dimensions in the layout read the model sizes and line up |
 | 8 | Without `create_viewport`, against a viewport you made yourself (`view.paper_centre` = its Center, view zoomed to `model_centre`, 1:10) | Same alignment: the manual route still works |
+| 9 | In the office template, `custom_section` paper mode with `levels` given as `elevation` + `description`, `sheet {project, sheet_no, view_no}`, `layer_scheme` left on auto | `generated.summary.layer_scheme` is `ao`; sections on `AO-MDF_SECTION_PLAN`, `AO-CORIAN C-TOP` and so on; no `A-DETL*` layers created |
+| 10 | Same, applied | Each note is a `Multiple Leader Lab` block with the arrow on the section edge and the text wrapped at 45 mm; no bare lines. Report any leader pointing the wrong way or with a wrong length (screenshot) |
+| 11 | Same | Each level is a `level indicator` with `EL +0.75` in LEVEL and `WORKTOP` in Area; the title is a `DWG-VIEWTITLE` with the sheet fields filled |
+| 12 | Blank template (no office blocks) | Native multileaders with arrowheads, text indicators, a warning for each missing block; still no bare lines |
 
 ## Things that may fail
 

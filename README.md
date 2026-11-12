@@ -1,6 +1,6 @@
 # Autodesk MCP Connector
 
-Current test package version: **1.0.0-beta.14**. See [TESTING.md](TESTING.md) before sharing the package with testers.
+Current test package version: **1.0.0-beta.15** (the root `VERSION` file, used by the legacy ZIP build; the compiled Smart Connector 1.1.0 is prepared in `release-preparation/beta17`). See [TESTING.md](TESTING.md) before sharing the package with testers.
 
 The shareable ZIP is intentionally compact. After extraction its root shows `INSTALL Autodesk MCP Connector.cmd`, `Autodesk MCP Skills for Claude.zip`, `README-FIRST.txt`, and a `Support` folder. Double-click the installer once; it installs the connector, skills, Revit add-in, and user-level Codex, Claude Code, and Claude Desktop registrations automatically, writes `%LOCALAPPDATA%\AutodeskMcpConnector\setup.log`, and displays a restart message when finished. Claude Desktop Free and paid accounts use the local registration; Claude web and mobile use the authenticated remote mode described in [Claude remote setup](REMOTE-CLAUDE.md). Claude Chat users upload the included combined skill once through **Customize > Skills**; Team and Enterprise owners may provision it organization-wide.
 
@@ -8,11 +8,11 @@ Every pull request and approved push to `main` builds the shareable ZIP in GitHu
 
 Do not copy or run the repository's `installer` folder by itself on another computer. Initial installation is self-contained. Manual and automatic updates use a separate public release channel over HTTPS, verify the ZIP with SHA-256, and require neither Git nor GitHub sign-in.
 
-One Autodesk connector for local Codex/Claude Code and authenticated Claude Free/Paid Chat access, plus the private BIM-CAD reusable skill library.
+One Autodesk connector for local Codex, Claude Code and Claude Desktop, plus the private BIM-CAD reusable skill library.
 
 ## AutoCAD status
 
-The repository includes a version-aware local MCP bridge for full AutoCAD on Windows. It discovers registered AutoCAD ActiveX ProgIDs instead of hardcoding one release. It can inspect the active drawing and layers, inspect top-level entities, create lines/circles/text, edit supported entity properties, manage layers, apply a validated plan of many objects (lines, circles, arcs, polylines, text, multiline text, block inserts, hatches, aligned and rotated dimensions) in one undoable call with `apply_plan`, run controlled C# against the full AutoCAD API with `execute_autocad` (local only, never exposed remotely; it is not a sandbox), generate a draft reception-counter section (boards, plinth, Corian or stone top, optional raised bar, wheelchair-accessible variant, hatches, dimensions, levels and notes, millimetres only) from a short brief with `generate_detail`, and explicitly save a drawing. AutoCAD 2025 is live-tested; other releases still require a compatibility test before being marked verified.
+The repository includes a version-aware local MCP bridge for full AutoCAD on Windows. It discovers registered AutoCAD ActiveX ProgIDs instead of hardcoding one release. It can inspect the active drawing and layers, read top-level entities (`list_entities` with `summary`, `fields` and a default limit of 25 keeps answers small), create lines/circles/text, edit supported entity properties, manage layers, create many objects (lines, circles, arcs, polylines, text and multiline text with justification, block inserts, leaders, hatches, aligned and rotated dimensions) in one undoable call with `apply_plan`, check a drawing against standards with `verify_standards`, run controlled C# against the full AutoCAD API with `execute_autocad` (local only; it is not a sandbox), generate draft construction details with `generate_detail`, and explicitly save a drawing. A real `apply_plan` or `generate_detail` run is refused unless the same plan passed a dry run on that drawing in the same session in the last 30 minutes. `connection_status` reports which program serves the AI app (`bridge.kind` `exe` or the old `powershell` fallback, which lacks `apply_plan`, `execute_autocad`, `generate_detail` and `verify_standards`). AutoCAD 2024 (24.3) and 2025 have live tests; other releases still require a compatibility test before being marked verified.
 
 The live application still runs on the computer where AutoCAD is installed. GitHub stores and synchronizes the code; it does not host the running AutoCAD session.
 
@@ -87,7 +87,7 @@ Release maintainers build both the ZIP and its manifest with `scripts\build-shar
 
 The unified connector exposes both AutoCAD and Revit tools through the `autodesk` MCP registration. A cross-process lock serializes model-changing calls when Codex and Claude are open together. The AutoCAD path discovers installed ActiveX versions automatically. The Revit path targets Revit 2024 and builds a local add-in against the installed Revit 2024 API, then installs a content-addressed DLL and user manifest. This allows the updater to finish while an older DLL is loaded. Restart Revit after installation so the new add-in loads, and restart Codex or Claude after bridge-schema changes so its combined tool list refreshes.
 
-The Revit named pipe remains local to the Windows computer. Codex and Claude Code use the STDIO bridge on that PC. Claude Free and paid Chat connect through the optional authenticated HTTPS gateway and Cloudflare Tunnel; see [Claude remote setup](REMOTE-CLAUDE.md). Free accounts support one custom remote connector.
+The Revit named pipe remains local to the Windows computer. Codex and Claude Code use the STDIO bridge on that PC. The optional Claude remote gateway (a local web server published through a Cloudflare tunnel) was removed in 1.1.0: it opened a route from the internet to a Revit session that can run code. Claude Chat on the web and mobile therefore cannot use this connector; Claude Desktop, Claude Code and Codex use the local program.
 
 ## Verify the bridge without editing a live drawing
 
@@ -109,12 +109,12 @@ After restarting Revit, open the **Autodesk MCP Connector** ribbon tab and click
 
 ## Current limitations
 
-- Full AutoCAD for Windows with ActiveX automation. AutoCAD 2025 is verified; other registered versions are discovered dynamically but need version-specific compatibility verification. AutoCAD LT and AutoCAD for Mac are not supported by this bridge.
+- Full AutoCAD for Windows with ActiveX automation. AutoCAD 2024 (24.3) and 2025 have live tests; other registered versions are discovered dynamically but need version-specific compatibility verification. AutoCAD LT and AutoCAD for Mac are not supported by this bridge.
 - The local STDIO bridge is available to Codex and Claude Code running on the same Windows computer and user session as AutoCAD/Revit.
-- Claude Chat requires the remote gateway, a stable HTTPS hostname, and a one-time account connector authorization. No Windows installer can silently grant access to a Claude account.
-- Local `SKILL.md` installation applies to Codex and Claude Code. Free and paid Claude Chat users install the generated combined skill in Customize; Team/Enterprise owners can provision it organization-wide.
+- Claude Chat on the web and mobile is not supported: the remote gateway was removed in 1.1.0. Claude Desktop, Claude Code and Codex connect locally.
+- Local `SKILL.md` installation applies to Codex and Claude Code. Claude Desktop and Claude Chat users install the generated combined skill (`Autodesk MCP Skills for Claude.zip`) in Customize; Team/Enterprise owners can provision it organization-wide.
 - GitHub access alone does not provide remote control of an office workstation.
-- AutoCAD blocks and external references are not expanded; arbitrary AutoLISP/command execution, hatches, dimensions, plotting, and general cloning are not exposed.
+- AutoCAD blocks and external references are not expanded by the readers. Hatches, dimensions and leaders are drawn through `apply_plan`; anything else (tables, radial and angular dimensions, plotting, queries) goes through `execute_autocad`. General cloning is not exposed.
 - Saving is always a separate explicit tool call because it writes all unsaved changes in the active drawing.
 - Revit 2025 and newer use .NET 8 and are not built by the current Revit 2024 compiler path.
 

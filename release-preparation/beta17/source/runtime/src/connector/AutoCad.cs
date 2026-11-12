@@ -42,9 +42,9 @@ namespace SmartConnector
                 {
                     Schema.Tool("drawing_info", "Read active drawing identity, units, layouts, object count and save state. Call before writes.", Json.Object(), new string[0], true),
                     Schema.Tool("list_layers", "Read all layers in the active drawing.", Json.Object(), new string[0], true),
-                    Schema.Tool("list_entities", "Read paginated top-level model-space or named-layout objects, including geometry/text where available. Does not expand blocks or xrefs. Offset refers to collection index; one call examines at most 2000 objects, so continue from next_offset when it is set.",
-                        Json.Object("layout", str(), "layer", str(), "offset", Json.Object("type", "integer", "minimum", 0), "limit", Json.Object("type", "integer", "minimum", 1, "maximum", 200)), new string[0], true),
-                    Schema.Tool("get_entity", "Read an object by handle from the expected drawing.", Json.Object("expected_drawing", target(), "handle", str()), new[] { "expected_drawing", "handle" }, true),
+                    Schema.Tool("list_entities", "Read top-level model-space or named-layout objects. summary=true returns only counts by layer and type plus the bounding box (cheapest way to see what a drawing holds or to verify a result). Otherwise objects, 25 per call by default (limit up to 200); fields (such as [\"TextString\",\"Height\"]) limits the properties read; values that are only the inherited default (ByLayer colour, linetype, lineweight) are left out. total_count is everything in the space; with a layer filter, filtered_count is the matches found. Does not expand blocks or xrefs. Offset refers to collection index; one call examines at most 2000 objects, so continue from next_offset when it is set.",
+                        Json.Object("layout", str(), "layer", str(), "offset", Json.Object("type", "integer", "minimum", 0), "limit", Json.Object("type", "integer", "minimum", 1, "maximum", 200), "summary", Json.Object("type", "boolean"), "fields", Json.Object("type", "array", "items", Json.Object("type", "string"))), new string[0], true),
+                    Schema.Tool("get_entity", "Read an object by handle from the expected drawing. fields limits the properties read; inherited defaults are left out.", Json.Object("expected_drawing", target(), "handle", str(), "fields", Json.Object("type", "array", "items", Json.Object("type", "string"))), new[] { "expected_drawing", "handle" }, true),
                     Schema.Tool("create_entity", "Create a line, circle or single-line text in model space or a named layout. Requires an existing unlocked layer. Coordinates are WCS, lengths are drawing units. Does not save.",
                         Json.Object("expected_drawing", target(), "kind", Json.Object("type", "string", "enum", new object[] { "line", "circle", "text" }), "layer", str(), "layout", str(),
                             "point", point(), "end", point(), "radius", Json.Object("type", "number", "exclusiveMinimum", 0), "text", str(), "height", Json.Object("type", "number", "exclusiveMinimum", 0)),
@@ -57,7 +57,7 @@ namespace SmartConnector
                         Json.Object("expected_drawing", target(), "name", str(), "action", Json.Object("type", "string", "enum", new object[] { "create", "color", "on", "frozen", "locked" }),
                             "color", Json.Object("type", "integer", "minimum", 1, "maximum", 255), "value", Json.Object("type", "boolean")),
                         new[] { "expected_drawing", "name", "action" }, false),
-                    Schema.Tool("apply_plan", "Create many objects in ONE undoable call from a plan (one round trip instead of hundreds). items are ordered steps {op, ...}: layer{name,color?,linetype?,lineweight?}, line{layer,start,end}, circle{layer,center,radius}, arc{layer,center,radius,start_angle,end_angle}, polyline{layer,points:[[x,y],...],closed?,bulges? (one per point: the arc of the segment that starts there, 0 straight, 1 half circle, positive anticlockwise)}, text{layer,point,text,height,rotation?,style?}, mtext{layer,point,width,text,height?,rotation?,style?; \\P = new line}, insert{layer,name,point,scale?,rotation?,attributes? (object of attribute tag: text; a tag the block lacks fails the step)}, hatch{layer,pattern,boundary,holes?,scale?,angle?,color?} (boundary and holes are ids of EARLIER closed polyline or circle steps, so give those steps an id), dim_aligned{layer,from,to,location,style?,scale?}, dim_rotated{layer,from,to,location,angle,style?,scale?} (location is a point the dimension line passes through; the value shown is the measured one; scale sets the dimension's overall scale, for example the detail scale denominator; linear_factor, for a dimension drawn in a paper-space layout over model geometry, multiplies the measured value so it reads the model size, for example 10 for a 1:10 viewport). Points are [x,y] or [x,y,z] in WCS drawing units; angles are degrees counter-clockwise; lineweight is in hundredths of mm. A step may carry an id; its handle is returned. A layer must already exist (or be created by an earlier layer step) and be unlocked; blocks, linetypes, text styles and dimension styles must already be in the drawing. At most 500 steps. Run with dry_run=true first: it checks everything against the drawing and changes nothing. A failed run removes what it created. Does not save.",
+                    Schema.Tool("apply_plan", "Create many objects in ONE undoable call from a plan (one round trip instead of hundreds). items are ordered steps {op, ...}: layer{name,color?,linetype?,lineweight?}, line{layer,start,end}, circle{layer,center,radius}, arc{layer,center,radius,start_angle,end_angle}, polyline{layer,points:[[x,y],...],closed?,bulges? (one per point: the arc of the segment that starts there, 0 straight, 1 half circle, positive anticlockwise)}, text{layer,point,text,height,rotation?,style?,justify?}, mtext{layer,point,width,text,height?,rotation?,style?,justify?; \\P = new line} (justify puts the point at that spot of the text: left, center, right, middle, top-left, top-center, top-right, middle-left, middle-center, middle-right, bottom-left, bottom-center, bottom-right; use middle-center to centre a label on a point), insert{layer,name,point,scale?,rotation?,attributes? (object of attribute tag: text; a tag the block lacks fails the step)}, hatch{layer,pattern,boundary,holes?,scale?,angle?,color?} (boundary and holes are ids of EARLIER closed polyline or circle steps, so give those steps an id), dim_aligned{layer,from,to,location,style?,scale?}, dim_rotated{layer,from,to,location,angle,style?,scale?} (location is a point the dimension line passes through; the value shown is the measured one; scale sets the dimension's overall scale, for example the detail scale denominator; linear_factor, for a dimension drawn in a paper-space layout over model geometry, multiplies the measured value so it reads the model size, for example 10 for a 1:10 viewport). Points are [x,y] or [x,y,z] in WCS drawing units; angles are degrees counter-clockwise; lineweight is in hundredths of mm. A step may carry an id; its handle is returned. A layer must already exist (or be created by an earlier layer step) and be unlocked; blocks, linetypes, text styles and dimension styles must already be in the drawing. At most 500 steps. Run with dry_run=true first: it checks everything against the drawing and changes nothing. A real run is refused unless a dry run of the same plan on the same drawing passed in this session in the last 30 minutes; a dry run is used up by one real run. After the dry run, show the user what will be created and wait for their yes. A failed run removes what it created. Does not save.",
                         Json.Object("expected_drawing", target(), "layout", str(), "dry_run", Json.Object("type", "boolean"),
                             "items", Json.Object("type", "array", "items", Json.Object("type", "object"), "minItems", 1, "maxItems", AutoCadPlan.MaxItems)),
                         new[] { "expected_drawing", "items" }, false),
@@ -67,15 +67,22 @@ namespace SmartConnector
                             "code", Json.Object("type", "string", "minLength", 1, "maxLength", AutoCadScript.MaxCodeLength),
                             "timeout_seconds", Json.Object("type", "integer", "minimum", 1, "maximum", 300)),
                         new[] { "expected_drawing", "execution_mode", "allow_model_changes", "code" }, false),
-                    Schema.Tool("generate_detail", "Detail Generator: build a draft construction detail from a short brief, and optionally draw it. Two templates. custom_section draws a section from parts the caller read off pictures and plans: params.parts [{id, material (mdf, ply, stone, corian, steel, glass, outline), x0, y0, x1, y1}] in mm with x from the staff face and y up from the floor, optional levels [{y, label}], notes [{part, text, y?}], dimensions [{from, to, axis x|y, chain?}], title, overall_dimensions, floor; every number and wording is the caller's and nothing is invented or checked against a code. reception_counter_section is a vertical section through a reception counter, in millimetres only: boards, plinth, top (corian by default, or stone), optional shelf, optional raised bar, or a wheelchair-accessible section (params.section = accessible; it needs accessible_height, knee_clearance_height, knee_clearance_depth and code_reference from the code you adopt, none are built in). params holds the design parameters in mm, all with defaults except the accessible ones. scale is the detail scale denominator (10 = 1:10); origin is where the floor meets the staff face. With apply=false (the default) AutoCAD is not contacted: you get a summary, warnings and, with return_plan, the steps. With apply=true (expected_drawing required) the drawing must be in millimetres, the plan is checked against it and drawn like apply_plan; dry_run defaults to true. Existing layers are left as they are unless update_layers. Unless dimension_style or text_style is given (or use_reference_styles is false), the drawing's reference styles are used when present: dimension style na1, text style EN-S for notes and levels, EN-SCB for titles; if one is missing the result says so. annotation says where dimensions, notes, levels and titles go: model (default, drawn in model space at the detail scale), paper (drawn in the layout named by layout at true paper size, text 2.5 mm, dimensions reading the model size; view.paper_centre [x,y] is where the detail sits on the sheet, optional view.model_centre; the layout needs a viewport at scale 1:scale centred on the model centre, which the result states), or none (geometry only). With create_viewport (paper mode) the tool makes that viewport itself on layer G-ANNO-VPRT (not plotted): centred on the sheet at view.paper_centre (default with apply: the centre of the layout's sheet), sized to the parts plus a 10 mm margin or view.viewport_size [w,h] in paper mm, at 1:scale, view centred on the model centre and locked. level_block (with level_tag, default LEVEL, and level_block_scale) uses an office block with an attribute for level markers in paper mode. Every result is a draft for a designer's review.",
+                    Schema.Tool("generate_detail", "Draft a construction detail from a brief, in millimetres, and optionally draw it. template custom_section: params.parts [{id, material (mdf, ply, stone, corian, steel, glass, outline), x0, y0, x1, y1 or points}] with optional levels, notes, dimensions, title; every number and word is the caller's, nothing is invented or checked against a code. template reception_counter_section: a counter section from params (defaults in the skill; the accessible variant needs accessible_height, knee_clearance_height, knee_clearance_depth and code_reference from the code the user names). scale is the denominator (10 = 1:10); origin is where the floor meets the staff face. apply=false (default) never contacts AutoCAD: summary, warnings and, with return_plan, the steps. apply=true (expected_drawing required; drawing in millimetres) checks the plan against the drawing; dry_run defaults to true, and a real run (dry_run false) is refused unless the same job passed a dry run on this drawing in the last 30 minutes. Present the brief and wait for the user's yes before the real run. annotation: model (default), paper (dimensions, notes, levels, title in the layout named by layout at true paper size; view.paper_centre [x,y], create_viewport makes the 1:scale viewport on G-ANNO-VPRT; notes are leaders, levels the office level indicator, titles DWG-VIEWTITLE when the drawing has those blocks, else native multileaders and text; leader_block, level_block, title_block, level_block_scale, note_width and sheet {project, sheet_no, view_no} adjust them) or none. layer_scheme auto uses the office counter-sheet layers when the drawing has them, else generic A-DETL layers (ao or generic forces one). Existing layers are never changed unless update_layers. Reference styles na1, EN-S, EN-SCB are used when present (dimension_style, text_style, use_reference_styles override). Read the detail-generator skill for the full options. Every result is a draft for a designer's review.",
                         Json.Object("expected_drawing", target(), "template", Json.Object("type", "string", "enum", new object[] { AutoCadDetail.ReceptionCounterSection, AutoCadDetail.CustomSection }),
                             "params", Json.Object("type", "object"), "scale", Json.Object("type", "integer", "minimum", 1, "maximum", 200), "origin", point(),
                             "dimension_style", str(), "text_style", str(), "dimension_scale", Json.Object("type", "number", "exclusiveMinimum", 0),
                             "apply", Json.Object("type", "boolean"), "dry_run", Json.Object("type", "boolean"), "update_layers", Json.Object("type", "boolean"), "use_reference_styles", Json.Object("type", "boolean"), "return_plan", Json.Object("type", "boolean"),
                             "annotation", Json.Object("type", "string", "enum", new object[] { "model", "paper", "none" }), "layout", str(), "view", Json.Object("type", "object"),
-                            "level_block", str(), "level_tag", str(), "level_block_scale", Json.Object("type", "number", "exclusiveMinimum", 0),
-                            "create_viewport", Json.Object("type", "boolean")),
+                            "level_block", str(), "leader_block", str(), "title_block", str(), "level_block_scale", Json.Object("type", "number", "exclusiveMinimum", 0),
+                            "note_width", Json.Object("type", "number", "minimum", 15, "maximum", 150), "sheet", Json.Object("type", "object"),
+                            "create_viewport", Json.Object("type", "boolean"),
+                            "layer_scheme", Json.Object("type", "string", "enum", new object[] { "auto", "generic", "ao" })),
                         new[] { "template" }, false),
+                    Schema.Tool("verify_standards", "Check a drawing and return violations only (a few tokens when all is well). required_layers [{name, color?}]; forbidden_layers [names] (nothing may be drawn on them, e.g. 0); text_height {min?, max?, layer?}; expected_counts [{layer?, type?, count}] with type line, circle, arc, polyline, text, mtext, hatch, dimension, insert or an AcDb name. Read-only; up to 2000 objects per call (offset continues).",
+                        Json.Object("expected_drawing", target(), "layout", str(), "offset", Json.Object("type", "integer", "minimum", 0),
+                            "required_layers", Json.Object("type", "array", "items", Json.Object("type", "object")), "forbidden_layers", Json.Object("type", "array", "items", Json.Object("type", "string")),
+                            "text_height", Json.Object("type", "object"), "expected_counts", Json.Object("type", "array", "items", Json.Object("type", "object"))),
+                        new[] { "expected_drawing" }, true),
                     Schema.Tool("save_drawing", "Explicitly save the expected drawing to its EXISTING path. Invoke only when saving is requested; no Save As.", Json.Object("expected_drawing", target()), new[] { "expected_drawing" }, false)
                 };
                 return _tools;
@@ -211,21 +218,38 @@ namespace SmartConnector
             return Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture);
         }
 
-        private static Dictionary<string, object> ReadEntity(object source)
+        // How a property is read from an object. Replaceable so tests can read a stand-in.
+        internal static Func<object, string, object> PropertyReader = delegate (object o, string name) { return Microsoft.VisualBasic.Interaction.CallByName(o, name, Microsoft.VisualBasic.CallType.Get); };
+
+        // A value that says nothing because the object inherits it: ByLayer colour (256), ByLayer linetype, ByLayer lineweight (-1).
+        private static bool IsDefaultValue(string property, object value)
+        {
+            if (property == "Color") { double n; return Double.TryParse(Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out n) && n == 256; }
+            if (property == "Linetype") return String.Equals(Convert.ToString(value), "ByLayer", StringComparison.OrdinalIgnoreCase);
+            if (property == "Lineweight") { double n; return Double.TryParse(Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out n) && n == -1; }
+            return false;
+        }
+
+        // handle, type and layer always; then the properties the type has, without the ones that are only the inherited default.
+        // fields (property names) limits the properties read to those named, so a caller that wants only text does not pay for geometry.
+        private static Dictionary<string, object> ReadEntity(object source, HashSet<string> fields = null)
         {
             dynamic entity = source;
             string type = Convert.ToString(entity.ObjectName);
             Dictionary<string, object> result = Json.Object("handle", Convert.ToString(entity.Handle), "type", type, "layer", Convert.ToString(entity.Layer));
             string[] properties;
-            bool learning = !PropertiesByType.TryGetValue(type, out properties);
+            bool learning = fields == null && !PropertiesByType.TryGetValue(type, out properties);
+            if (fields == null && !learning) properties = PropertiesByType[type];
+            else if (fields != null) properties = fields.ToArray();
+            else properties = EntityProperties;
             List<string> present = new List<string>();
-            foreach (string property in learning ? EntityProperties : properties)
+            foreach (string property in properties)
             {
                 try
                 {
-                    object value = Microsoft.VisualBasic.Interaction.CallByName(source, property, Microsoft.VisualBasic.CallType.Get);
+                    object value = PropertyReader(source, property);
                     present.Add(property);
-                    if (value != null) result[property] = Plain(value);
+                    if (value != null && !IsDefaultValue(property, value)) result[property] = Plain(value);
                 }
                 catch (Exception exception)
                 {
@@ -235,6 +259,191 @@ namespace SmartConnector
             }
             if (learning) PropertiesByType[type] = present.ToArray();
             return result;
+        }
+
+        // The property names a caller asked for, or null for the default set. Names are checked so nothing odd reaches the property reader.
+        private static HashSet<string> FieldSet(IDictionary<string, object> a)
+        {
+            if (!a.ContainsKey("fields") || a["fields"] == null) return null;
+            System.Collections.IEnumerable list = a["fields"] as System.Collections.IEnumerable;
+            if (list == null || a["fields"] is string) throw new ToolException("fields must be a list of property names.");
+            HashSet<string> fields = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (object o in list)
+            {
+                string name = o as string;
+                if (name == null || !Regex.IsMatch(name, "^[A-Za-z][A-Za-z0-9]{0,40}$")) throw new ToolException("fields must be a list of property names such as TextString, Height, StartPoint.");
+                fields.Add(name);
+            }
+            return fields.Count == 0 ? null : fields;
+        }
+
+        private static readonly Dictionary<string, string> TypeNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            { "line", "AcDbLine" }, { "circle", "AcDbCircle" }, { "arc", "AcDbArc" }, { "polyline", "AcDbPolyline" }, { "text", "AcDbText" }, { "mtext", "AcDbMText" },
+            { "hatch", "AcDbHatch" }, { "insert", "AcDbBlockReference" }, { "dimension", "AcDbRotatedDimension" }
+        };
+
+        private static object[] ListOf(object value)
+        {
+            object[] items = value as object[];
+            if (items != null) return items;
+            System.Collections.ArrayList list = value as System.Collections.ArrayList;
+            return list == null ? null : list.ToArray();
+        }
+
+        private static double? NumberOf(object value)
+        {
+            double n;
+            return value != null && Double.TryParse(Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out n) ? (double?)n : null;
+        }
+
+        // verify_standards: the violations only. One pass over the objects counts by layer and type and checks text heights; the layer
+        // checks read the layer table. Nothing is changed.
+        internal static object VerifyStandards(object docSource, IDictionary<string, object> a)
+        {
+            dynamic doc = docSource;
+            List<string> violations = new List<string>();
+            Func<string, string> note = text => text;
+            // layers
+            Dictionary<string, object> layerColors = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+            dynamic layerTable = doc.Layers;
+            int layerCount = Convert.ToInt32(layerTable.Count);
+            for (int i = 0; i < layerCount; i++) { dynamic l = layerTable.Item(i); layerColors[Convert.ToString(l.Name)] = Plain(l.Color); }
+            object[] required = a.ContainsKey("required_layers") ? ListOf(a["required_layers"]) : null;
+            if (required != null)
+                foreach (object o in required)
+                {
+                    IDictionary<string, object> rule = o as IDictionary<string, object>;
+                    string layerName = rule == null ? "" : Json.GetString(rule, "name");
+                    if (layerName.Length == 0) throw new ToolException("Every required_layers entry needs a name.");
+                    object color;
+                    if (!layerColors.TryGetValue(layerName, out color)) { violations.Add("layer " + layerName + " is missing"); continue; }
+                    if (rule.ContainsKey("color") && NumberOf(rule["color"]) != NumberOf(color))
+                        violations.Add("layer " + layerName + " has colour " + Convert.ToString(color, System.Globalization.CultureInfo.InvariantCulture) + ", expected " + Convert.ToString(rule["color"], System.Globalization.CultureInfo.InvariantCulture));
+                }
+            HashSet<string> forbidden = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            object[] forbiddenList = a.ContainsKey("forbidden_layers") ? ListOf(a["forbidden_layers"]) : null;
+            if (forbiddenList != null) foreach (object o in forbiddenList) forbidden.Add(Convert.ToString(o));
+            IDictionary<string, object> heights = a.ContainsKey("text_height") ? a["text_height"] as IDictionary<string, object> : null;
+            double? minHeight = heights != null && heights.ContainsKey("min") ? NumberOf(heights["min"]) : null, maxHeight = heights != null && heights.ContainsKey("max") ? NumberOf(heights["max"]) : null;
+            string heightLayer = heights == null ? "" : Json.GetString(heights, "layer");
+            object[] expected = a.ContainsKey("expected_counts") ? ListOf(a["expected_counts"]) : null;
+
+            // objects
+            dynamic space = Space((object)doc, Json.GetString(a, "layout"));
+            int count = Convert.ToInt32(space.Count);
+            int start = a.ContainsKey("offset") ? Convert.ToInt32(a["offset"]) : 0, index = start;
+            Dictionary<string, int> byLayerType = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            Dictionary<string, int> onForbidden = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            List<string> badText = new List<string>();
+            int badTextCount = 0;
+            bool needObjects = forbidden.Count > 0 || heights != null || expected != null;
+            while (needObjects && index < count && (index - start) < MaxScanPerCall)
+            {
+                dynamic entity = space.Item(index); index++;
+                string layer = Convert.ToString(entity.Layer), type = Convert.ToString(entity.ObjectName);
+                string key = layer + "|" + type;
+                byLayerType[key] = (byLayerType.ContainsKey(key) ? byLayerType[key] : 0) + 1;
+                if (forbidden.Contains(layer)) onForbidden[layer] = (onForbidden.ContainsKey(layer) ? onForbidden[layer] : 0) + 1;
+                if (heights != null && (type == "AcDbText" || type == "AcDbMText") && (heightLayer.Length == 0 || String.Equals(layer, heightLayer, StringComparison.OrdinalIgnoreCase)))
+                {
+                    double? h = NumberOf(PropertyReader((object)entity, "Height"));
+                    if (h.HasValue && ((minHeight.HasValue && h.Value < minHeight.Value - 1e-9) || (maxHeight.HasValue && h.Value > maxHeight.Value + 1e-9)))
+                    {
+                        badTextCount++;
+                        if (badText.Count < 5) badText.Add(Convert.ToString(entity.Handle) + " (" + Convert.ToString(h.Value, System.Globalization.CultureInfo.InvariantCulture) + ")");
+                    }
+                }
+            }
+            bool complete = index >= count;
+            foreach (KeyValuePair<string, int> pair in onForbidden) violations.Add(pair.Value + " object(s) on forbidden layer " + pair.Key);
+            if (badTextCount > 0) violations.Add(badTextCount + " text(s) outside the height range" + (minHeight.HasValue ? " min " + minHeight.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) : "") + (maxHeight.HasValue ? " max " + maxHeight.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) : "") + ", e.g. handle " + String.Join(", ", badText.ToArray()));
+            if (expected != null && complete && start == 0)
+                foreach (object o in expected)
+                {
+                    IDictionary<string, object> rule = o as IDictionary<string, object>;
+                    if (rule == null || !rule.ContainsKey("count")) throw new ToolException("Every expected_counts entry needs a count.");
+                    string wantLayer = Json.GetString(rule, "layer"), wantType = Json.GetString(rule, "type");
+                    string mapped;
+                    if (wantType.Length > 0 && TypeNames.TryGetValue(wantType, out mapped)) wantType = mapped;
+                    int found = 0;
+                    foreach (KeyValuePair<string, int> pair in byLayerType)
+                    {
+                        string[] parts = pair.Key.Split('|');
+                        if (wantLayer.Length > 0 && !String.Equals(parts[0], wantLayer, StringComparison.OrdinalIgnoreCase)) continue;
+                        if (wantType.Length > 0 && !(String.Equals(parts[1], wantType, StringComparison.OrdinalIgnoreCase) || (wantType == "AcDbRotatedDimension" && parts[1].IndexOf("Dimension", StringComparison.Ordinal) >= 0))) continue;
+                        found += pair.Value;
+                    }
+                    double? want = NumberOf(rule["count"]);
+                    if (want.HasValue && found != (int)want.Value)
+                        violations.Add("expected " + (int)want.Value + " " + (Json.GetString(rule, "type").Length > 0 ? Json.GetString(rule, "type") + " " : "object(s) ") + (wantLayer.Length > 0 ? "on " + wantLayer : "in the drawing") + ", found " + found);
+                }
+            else if (expected != null && !(complete && start == 0)) violations.Add("expected_counts needs the whole drawing in one call, which is more than " + MaxScanPerCall + " objects here; use summary in list_entities instead");
+            Dictionary<string, object> result = Json.Object("drawing", DrawingId((object)doc), "ok", violations.Count == 0, "scanned", index - start);
+            if (violations.Count > 0) result["violations"] = violations.Take(20).ToList();
+            if (!complete) { result["complete"] = false; result["next_offset"] = index; }
+            return result;
+        }
+
+        private const int DefaultEntityLimit = 25;
+
+        // list_entities. summary: counts by layer and type plus the drawing's bounding box, no objects. Otherwise the objects (default 25),
+        // with total_count (everything in the space) and, for a layer filter, filtered_count (matches found in this call's scan; exact when
+        // filtered_count_complete is true, which is the case from offset 0 up to 2000 objects).
+        internal static object ListEntities(object docSource, IDictionary<string, object> a)
+        {
+            dynamic doc = docSource;
+            dynamic space = Space((object)doc, Json.GetString(a, "layout"));
+            int count = Convert.ToInt32(space.Count);
+            int i = a.ContainsKey("offset") ? Convert.ToInt32(a["offset"]) : 0, start = i;
+            string layer = Json.GetString(a, "layer");
+            bool summary = a.ContainsKey("summary") && a["summary"] is bool && (bool)a["summary"];
+            HashSet<string> fields = FieldSet(a);
+            if (summary)
+            {
+                SortedDictionary<string, int> byLayer = new SortedDictionary<string, int>(StringComparer.OrdinalIgnoreCase), byType = new SortedDictionary<string, int>();
+                double[] box = null;
+                int matched = 0;
+                while (i < count && (i - start) < MaxScanPerCall)
+                {
+                    dynamic entity = space.Item(i); i++;
+                    string entityLayer = Convert.ToString(entity.Layer);
+                    if (layer.Length > 0 && !String.Equals(entityLayer, layer, StringComparison.OrdinalIgnoreCase)) continue;
+                    matched++;
+                    string type = Convert.ToString(entity.ObjectName);
+                    byLayer[entityLayer] = (byLayer.ContainsKey(entityLayer) ? byLayer[entityLayer] : 0) + 1;
+                    byType[type] = (byType.ContainsKey(type) ? byType[type] : 0) + 1;
+                    try
+                    {
+                        object low = null, high = null;
+                        entity.GetBoundingBox(ref low, ref high);
+                        double[] lo = ((Array)low).Cast<object>().Select(x => Convert.ToDouble(x, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+                        double[] hi = ((Array)high).Cast<object>().Select(x => Convert.ToDouble(x, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+                        if (box == null) box = new[] { lo[0], lo[1], hi[0], hi[1] };
+                        else { box[0] = Math.Min(box[0], lo[0]); box[1] = Math.Min(box[1], lo[1]); box[2] = Math.Max(box[2], hi[0]); box[3] = Math.Max(box[3], hi[1]); }
+                    }
+                    catch (Exception) { }   // an object without extents (a point, an empty text) adds none
+                }
+                Dictionary<string, object> result = Json.Object("drawing", DrawingId((object)doc), "summary", true, "total_count", count, "counted", matched,
+                    "by_layer", byLayer, "by_type", byType, "bbox", box == null ? null : (object)box.Select(x => (object)Math.Round(x, 3)).ToArray());
+                if (i < count) { result["complete"] = false; result["next_offset"] = i; } else result["complete"] = true;
+                return result;
+            }
+            int limit = a.ContainsKey("limit") ? Convert.ToInt32(a["limit"]) : DefaultEntityLimit;
+            List<object> items = new List<object>();
+            int matches = 0, resume = -1;
+            while (i < count && (i - start) < MaxScanPerCall)
+            {
+                dynamic entity = space.Item(i); i++;
+                if (layer.Length > 0 && !String.Equals(Convert.ToString(entity.Layer), layer, StringComparison.OrdinalIgnoreCase)) continue;
+                matches++;
+                if (items.Count < limit) { items.Add(ReadEntity((object)entity, fields)); if (items.Count == limit) resume = i; }
+            }
+            // more matches than the limit: continue right after the last object returned
+            int next = resume >= 0 && matches > limit ? resume : (i < count ? i : -1);
+            Dictionary<string, object> data = Json.Object("drawing", DrawingId((object)doc), "entities", items, "total_count", count, "next_offset", next >= 0 ? (object)next : null);
+            if (layer.Length > 0) { data["filtered_count"] = matches; data["filtered_count_complete"] = i >= count && start == 0; }
+            return data;
         }
 
         private static dynamic Space(object source, string layout)
@@ -355,6 +564,8 @@ namespace SmartConnector
         }
 
         // Fills the block's attributes by tag (case-insensitive). A tag the block does not have fails the step, so a wrong tag is never silent.
+        // A key written @elevation or @description is a role, not a tag: the office level block has used LEVEL = the elevation and Area = the
+        // description, and an older one ELEVATION = the elevation and LEVEL = the description, so the role is resolved from the tags this block has.
         private static void SetAttributes(object blockSource, PlanItem p)
         {
             dynamic block = blockSource;
@@ -362,13 +573,86 @@ namespace SmartConnector
             if ((bool)block.HasAttributes)
                 foreach (dynamic attribute in (System.Collections.IEnumerable)block.GetAttributes())
                     found[Convert.ToString(attribute.TagString)] = attribute;
+            string where = "items[" + p.Index.ToString(System.Globalization.CultureInfo.InvariantCulture) + "]: block '" + p.BlockName + "'";
             foreach (KeyValuePair<string, string> pair in p.Attributes)
             {
+                string tag = pair.Key;
+                if (tag.StartsWith("@"))
+                {
+                    bool elevation = String.Equals(tag, "@elevation", StringComparison.OrdinalIgnoreCase), description = String.Equals(tag, "@description", StringComparison.OrdinalIgnoreCase);
+                    if (!elevation && !description) throw new ToolException(where + ": unknown attribute role '" + tag + "' (use @elevation or @description).");
+                    if (found.ContainsKey("Area")) tag = elevation ? "LEVEL" : "Area";
+                    else if (found.ContainsKey("ELEVATION")) tag = elevation ? "ELEVATION" : "LEVEL";
+                    else if (elevation) tag = "LEVEL";
+                    else continue;   // a one-line level block has no place for a description
+                }
                 dynamic attribute;
-                if (!found.TryGetValue(pair.Key, out attribute)) throw new ToolException("items[" + p.Index.ToString(System.Globalization.CultureInfo.InvariantCulture) + "]: block '" + p.BlockName + "' has no attribute '" + pair.Key + "'.");
+                if (!found.TryGetValue(tag, out attribute)) throw new ToolException(where + " has no attribute '" + tag + "'.");
                 attribute.TextString = pair.Value;
-                if (Convert.ToString(attribute.TextString) != pair.Value) throw new ToolException("items[" + p.Index.ToString(System.Globalization.CultureInfo.InvariantCulture) + "]: attribute '" + pair.Key + "' did not take the text.");
+                if (Convert.ToString(attribute.TextString) != pair.Value) throw new ToolException(where + ": attribute '" + tag + "' did not take the text.");
             }
+        }
+
+        // Sets one dynamic property of a block reference. The block is fetched again by its handle before every property, because setting a
+        // property (visibility especially) invalidates the property wrappers (as the counter-sheet script found live). A missing or read-only
+        // property fails the step.
+        private static void SetDynamicProperty(object docSource, string handle, string name, object value, PlanItem p)
+        {
+            dynamic doc = docSource;
+            dynamic reference = doc.HandleToObject(handle);
+            foreach (dynamic property in (System.Collections.IEnumerable)reference.GetDynamicBlockProperties())
+            {
+                if (!String.Equals(Convert.ToString(property.PropertyName), name, StringComparison.OrdinalIgnoreCase) || (bool)property.ReadOnly) continue;
+                if (Convert.ToString(property.Value, System.Globalization.CultureInfo.InvariantCulture) != Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture)) property.Value = value;
+                return;
+            }
+            throw new ToolException("items[" + p.Index.ToString(System.Globalization.CultureInfo.InvariantCulture) + "]: block '" + p.BlockName + "' has no writable dynamic property '" + name + "'.");
+        }
+
+        // A note with a leader. With a block (the office "Multiple Leader Lab"): the block goes at the label anchor, its LABEL attribute takes the
+        // text wrapped to the width, and its dynamic Distance1 (landing), Distance2 (leader length) and Angle1 draw the leader to the target, as
+        // the counter-sheet script does. Without a block: a native AutoCAD multileader with an arrowhead. Either way a real leader, never a bare line.
+        private static dynamic CreateLeader(object spaceSource, PlanItem p)
+        {
+            dynamic space = spaceSource;
+            string at = "items[" + p.Index.ToString(System.Globalization.CultureInfo.InvariantCulture) + "]: ";
+            if (p.BlockName == null)
+            {
+                double[] points = { p.End[0], p.End[1], 0, p.Point[0] - p.Landing, p.Point[1], 0 };
+                int index = 0;
+                dynamic multi = space.AddMLeader(points, ref index);
+                try
+                {
+                    multi.TextString = p.Text;
+                    if (p.Height > 0) multi.TextHeight = p.Height;
+                }
+                catch (Exception) { try { multi.Delete(); } catch (Exception) { } throw; }
+                return multi;
+            }
+            dynamic block = space.InsertBlock(new double[] { p.Point[0], p.Point[1], 0 }, p.BlockName, 1.0, 1.0, 1.0, 0.0);
+            try
+            {
+                block.Layer = p.Layer;
+                bool taken = false;
+                if ((bool)block.HasAttributes)
+                    foreach (dynamic attribute in (System.Collections.IEnumerable)block.GetAttributes())
+                        if (String.Equals(Convert.ToString(attribute.TagString), p.Tag, StringComparison.OrdinalIgnoreCase))
+                        {
+                            attribute.TextString = p.Text;
+                            try { attribute.MTextBoundaryWidth = p.Width; } catch (Exception) { }   // only a multi-line attribute has a boundary width
+                            taken = true;
+                        }
+                if (!taken) throw new ToolException(at + "block '" + p.BlockName + "' has no attribute '" + p.Tag + "' for the text.");
+                double dx = p.End[0] - (p.Point[0] - p.Landing), dy = p.End[1] - p.Point[1];
+                string handle = Convert.ToString(block.Handle);
+                object document = space.Document;
+                if (p.Visibility != null) SetDynamicProperty(document, handle, "Visibility1", p.Visibility, p);
+                SetDynamicProperty(document, handle, "Distance1", p.Landing, p);
+                SetDynamicProperty(document, handle, "Distance2", Math.Sqrt(dx * dx + dy * dy), p);
+                SetDynamicProperty(document, handle, "Angle1", Math.Atan2(dy, dx) - Math.PI, p);
+            }
+            catch (Exception) { try { block.Delete(); } catch (Exception) { } throw; }
+            return block;
         }
 
         private static dynamic CreateItem(object spaceSource, PlanItem p)
@@ -395,6 +679,12 @@ namespace SmartConnector
                     {
                         dynamic text = space.AddText(p.Text, p.Point, p.Height);
                         if (p.Rotation != 0) text.Rotation = p.Rotation * toRadians;
+                        if (p.Justify != null && p.Justify != "left")
+                        {
+                            // the alignment first, then the point the text is aligned at (the insertion point no longer places it)
+                            try { text.Alignment = AutoCadPlan.Justifications[p.Justify][0]; text.TextAlignmentPoint = new double[] { p.Point[0], p.Point[1], p.Point.Length > 2 ? p.Point[2] : 0.0 }; }
+                            catch (Exception) { try { text.Delete(); } catch (Exception) { } throw; }
+                        }
                         return text;
                     }
                 case "mtext":
@@ -402,6 +692,11 @@ namespace SmartConnector
                         dynamic mtext = space.AddMText(p.Point, p.Width, p.Text);
                         if (p.Height > 0) mtext.Height = p.Height;
                         if (p.Rotation != 0) mtext.Rotation = p.Rotation * toRadians;
+                        if (p.Justify != null && p.Justify != "top-left")
+                        {
+                            try { mtext.AttachmentPoint = AutoCadPlan.Justifications[p.Justify][1]; }
+                            catch (Exception) { try { mtext.Delete(); } catch (Exception) { } throw; }
+                        }
                         return mtext;
                     }
                 case "insert":
@@ -415,6 +710,7 @@ namespace SmartConnector
                         }
                         return block;
                     }
+                case "leader": return CreateLeader((object)space, p);
                 case "dim_aligned": return space.AddDimAligned(p.Point, p.End, p.Location);
                 case "dim_rotated": return space.AddDimRotated(p.Point, p.End, p.Location, p.Rotation * toRadians);
             }
@@ -436,7 +732,7 @@ namespace SmartConnector
             dynamic layerTable = doc.Layers;
             int layerCount = Convert.ToInt32(layerTable.Count);
             for (int i = 0; i < layerCount; i++) { dynamic item = layerTable.Item(i); layers[Convert.ToString(item.Name)] = (bool)item.Lock; }
-            bool needsLinetypes = plan.Any(p => p.Linetype != null), needsStyles = plan.Any(p => p.TextStyle != null), needsBlocks = plan.Any(p => p.Op == "insert"), needsDimStyles = plan.Any(p => p.DimStyle != null);
+            bool needsLinetypes = plan.Any(p => p.Linetype != null), needsStyles = plan.Any(p => p.TextStyle != null), needsBlocks = plan.Any(p => p.Op == "insert" || (p.Op == "leader" && p.BlockName != null)), needsDimStyles = plan.Any(p => p.DimStyle != null);
             HashSet<string> linetypes = needsLinetypes ? Names((object)doc.Linetypes) : new HashSet<string>();
             HashSet<string> styles = needsStyles ? Names((object)doc.TextStyles) : new HashSet<string>();
             HashSet<string> blocks = needsBlocks ? Names((object)doc.Blocks) : new HashSet<string>();
@@ -446,9 +742,16 @@ namespace SmartConnector
 
             List<string> toCreate = AutoCadPlan.LayersToCreate(plan, layers.Keys);
             Dictionary<string, object> counts = AutoCadPlan.Counts(plan);
+            // The dry-run rule: a plan applied inside generate_detail is covered by that tool's own check (it passes __guard_skip).
+            bool guarded = !a.ContainsKey("__guard_skip");
+            string guardKey = guarded ? DryRunGuard.Key(DrawingId((object)doc), layout, a["items"]) : null;
             if (dryRun)
+            {
+                if (guarded) DryRunGuard.Passed_(guardKey);
                 return Json.Object("drawing", DrawingId((object)doc), "dry_run", true, "valid", true, "steps", plan.Count, "counts", counts, "layers_to_create", toCreate,
                     "layout", layout.Length == 0 ? "Model" : layout, "save_performed", false);
+            }
+            if (guarded) DryRunGuard.Require(guardKey);
 
             dynamic space = Space((object)doc, layout);
             int before = Convert.ToInt32(space.Count);
@@ -515,6 +818,7 @@ namespace SmartConnector
             }
             finally { doc.EndUndoMark(); }
 
+            if (guarded) DryRunGuard.Used(guardKey);   // a plan is drawn once per dry run
             int after = Convert.ToInt32(space.Count);
             Dictionary<string, object> data = Json.Object("steps", plan.Count, "objects_created", objects, "layers_created", layersCreated, "counts", counts, "handles", handles,
                 "layout", layout.Length == 0 ? "Model" : layout, "object_count_before", before, "object_count_after", after, "count_matches_plan", after - before == objects);
@@ -663,8 +967,27 @@ namespace SmartConnector
                     a["__viewport_size"] = size;
                 }
             }
+            if (a.ContainsKey("layer_scheme")) place.Scheme = Json.GetString(a, "layer_scheme");
             if (a.ContainsKey("level_block")) place.LevelBlock = Json.GetString(a, "level_block");
-            if (a.ContainsKey("level_tag")) place.LevelTag = Json.GetString(a, "level_tag");
+            if (a.ContainsKey("leader_block")) place.LeaderBlock = Json.GetString(a, "leader_block");
+            if (a.ContainsKey("title_block")) place.TitleBlock = Json.GetString(a, "title_block");
+            if (a.ContainsKey("note_width")) place.NoteWidth = Convert.ToDouble(a["note_width"], System.Globalization.CultureInfo.InvariantCulture);
+            if (a.ContainsKey("sheet"))
+            {
+                IDictionary<string, object> sheet = a["sheet"] as IDictionary<string, object>;
+                if (sheet == null) throw new ToolException("sheet must be an object.");
+                foreach (string key in sheet.Keys) if (key != "project" && key != "sheet_no" && key != "view_no") throw new ToolException("Unknown sheet field: " + key + ". Allowed: project, sheet_no, view_no.");
+                Func<string, string> text = key =>
+                {
+                    if (!sheet.ContainsKey(key)) return null;
+                    string v = sheet[key] as string;
+                    if (v == null || v.Length > 80 || v.IndexOf('\n') >= 0) throw new ToolException("sheet." + key + " must be one line of text of up to 80 characters.");
+                    return v;
+                };
+                place.SheetProject = text("project"); place.SheetNo = text("sheet_no"); place.ViewNo = text("view_no");
+            }
+            if (place.Mode != "paper" && (place.LeaderBlock != null || place.TitleBlock != null || place.LevelBlock != null || a.ContainsKey("sheet") || a.ContainsKey("note_width")))
+                throw new ToolException("level_block, leader_block, title_block, note_width and sheet are used with annotation paper only.");
             if (a.ContainsKey("level_block_scale")) place.LevelBlockScale = Convert.ToDouble(a["level_block_scale"], System.Globalization.CultureInfo.InvariantCulture);
             if (place.Mode == "paper" && apply0(a) && Json.GetString(a, "layout").Length == 0) throw new ToolException("annotation paper needs layout: the name of the layout to annotate.");
             if (place.Mode != "paper" && a.ContainsKey("layout")) throw new ToolException("layout is used with annotation paper only.");
@@ -684,15 +1007,31 @@ namespace SmartConnector
                 centreSource = "the centre of the sheet of layout '" + Json.GetString(a, "layout") + "' (approximate: printer margins can move it a few millimetres)";
             }
             DetailResult built = AutoCadDetail.Build(Json.GetString(a, "template"), parameters, scale, ox, oy, dimStyle, textStyle, dimScale, place);
+            bool apply = a.ContainsKey("apply") && (bool)a["apply"];
+            if (apply)
+            {
+                // The brief is valid. Now the drawing's own layers and blocks decide which layer set is used, so read them and build again.
+                if (Json.GetString(a, "expected_drawing").Length == 0) throw new ToolException("expected_drawing is required when apply is true.");
+                if (doc == null) doc = ActiveDrawing();
+                place.Facts = ReadFacts((object)doc);
+                built = AutoCadDetail.Build(Json.GetString(a, "template"), parameters, scale, ox, oy, dimStyle, textStyle, dimScale, place);
+            }
 
             Dictionary<string, object> generated = Json.Object("summary", built.Summary, "warnings", built.Warnings);
             if (centreSource != null) generated["paper_centre_source"] = centreSource;
             if (a.ContainsKey("return_plan") && (bool)a["return_plan"]) { generated["items"] = built.Items; if (built.PaperItems.Count > 0) generated["paper_items"] = built.PaperItems; }
-            bool apply = a.ContainsKey("apply") && (bool)a["apply"];
             if (!apply) return Json.Object("applied", false, "generated", generated);
-            if (Json.GetString(a, "expected_drawing").Length == 0) throw new ToolException("expected_drawing is required when apply is true.");
-            if (doc == null) doc = ActiveDrawing();
             return ApplyGenerated((object)doc, a, built, generated);
+        }
+
+        // The layers and blocks the drawing already has.
+        private static DrawingFacts ReadFacts(object docSource)
+        {
+            dynamic doc = docSource;
+            DrawingFacts facts = new DrawingFacts();
+            facts.Layers = Names((object)doc.Layers);
+            facts.Blocks = Names((object)doc.Blocks);
+            return facts;
         }
 
         private static dynamic ActiveDrawing()
@@ -805,8 +1144,8 @@ namespace SmartConnector
             List<object> paperSteps = new List<object>();
             foreach (object step in steps) if (Json.GetString((IDictionary<string, object>)step, "op") == "layer") paperSteps.Add(step);
             paperSteps.AddRange(built.PaperItems.Cast<object>());
-            Dictionary<string, object> paperArguments = Json.Object("expected_drawing", id, "dry_run", true, "items", paperSteps.ToArray(), "layout", layout);
-            object modelCheck = ApplyPlan(docSource, Json.Object("expected_drawing", id, "dry_run", true, "items", steps.ToArray()));
+            Dictionary<string, object> paperArguments = Json.Object("expected_drawing", id, "dry_run", true, "items", paperSteps.ToArray(), "layout", layout, "__guard_skip", true);
+            object modelCheck = ApplyPlan(docSource, Json.Object("expected_drawing", id, "dry_run", true, "items", steps.ToArray(), "__guard_skip", true));
             object paperCheck = ApplyPlan(docSource, paperArguments);
             bool createViewport = a.ContainsKey("create_viewport") && (bool)a["create_viewport"];
             ViewportPlan viewport = null;
@@ -820,11 +1159,22 @@ namespace SmartConnector
                 string viewportWarning = ViewportWarning(docSource, layout, built.Scale);
                 if (viewportWarning != null) generated["viewport_warning"] = viewportWarning;
             }
-            if (dry) return Json.Object("applied", false, "generated", generated, "plan_result", modelCheck, "paper_plan_result", paperCheck);
+            // The dry-run rule for the whole job (geometry, annotation and viewport): one key over everything that decides what is drawn.
+            string guardKey = DryRunGuard.Key(id, steps, paperSteps, layout, createViewport,
+                built.Summary.ContainsKey("paper_centre") ? built.Summary["paper_centre"] : null, built.Summary.ContainsKey("model_centre") ? built.Summary["model_centre"] : null,
+                a.ContainsKey("__viewport_size") ? a["__viewport_size"] : null);
+            if (dry)
+            {
+                DryRunGuard.Passed_(guardKey);
+                return Json.Object("applied", false, "generated", generated, "plan_result", modelCheck, "paper_plan_result", paperCheck);
+            }
+            DryRunGuard.Require(guardKey);
 
+            planArguments["__guard_skip"] = true;
             object modelResult = ApplyPlan(docSource, planArguments);
             paperArguments["dry_run"] = false;
             object paperResult;
+            DryRunGuard.Used(guardKey);
             try { paperResult = ApplyPlan(docSource, paperArguments); }
             catch (ToolException e) { throw new ToolException("The geometry was drawn in model space, but the annotation in layout '" + layout + "' failed and was rolled back: " + e.Message + " Undo once (U) to remove the geometry, fix the cause, then run again."); }
             if (viewport == null) return Json.Object("applied", true, "generated", generated, "plan_result", modelResult, "paper_plan_result", paperResult);
@@ -846,7 +1196,6 @@ namespace SmartConnector
             }
         }
 
-        internal const string ViewportLayer = "G-ANNO-VPRT";
         private const double ViewportMargin = 10;   // paper millimetres around the parts
 
         internal sealed class ViewportPlan
@@ -855,9 +1204,10 @@ namespace SmartConnector
             internal double Width, Height;
             internal int Scale;
             internal bool LayerExists;
+            internal string LayerName = "G-ANNO-VPRT";
             internal Dictionary<string, object> Describe()
             {
-                return Json.Object("layer", ViewportLayer, "plotted", false, "centre", new object[] { Centre[0], Centre[1] }, "size", new object[] { Width, Height },
+                return Json.Object("layer", LayerName, "plotted", false, "centre", new object[] { Centre[0], Centre[1] }, "size", new object[] { Width, Height },
                     "scale", "1:" + Scale.ToString(System.Globalization.CultureInfo.InvariantCulture), "view_centre", new object[] { ViewCentre[0], ViewCentre[1] },
                     "layer_to_create", !LayerExists);
             }
@@ -883,9 +1233,13 @@ namespace SmartConnector
             dynamic layers = doc.Layers;
             int count = Convert.ToInt32(layers.Count);
             for (int i = 0; i < count; i++) { dynamic l = layers.Item(i); locks[Convert.ToString(l.Name)] = (bool)l.Lock; }
+            // The viewport goes on the drawing's own not-plotted viewport layer: the scheme's, else AO-MV (counter sheets), else G-ANNO-NPLT
+            // (kitchen library sheets); only when the drawing has none is one created, not plotted.
+            string preferred = built.Summary.ContainsKey("layer_scheme") && (string)built.Summary["layer_scheme"] == "ao" ? "AO-MV" : "G-ANNO-VPRT";
+            v.LayerName = new[] { preferred, "AO-MV", "G-ANNO-NPLT" }.FirstOrDefault(n => locks.ContainsKey(n)) ?? preferred;
             bool locked;
-            v.LayerExists = locks.TryGetValue(ViewportLayer, out locked);
-            if (v.LayerExists && locked) throw new ToolException("Layer " + ViewportLayer + " is locked, so the viewport cannot be placed on it. Unlock it and run again. Nothing was drawn.");
+            v.LayerExists = locks.TryGetValue(v.LayerName, out locked);
+            if (v.LayerExists && locked) throw new ToolException("Layer " + v.LayerName + " is locked, so the viewport cannot be placed on it. Unlock it and run again. Nothing was drawn.");
             return v;
         }
 
@@ -944,7 +1298,7 @@ namespace SmartConnector
                 {
                     if (!v.LayerExists)
                     {
-                        dynamic layer = doc.Layers.Add(ViewportLayer);
+                        dynamic layer = doc.Layers.Add(v.LayerName);
                         layerCreated = true;
                         layer.Color = 8;
                         layer.Plottable = false;
@@ -953,7 +1307,7 @@ namespace SmartConnector
                     try { doc.ActiveSpace = 0; } catch (Exception) { }
                     try { doc.Regen(1); } catch (Exception) { }
                     viewport = sheet.Block.AddPViewport(new double[] { v.Centre[0], v.Centre[1], 0 }, v.Width, v.Height);
-                    viewport.Layer = ViewportLayer;
+                    viewport.Layer = v.LayerName;
                     viewport.Display(true);
                     string handle = Convert.ToString(viewport.Handle);
                     string method, zoomError = null;
@@ -1002,7 +1356,7 @@ namespace SmartConnector
                     if (Math.Abs(custom * v.Scale - 1.0) > 1e-6) throw new ToolException("the viewport scale read back as " + custom.ToString(System.Globalization.CultureInfo.InvariantCulture) + " instead of 1:" + v.Scale.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".");
                     if (!(bool)viewport.DisplayLocked) throw new ToolException("the viewport display did not lock.");
                     try { doc.Regen(1); } catch (Exception) { }
-                    Dictionary<string, object> result = Json.Object("handle", handle, "method", method, "layer", ViewportLayer, "layer_created", layerCreated, "custom_scale", custom, "display_locked", true,
+                    Dictionary<string, object> result = Json.Object("handle", handle, "method", method, "layer", v.LayerName, "layer_created", layerCreated, "custom_scale", custom, "display_locked", true,
                         "centre", new object[] { v.Centre[0], v.Centre[1] }, "size", new object[] { v.Width, v.Height }, "view_centre_read_back", readBack);
                     if (readBack) { result["view_centre"] = new object[] { Math.Round(cx, 3), Math.Round(cy, 3) }; result["view_centre_corrected"] = corrected; }
                     else result["note"] = "AutoCAD did not answer the view read-back, so the centre is not proven: check that the section sits in the middle of the viewport.";
@@ -1013,7 +1367,7 @@ namespace SmartConnector
                 {
                     try { doc.MSpace = false; } catch (Exception) { }
                     if (viewport != null) { try { viewport.Delete(); } catch (Exception) { } }
-                    if (layerCreated) { try { doc.Layers.Item(ViewportLayer).Delete(); } catch (Exception) { } }
+                    if (layerCreated) { try { doc.Layers.Item(v.LayerName).Delete(); } catch (Exception) { } }
                     throw;
                 }
             }
@@ -1062,22 +1416,11 @@ namespace SmartConnector
                 case "list_layers":
                     return Json.Object("drawing", DrawingId((object)doc), "layers", Each((object)doc.Layers, l => Json.Object("name", Convert.ToString(l.Name), "color", Plain(l.Color), "on", (bool)l.LayerOn, "frozen", (bool)l.Freeze, "locked", (bool)l.Lock)));
                 case "list_entities":
-                    {
-                        dynamic space = Space((object)doc, Json.GetString(a, "layout"));
-                        int limit = a.ContainsKey("limit") ? Convert.ToInt32(a["limit"]) : 100;
-                        int i = a.ContainsKey("offset") ? Convert.ToInt32(a["offset"]) : 0, start = i;
-                        int count = Convert.ToInt32(space.Count);
-                        string layer = Json.GetString(a, "layer");
-                        List<object> items = new List<object>();
-                        while (i < count && items.Count < limit && (i - start) < MaxScanPerCall)
-                        {
-                            dynamic entity = space.Item(i); i++;
-                            if (layer.Length == 0 || String.Equals(Convert.ToString(entity.Layer), layer, StringComparison.OrdinalIgnoreCase)) items.Add(ReadEntity((object)entity));
-                        }
-                        return Json.Object("drawing", DrawingId((object)doc), "entities", items, "next_offset", i < count ? (object)i : null, "collection_count", count, "scanned", i - start);
-                    }
+                    return ListEntities((object)doc, a);
                 case "get_entity":
-                    return ReadEntity((object)doc.HandleToObject(Json.GetString(a, "handle")));
+                    return ReadEntity((object)doc.HandleToObject(Json.GetString(a, "handle")), FieldSet(a));
+                case "verify_standards":
+                    return VerifyStandards((object)doc, a);
             }
 
             if (name == "apply_plan") return ApplyPlan((object)doc, a);

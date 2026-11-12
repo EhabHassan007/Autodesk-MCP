@@ -114,7 +114,7 @@ function Get-AutodeskConnectionStatus {
     if (-not ($autoCad.available -or $revit.available)) {
         throw "Smart Connector is running, but neither AutoCAD nor Revit is reachable. $summary"
     }
-    @{connected=$true; summary=$summary; autocad=$autoCad; revit=$revit}
+    @{connected=$true; summary=$summary; bridge=@{kind='powershell'; version=$connectorVersion; warning='This is the old PowerShell bridge. It lacks apply_plan, execute_autocad and generate_detail, so every object costs one call. Open Smart Connector, run Repair, then restart the AI app.'}; autocad=$autoCad; revit=$revit}
 }
 
 function Invoke-WithWriteLock {

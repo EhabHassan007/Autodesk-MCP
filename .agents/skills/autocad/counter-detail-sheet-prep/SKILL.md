@@ -10,6 +10,12 @@ Two linked jobs: (A) the counter detail geometry drawn 1:1 in model space, and (
 
 Read `drawing_info` before every write, bind work to its exact path, and save only when the user asks. Keep the user's drawing usable: run AutoCAD work in short foreground steps.
 
+## Dry run first, then ask
+- Dry run before every write: `apply_plan` with `dry_run` true; `generate_detail` with `apply` false, then `apply` true with `dry_run` true. The connector refuses a real run without a passed dry run of the same plan.
+- Then stop and show what will be created (counts by type and layer), layers changed, drawing (name, path), units, warnings, and what stays untouched. Wait for an explicit yes.
+- After the yes, run once, check `count_matches_plan`, read a sample back, and do not save unless asked.
+- A changed request needs a new dry run and a new yes. Only "skip the dry run" in the user's current message overrides this.
+
 ## A. Counter detail package
 
 Follow [references/counter-detail-standard.md](references/counter-detail-standard.md) for views, scales, layers, text heights, and the general notes. In summary:

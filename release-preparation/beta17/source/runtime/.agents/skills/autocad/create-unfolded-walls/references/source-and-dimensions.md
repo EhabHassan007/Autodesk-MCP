@@ -1,0 +1,8 @@
+# Establish the source and dimensions
+
+- Call `drawing_info` and bind operations to the current drawing identity. Check model/paper space, units, read-only state, and relevant layer locks. Keep source entities, existing sample blocks, and unrelated edits intact.
+- Use the user's selection, marked reference, or specified route to identify actual CAD geometry. A marked image establishes scope; measure CAD coordinates, not image pixels. Resolve materially ambiguous routes or wall faces before creating the affected panels.
+- Record the ordered start/end points and source handles for each face, including marked returns, recesses, columns, and bends. Identify duplicate/overlapping linework so it is not counted twice. Use one consistent finish face; do not silently mix inner faces, outer faces, and centerlines.
+- Establish the unfolding direction and endpoints. Keep all lengths in one working unit. For a millimetre drawing, 5.00 m is 5000 mm and 2.20 m is 2200 mm; these are examples, not automatic defaults. Use the user's heights, and ask for materially missing heights.
+- Measure door widths and offsets from wall jambs or verified block geometry, accounting for rotation, mirrored scales, and paired leaves. Do not treat a swing bounding box as the clear opening. Include only doors intersecting the chosen wall route. Keep unspecified openings undeducted and explain the limitation rather than inventing dimensions.
+- Use actual arc length for a curved wall; never substitute chord length. If the existing block cannot represent the intended curved development or varying height, explain the limitation and resolve that portion separately.

@@ -1,3 +1,5 @@
+> **Removed in Smart Connector 1.1.0.** The remote gateway and the Cloudflare tunnel described below opened a route from the internet to a Revit session that can run code, so the compiled connector no longer includes them. Claude Desktop, Claude Code and Codex connect locally. This page is kept as history only; do not set up new tunnels from it.
+
 # Claude Free and paid remote connection
 
 Claude Chat connects from Anthropic's cloud, so each Revit workstation needs a stable public HTTPS hostname. Autodesk MCP Connector keeps Revit's named pipe local and exposes only an authenticated MCP gateway through an outbound Cloudflare Tunnel. No inbound router port is opened.

@@ -8,6 +8,12 @@ description: Draw and check zone / area outlines in AutoCAD that sit exactly on 
 
 A zone outline must follow the plan's existing lines exactly, not a sketch. The reliable pattern is: **the user draws the zones that need judgement; derive the rest from those and the plan; check everything numerically.** Read `drawing_info` first, and save only when asked.
 
+## Dry run first, then ask
+- Dry run before every write: `apply_plan` with `dry_run` true; `generate_detail` with `apply` false, then `apply` true with `dry_run` true. The connector refuses a real run without a passed dry run of the same plan.
+- Then stop and show what will be created (counts by type and layer), layers changed, drawing (name, path), units, warnings, and what stays untouched. Wait for an explicit yes.
+- After the yes, run once, check `count_matches_plan`, read a sample back, and do not save unless asked.
+- A changed request needs a new dry run and a new yes. Only "skip the dry run" in the user's current message overrides this.
+
 ## Fast path: one command per job (use this first)
 
 [scripts/zone.ps1](scripts/zone.ps1) runs on the active drawing. It finds the xref and every `ZONE-*` / `SKETCH` polyline itself, needs Python 3 + shapely, and prints a short report.

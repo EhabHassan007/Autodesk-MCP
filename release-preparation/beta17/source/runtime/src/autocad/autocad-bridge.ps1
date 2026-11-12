@@ -158,7 +158,7 @@ function Invoke-CadTool($name,$a) {
     $doc=$cad.ActiveDocument
     if ($a.expected_drawing) { Assert-Target $doc $a.expected_drawing }
     switch ($name) {
-        'drawing_info' { return @{name=$doc.Name;path=$doc.FullName;drawing_id=(Drawing-Id $doc);version=$cad.Version;units_code=$doc.GetVariable('INSUNITS');model_space_objects=$doc.ModelSpace.Count;saved=$doc.Saved;read_only=$doc.ReadOnly;active_layout=$doc.ActiveLayout.Name;layouts=@($doc.Layouts | ForEach-Object {$_.Name})} }
+        'drawing_info' { return @{name=$doc.Name;path=$doc.FullName;drawing_id=(Drawing-Id $doc);bridge='powershell';bridge_warning='This is the old PowerShell bridge. It lacks apply_plan, execute_autocad and generate_detail, so every object costs one call. Open Smart Connector, run Repair, then restart the AI app.';version=$cad.Version;units_code=$doc.GetVariable('INSUNITS');model_space_objects=$doc.ModelSpace.Count;saved=$doc.Saved;read_only=$doc.ReadOnly;active_layout=$doc.ActiveLayout.Name;layouts=@($doc.Layouts | ForEach-Object {$_.Name})} }
         'list_layers' { return @{drawing=(Drawing-Id $doc);layers=@($doc.Layers | ForEach-Object {@{name=$_.Name;color=$_.Color;on=$_.LayerOn;frozen=$_.Freeze;locked=$_.Lock}})} }
         'list_entities' {
             $space=Get-Space $doc $a.layout; $limit=100; if ($a.limit) {$limit=$a.limit}; $i=[int]$a.offset; $start=$i
@@ -256,7 +256,7 @@ while ($null -ne ($line=[Console]::ReadLine())) {
     switch ($r.method) {
         'initialize' {
             $protocol='2024-11-05'; if ($r.params.protocolVersion -in @('2024-11-05','2025-03-26','2025-06-18','2025-11-25')) {$protocol=$r.params.protocolVersion}
-            $response.result=@{protocolVersion=$protocol;capabilities=@{tools=@{}};serverInfo=@{name='Smart Connector - AutoCAD';version='0.4.0'};instructions='Read drawing_info before editing; use drawing_id as expected_drawing. Inspect entities before modifying their handles. Writes are enabled for any active writable drawing. Coordinates use WCS and drawing units. Each edit is an Undo group, not an atomic transaction; inspect after errors before retrying. Saving requires the separate save_drawing tool and user intent to save. Blocks and xrefs are not expanded by list_entities.'}
+            $response.result=@{protocolVersion=$protocol;capabilities=@{tools=@{}};serverInfo=@{name='Smart Connector - AutoCAD';version='0.4.0'};instructions='This is the old PowerShell bridge. It lacks apply_plan, execute_autocad and generate_detail, so every object costs one call. Open Smart Connector, run Repair, then restart the AI app. Read drawing_info before editing; use drawing_id as expected_drawing. Inspect entities before modifying their handles. Writes are enabled for any active writable drawing. Coordinates use WCS and drawing units. Each edit is an Undo group, not an atomic transaction; inspect after errors before retrying. Saving requires the separate save_drawing tool and user intent to save. Blocks and xrefs are not expanded by list_entities.'}
         }
         'ping' {$response.result=@{}}
         'tools/list' {$response.result=@{tools=$toolList}}

@@ -12,6 +12,7 @@ namespace SmartConnector
     {
         internal int Index;
         internal string Op, Id, Layer, TextStyle, Text, BlockName, Linetype;
+        internal string Justify;               // text and mtext: where the point sits on the text (middle-center, bottom-left, ...); null = the default, left on the baseline (text) or top-left (mtext)
         internal int Color;                    // layer step only; 0 = leave as is
         internal int Lineweight = -1;          // layer step only; -1 = leave as is
         internal double[] Point, End;
@@ -27,6 +28,8 @@ namespace SmartConnector
         internal double LinearFactor;          // dimensions in paper space: the measured value is multiplied by this (DIMLFAC), so a dimension of model geometry reads true; 0 = the style decides
         internal List<KeyValuePair<string, string>> Attributes;   // insert: attribute tag and value
         internal List<double> Bulges;          // polyline: bulge of the segment that starts at each point (0 = straight); null = all straight
+        internal double Landing = 4;           // leader: the label's landing, drawn to the left of its anchor (the label block's Distance1)
+        internal string Tag = "LABEL", Visibility;   // leader block: the attribute that takes the text; its visibility state, if the block has one
     }
 
     // The pure part of apply_plan: it checks a plan before AutoCAD is contacted, and checks it against the drawing's
@@ -40,6 +43,16 @@ namespace SmartConnector
         private static readonly Regex Name = new Regex("^[^<>/\\\\\":;?*|,=`]{1,255}$", RegexOptions.CultureInvariant);
         private static readonly Regex IdPattern = new Regex("^[A-Za-z0-9_.-]{1,40}$", RegexOptions.CultureInvariant);
         // Layer lineweights AutoCAD accepts, in hundredths of a millimetre.
+        // How the point of a text step sits on the text: AutoCAD's AcAlignment value for TEXT (ActiveX Alignment, then TextAlignmentPoint) and
+        // AcAttachmentPoint for MTEXT. "left" and "top-left" are the defaults of the two, so a step without justify is unchanged.
+        internal static readonly Dictionary<string, int[]> Justifications = new Dictionary<string, int[]>
+        {
+            { "left", new[] { 0, 7 } }, { "center", new[] { 1, 8 } }, { "right", new[] { 2, 9 } }, { "middle", new[] { 4, 5 } },
+            { "top-left", new[] { 6, 1 } }, { "top-center", new[] { 7, 2 } }, { "top-right", new[] { 8, 3 } },
+            { "middle-left", new[] { 9, 4 } }, { "middle-center", new[] { 10, 5 } }, { "middle-right", new[] { 11, 6 } },
+            { "bottom-left", new[] { 12, 7 } }, { "bottom-center", new[] { 13, 8 } }, { "bottom-right", new[] { 14, 9 } }
+        };
+
         private static readonly int[] Lineweights = { 0, 5, 9, 13, 15, 18, 20, 25, 30, 35, 40, 50, 53, 60, 70, 80, 90, 100, 106, 120, 140, 158, 200, 211 };
 
         private static readonly Dictionary<string, string[]> Allowed = new Dictionary<string, string[]>
@@ -49,9 +62,10 @@ namespace SmartConnector
             { "circle", new[] { "op", "id", "layer", "center", "radius" } },
             { "arc", new[] { "op", "id", "layer", "center", "radius", "start_angle", "end_angle" } },
             { "polyline", new[] { "op", "id", "layer", "points", "closed", "bulges" } },
-            { "text", new[] { "op", "id", "layer", "point", "text", "height", "rotation", "style" } },
-            { "mtext", new[] { "op", "id", "layer", "point", "width", "text", "height", "rotation", "style" } },
+            { "text", new[] { "op", "id", "layer", "point", "text", "height", "rotation", "style", "justify" } },
+            { "mtext", new[] { "op", "id", "layer", "point", "width", "text", "height", "rotation", "style", "justify" } },
             { "insert", new[] { "op", "id", "layer", "name", "point", "scale", "rotation", "attributes" } },
+            { "leader", new[] { "op", "id", "layer", "point", "target", "text", "block", "tag", "visibility", "landing", "width", "height" } },
             { "hatch", new[] { "op", "id", "layer", "pattern", "boundary", "holes", "scale", "angle", "color" } },
             { "dim_aligned", new[] { "op", "id", "layer", "from", "to", "location", "style", "scale", "linear_factor" } },
             { "dim_rotated", new[] { "op", "id", "layer", "from", "to", "location", "angle", "style", "scale", "linear_factor" } }
@@ -154,6 +168,12 @@ namespace SmartConnector
                         if (op == "mtext") p.Width = Positive(d, "width", i);
                         if (d.ContainsKey("rotation")) p.Rotation = Number(d, "rotation", i);
                         if (d.ContainsKey("style")) p.TextStyle = NameField(d, "style", i, true);
+                        if (d.ContainsKey("justify"))
+                        {
+                            string j = Convert.ToString(d["justify"]).Trim().ToLowerInvariant();
+                            if (!Justifications.ContainsKey(j)) throw Fail(i, "justify must be one of: " + String.Join(", ", Justifications.Keys.ToArray()) + ".");
+                            p.Justify = j;
+                        }
                         break;
                     case "insert":
                         p.Layer = NameField(d, "layer", i, true);
@@ -174,6 +194,21 @@ namespace SmartConnector
                                 p.Attributes.Add(new KeyValuePair<string, string>(pair.Key, value));
                             }
                         }
+                        break;
+                    case "leader":
+                        p.Layer = NameField(d, "layer", i, true);
+                        p.Point = Point(d, "point", i);
+                        p.End = Point(d, "target", i);
+                        p.Text = TextField(d, "text", i, 500);
+                        if (p.Text.IndexOf('\n') >= 0) throw Fail(i, "a leader's text is one line; the block wraps it to its width.");
+                        if (Math.Abs(p.Point[0] - p.End[0]) < 0.001 && Math.Abs(p.Point[1] - p.End[1]) < 0.001) throw Fail(i, "'point' and 'target' must differ.");
+                        if (d.ContainsKey("block")) p.BlockName = NameField(d, "block", i, true);
+                        if (d.ContainsKey("tag")) p.Tag = NameField(d, "tag", i, true);
+                        if (d.ContainsKey("visibility")) p.Visibility = NameField(d, "visibility", i, true);
+                        if (d.ContainsKey("landing")) { p.Landing = Number(d, "landing", i); if (p.Landing < 0 || p.Landing > 100) throw Fail(i, "landing must be from 0 to 100."); }
+                        p.Width = d.ContainsKey("width") ? Positive(d, "width", i) : 45;
+                        if (d.ContainsKey("height")) p.Height = Positive(d, "height", i);
+                        if (p.BlockName != null && d.ContainsKey("height")) throw Fail(i, "height is for a native leader (no block); a block has its own text size.");
                         break;
                     case "hatch":
                         p.Layer = NameField(d, "layer", i, true);
@@ -246,7 +281,7 @@ namespace SmartConnector
                     if (!known.TryGetValue(p.Layer, out locked)) errors.Add(at + "layer '" + p.Layer + "' does not exist; add a layer step before it.");
                     else if (locked) errors.Add(at + "layer '" + p.Layer + "' is locked.");
                     if (p.TextStyle != null && !st.Contains(p.TextStyle)) errors.Add(at + "text style '" + p.TextStyle + "' does not exist in the drawing.");
-                    if (p.Op == "insert" && !bl.Contains(p.BlockName)) errors.Add(at + "block '" + p.BlockName + "' is not defined in the drawing.");
+                    if ((p.Op == "insert" || (p.Op == "leader" && p.BlockName != null)) && !bl.Contains(p.BlockName)) errors.Add(at + "block '" + p.BlockName + "' is not defined in the drawing.");
                     if (p.DimStyle != null && !ds.Contains(p.DimStyle)) errors.Add(at + "dimension style '" + p.DimStyle + "' does not exist in the drawing.");
                 }
                 if (errors.Count >= MaxErrors) { errors.Add("(more problems not listed)"); break; }

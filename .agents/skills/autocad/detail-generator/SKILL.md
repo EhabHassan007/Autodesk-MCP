@@ -6,50 +6,31 @@ description: Generate a draft construction detail in AutoCAD from a short brief,
 
 # Detail Generator
 
-`generate_detail` turns a brief (a template name and a few parameters) into an `apply_plan` plan and, when asked, draws it. Everything it makes is a **draft for a designer's review**: confirm dimensions and construction with the project designer, and the accessible section with the authority or consultant.
+`generate_detail` turns a brief (a template name and a few parameters) into an `apply_plan` plan and, when asked, draws it. Everything it makes is a **draft for a designer's review**.
+
+## Dry run first, then ask (the connector refuses a real run otherwise)
+- Call with `apply` false (summary, warnings, `return_plan`), then `apply` true with `dry_run` true. Never `dry_run` false yet.
+- STOP and present the brief you will draw: parts with dimensions, levels, notes, dimension chains, title, scale, origin, styles; the drawing (name, path), units, layers created, warnings, what stays untouched. List everything read off a picture or assumed. Wait for an explicit yes.
+- After the yes, one real run; check `count_matches_plan` and a `get_entity` sample; do not save unless asked. A changed brief needs a new dry run and a new yes. Only "skip the dry run" in the user's current message overrides this.
 
 ## Workflow
+1. `drawing_info`; the drawing must be in millimetres (`units_code` 4) or nothing is drawn.
+2. Agree the parameters; ask for what is open (depth, top height, top material, raised bar, accessible section). Never guess a number.
+3. Dry run as above, with `origin` (where the floor meets the staff face) in a free area.
+4. Tell the user the drawing is unsaved; one `UNDO` removes the detail.
 
-1. `drawing_info` for the drawing id. The drawing must be in millimetres (`units_code` 4); the tool refuses anything else and draws nothing. For a new drawing use a millimetre template such as `acadiso.dwt`.
-2. Agree the parameters with the user. Everything has a default except the accessible section's values (see below). Ask for what the brief leaves open instead of guessing: depth, top height, top material, whether a raised bar or an accessible section is wanted.
-3. Call `generate_detail` with `apply` false first (the default) and `return_plan` if the steps are wanted. AutoCAD is not contacted; you get a summary and warnings. Show the summary and any warning to the user.
-4. Call it with `apply` true and `expected_drawing` set. `dry_run` defaults to true: read what it would create, then repeat with `dry_run` false. Choose `origin` (where the floor meets the staff face) so the section does not overlap existing work; a free area to the right of the drawing is usual.
-5. Verify: `count_matches_plan` true, then read a sample back with `get_entity`. Tell the user the drawing is unsaved. One `UNDO` removes the whole detail. Save only when asked.
+Parameters, defaults and what is drawn: [reception counter section](references/reception-counter-section.md).
 
-Read [reception counter section](references/reception-counter-section.md) for the parameters, defaults, what is drawn and what is not.
-
-## Annotation: model space, paper space, or none
-
-`annotation` chooses where dimensions, notes, levels and titles go.
-
-| Value | What you get |
-|---|---|
-| `model` (default) | Everything in model space at the detail scale (text 2.5 x the scale denominator). |
-| `paper` | Geometry in model space; dimensions, notes, levels and titles in the layout named by `layout`, at **true paper size: notes and levels 2.5 mm, title 3.5 mm**. Dimensions measure paper distances and carry `linear_factor` = the scale denominator, so they read the model size. |
-| `none` | Geometry only (parts, hatches, floor line). |
-
-For `paper`, pass `layout` (with `apply`). **Recommended: `create_viewport` true.** The tool then makes the viewport itself on layer `G-ANNO-VPRT` (created not plotted, colour 8; an existing layer is used as it is): at `view.paper_centre`, which defaults to the centre of the layout's sheet when applying (approximate by a few millimetres because of printer margins), sized to the parts plus 10 mm each side or `view.viewport_size [w, h]` in paper mm, with its view centred on the detail's model centre, set to 1:scale and display-locked. It is made last, in its own Undo group (three groups in all: geometry, annotation, viewport). The view is centred by switching into the viewport and zooming, after a regen (live-proven on AutoCAD 2024; without the regen AutoCAD answers "There is no active modelspace viewport"); if that fails, through the viewport's Target, the method of the counter sheets. The real view centre is then read back with one read-only AutoLISP query and corrected through Target if it is off; `viewport_result` says the `method`, `view_centre` and whether it was `view_centre_read_back`. If the viewport cannot be made, it is removed and the result (not an error) carries `viewport_error` and `viewport_next_step`, with the geometry and annotation results intact. Undo is typed by the user in AutoCAD; an AI's `U` sent as a command does not run. Without `create_viewport`, pass `view.paper_centre` = the Center of an existing 1:scale viewport whose view is centred on the result's `model_centre`; the tool warns (`viewport_warning`) if the layout has no viewport at that scale but cannot check the centre. Optional `view.model_centre`; the default is the centre of the parts. Office level blocks can be used with `level_block` (and `level_tag`, default `LEVEL`, `level_block_scale`).
-
-Both plans are checked against the drawing before anything is drawn. If the annotation fails after the geometry was drawn, the annotation is rolled back and the message says the geometry stays; undo once to remove it.
+## Annotation (`annotation`)
+- `model` (default): in model space at the detail scale.
+- `paper`: geometry in model space; dimensions, notes, levels, title in the layout `layout` at true paper size (notes 2.5 mm). Use `create_viewport` true. In an office drawing notes are `Multiple Leader Lab` leaders, levels `level indicator`, titles `DWG-VIEWTITLE`; `layer_scheme` auto picks the office layers. All options: [paper annotation](references/paper-annotation.md), [office standard](references/office-sheet-standard.md).
+- `none`: geometry only.
 
 ## Working from renders and plans
+Do not draw from pictures directly: write an interpretation list (parts, materials, dimensions), mark every number **given** or **estimated**, ask for at least two real dimensions per view, and wait for confirmation. Then build with `custom_section`, once per view. How: [working from renders](references/working-from-renders.md), [reading renders](references/reading-renders.md).
 
-The usual brief is not a list of parameters but **rendered pictures from several angles, plans, and some dimensions**. Do not draw from the pictures directly.
-
-1. Read the pictures and plans and write an **interpretation list**: the parts, their materials, the overall length, depth and heights, and any special feature (curves, steel frames, glass, lighting).
-2. Mark every number as **given** (from the user's dimensions or plan) or **estimated from the picture**. Pictures have no scale, so ask for at least two real dimensions per view, such as an overall length and a counter height. Never present an estimate as a fact.
-3. Show the list and the open questions, and **wait for the user's confirmation or corrections** before drawing anything.
-4. Build from the confirmed design, sections first, then plan and elevations, as drafts for review. Use `template` `custom_section` for anything the reception template does not cover, once per view (`view` section, elevation or plan, each with its own `origin` in model space and, in paper mode, its own `paper_centre` and viewport on the same layout). Shaped panels use `points` (with an arc on a point for curved fronts and S-shaped plans), repeated slats or fins use `repeat`, LED strips use `lines` with kind `led`, and in elevations the nearer parts go last in the list so they hide what is behind them. the confirmed list becomes `params.parts` (id, material, x0, y0, x1, y1 in mm; x from the staff face, y up from the floor), with `levels`, `notes`, `dimensions` and `title` written from the specification. Every number and every word of a note is yours to supply; the generator invents none, warns when parts have no note, refuses overlapping parts and unknown materials (mdf, ply, stone, corian, steel, glass, outline), and does not check the design against the pictures or any code.
-
-Read [reading renders](references/reading-renders.md) for how to read catalogue dimensions (chords, plan depth versus body depth, which surface a height measures to), typical sizes to cross-check estimates, and how materials map to the tool. Where the pictures show something the template cannot draw yet, say so and offer the nearest standard construction, clearly marked.
-
-## Rules
-
-- Millimetres only. Never convert or reinterpret units.
-- Existing layers are left as they are (their colours and lineweights are not changed). Pass `update_layers` only when the user asks for the generator's layer settings.
-- **The accessible section has no built-in numbers.** It needs `accessible_height`, `knee_clearance_height`, `knee_clearance_depth` and `code_reference`, taken from the code and edition the project uses. Never fill them from memory, and never carry a figure from one jurisdiction into another. The generator prints the code reference on the drawing, marked "to be verified".
-- Top material follows the item: Corian (the default) for counters, stone for kitchens and F&B.
-- Do not copy dimensions or curves from one project's drawing into a default. The defaults come from conventions repeated across the office's kitchen and joinery sheets; anything specific to one counter is an option.
-- **Annotation follows the reference sheets.** When the drawing has them, dimensions use style `na1`, notes and levels use text style `EN-S`, and titles use `EN-SCB`; the result lists them under `reference_styles` and says in `style_notes` which are missing. Pass `dimension_style` or `text_style` to override, or `use_reference_styles` false to use the current styles. See the reference for the numbers behind these styles.
-- Dimension and text sizes depend on the style and the detail scale. In model space the generator sets each dimension's scale to the detail scale, so a 3.5 mm style prints 3.5 mm at that scale; check the first dimension on screen, and if the size is wrong pass `dimension_scale` or fix the style. In paper space the style's own size applies (no scale is set unless `dimension_scale` is given).
-- If the plan is refused, the message names the step; fix the parameter and retry. A failed plan removes what it created.
+## Rules (full list: [rules](references/rules.md))
+- Millimetres only. Existing layers are left as they are.
+- The accessible section has no built-in numbers: heights and `code_reference` come from the code the user names. Never carry a figure between jurisdictions.
+- Annotation follows the reference sheets (`na1`, `EN-S`, `EN-SCB`) when present. Check the first dimension on screen.
+- A refused plan names the step; fix it and retry. A failed plan removes what it created.

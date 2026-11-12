@@ -65,12 +65,15 @@ try {
     $expected = @(Get-AutodeskMcpTools)
     $allTools = @((Invoke-Mcp 'tools/list').result.tools)
     # Tools that only SmartConnector.exe has; the PowerShell fallback bridge does not. Every other tool must match exactly.
-    $exeOnlyTools = @('apply_plan', 'execute_autocad', 'generate_detail')
+    $exeOnlyTools = @('apply_plan', 'execute_autocad', 'generate_detail', 'verify_standards')
+    # Tools the exe has improved on purpose (summary and fields for the readers, a product filter for the workflow list); the fallback bridge keeps the old form. Only their names and order must match.
+    $exeChangedTools = @('list_entities', 'get_entity', 'list_skill_workflows')
     Assert (@($allTools | Where-Object { $exeOnlyTools -contains $_.name }).Count -eq $exeOnlyTools.Count) ('An exe-only tool is missing from the tool list: ' + (($allTools | ForEach-Object name) -join ','))
     $actual = @($allTools | Where-Object { $exeOnlyTools -notcontains $_.name })
     Assert ((($actual | ForEach-Object name) -join ',') -eq (($expected | ForEach-Object { $_['name'] }) -join ',')) ('Tool list differs: ' + (($actual | ForEach-Object name) -join ','))
     for ($i = 0; $i -lt $expected.Count; $i++) {
         $e = $expected[$i]; $a = $actual[$i]; $n = $e['name']
+        if ($exeChangedTools -contains $n) { continue }
         Assert ($a.description -eq $e['description']) "Description of $n differs"
         Assert ((@($a.inputSchema.required) -join ',') -eq (@($e['inputSchema']['required']) -join ',')) "Required arguments of $n differ"
         Assert ((@($a.inputSchema.properties.PSObject.Properties.Name | Sort-Object) -join ',') -eq (@($e['inputSchema']['properties'].Keys | Sort-Object) -join ',')) "Arguments of $n differ"
@@ -90,6 +93,10 @@ try {
     $bridgeSkills = @(Get-SharedWorkflows)
     Assert ($skills.Count -ge 30 -and $skills.Count -eq $bridgeSkills.Count) "Skill count $($skills.Count) differs from the bridge ($($bridgeSkills.Count))"
     foreach ($skill in $bridgeSkills) { Assert (@($skills | Where-Object { $_.name -eq $skill['name'] -and $_.category -eq $skill['category'] }).Count -eq 1) "Skill $($skill['name']) missing or in another category" }
+    $cadSkills = @(($(Invoke-Tool 'list_skill_workflows' @{ product = 'autocad' }).content[0].text | ConvertFrom-Json).skills)
+    Assert ($cadSkills.Count -ge 5 -and @($cadSkills | Where-Object { $_.category -ne 'autocad' }).Count -eq 0 -and @($cadSkills | Where-Object { -not $_.description }).Count -eq 0) 'list_skill_workflows with product autocad must list only AutoCAD workflows, each with a description'
+    Assert (@(($(Invoke-Tool 'list_skill_workflows' @{ product = 'revit' }).content[0].text | ConvertFrom-Json).skills | Where-Object { $_.name -eq 'find-skills' }).Count -eq 0) 'The generic skill-finder is not a Revit workflow'
+    Assert ((Invoke-Tool 'list_skill_workflows' @{ product = 'catia' }).content[0].text -like 'product must be*') 'An unknown product must be refused'
     $first = $skills[0]
     $read = Invoke-Tool 'read_skill_workflow' @{ name = $first.name }
     $content = ($read.content[0].text | ConvertFrom-Json).content
@@ -101,6 +108,21 @@ try {
     $usage = Get-Content (Join-Path $env:LOCALAPPDATA 'AutodeskMcpSkillCollection\usage.jsonl') -Raw
     Assert ($usage -match ('"kind":"skill","name":"' + [regex]::Escape($first.name) + '"') -or $usage -match ('"name":"' + [regex]::Escape($first.name) + '"')) "Skill use was not recorded: $usage"
     'PASS: workflow skills match the bridge, invalid names and paths are refused, use is recorded on team PCs'
+
+    # 4b. `mcp --product autocad` offers only the AutoCAD tools (plus connection_status and the skill tools).
+    foreach ($scope in @(@('autocad', 'list_sessions', 'apply_plan'), @('revit', 'apply_plan', 'list_sessions'))) {
+        $scoped = New-Object Diagnostics.ProcessStartInfo($exe, ('mcp --product ' + $scope[0]))
+        $scoped.UseShellExecute = $false; $scoped.RedirectStandardInput = $true; $scoped.RedirectStandardOutput = $true
+        $scoped.StandardOutputEncoding = New-Object Text.UTF8Encoding($false)
+        $scopedProcess = [Diagnostics.Process]::Start($scoped)
+        $scopedProcess.StandardInput.WriteLine('{"jsonrpc":"2.0","id":1,"method":"tools/list"}')
+        $scopedRead = $scopedProcess.StandardOutput.ReadLineAsync()
+        Assert ($scopedRead.Wait(20000)) "mcp --product $($scope[0]) did not answer"
+        $scopedNames = @(($scopedRead.Result | ConvertFrom-Json).result.tools | ForEach-Object name)
+        $scopedProcess.StandardInput.Close(); if (-not $scopedProcess.WaitForExit(5000)) { $scopedProcess.Kill() }
+        Assert (($scopedNames -notcontains $scope[1]) -and ($scopedNames -contains $scope[2]) -and ($scopedNames -contains 'connection_status') -and ($scopedNames -contains 'list_skill_workflows')) "mcp --product $($scope[0]) offers the wrong tools: $($scopedNames -join ',')"
+    }
+    'PASS: mcp --product autocad and --product revit offer only that product''s tools'
 
     # 5. Argument checks and messages, before AutoCAD or Revit is contacted.
     $checks = @(
@@ -124,6 +146,9 @@ try {
         @('execute_autocad', @{ expected_drawing = 'a.dwg'; execution_mode = 'read'; allow_model_changes = $true; code = 'return "x";' }, 'Read execution requires allow_model_changes=false.'),
         @('execute_autocad', @{ expected_drawing = 'a.dwg'; execution_mode = 'read'; allow_model_changes = $false; code = 'return 1 +;' }, 'C# compilation failed:*Line 1:*'),
         @('execute_autocad', @{ expected_drawing = 'a.dwg'; execution_mode = 'read'; allow_model_changes = $false; code = 'return doc.Name;' }, 'No running full AutoCAD instance was found*'),
+        @('list_entities', @{ fields = 'TextString' }, 'Invalid array: fields'),
+        @('list_entities', @{ summary = 'yes' }, 'Invalid boolean: summary'),
+        @('verify_standards', @{}, 'Missing argument: expected_drawing'),
         @('generate_detail', @{}, 'Missing argument: template'),
         @('generate_detail', @{ template = 'kitchen' }, 'Invalid choice: template'),
         @('generate_detail', @{ template = 'reception_counter_section'; params = @{ height = 100 } }, 'params.height must be between 300 and 1500 mm.'),
@@ -142,8 +167,11 @@ try {
         @('generate_detail', @{ template = 'reception_counter_section'; annotation = 'paper'; view = @{ zoom = 2 } }, 'Unknown view field: zoom*'),
         @('generate_detail', @{ template = 'reception_counter_section'; annotation = 'paper'; view = @{ paper_centre = @(200, 150) }; apply = $true; expected_drawing = 'a.dwg' }, 'annotation paper needs layout*'),
         @('generate_detail', @{ template = 'reception_counter_section'; layout = 'Layout1' }, 'layout is used with annotation paper only.'),
-        @('generate_detail', @{ template = 'reception_counter_section'; level_block = 'LVL' }, 'level_block is used with annotation paper only.'),
+        @('generate_detail', @{ template = 'reception_counter_section'; level_block = 'LVL' }, 'level_block, leader_block, title_block, note_width and sheet are used with annotation paper only.'),
         @('generate_detail', @{ template = 'reception_counter_section'; create_viewport = $true }, 'create_viewport is used with annotation paper only.'),
+        @('generate_detail', @{ template = 'reception_counter_section'; leader_block = 'MLL' }, 'level_block, leader_block, title_block, note_width and sheet are used with annotation paper only.'),
+        @('generate_detail', @{ template = 'reception_counter_section'; layer_scheme = 'office' }, 'Invalid choice: layer_scheme'),
+        @('generate_detail', @{ template = 'reception_counter_section'; annotation = 'paper'; view = @{ paper_centre = @(200, 150) }; sheet = @{ number = 'A1' } }, 'Unknown sheet field: number*'),
         @('generate_detail', @{ template = 'reception_counter_section'; annotation = 'paper'; create_viewport = $true }, 'view.paper_centre is needed to preview without AutoCAD*'),
         @('generate_detail', @{ template = 'reception_counter_section'; annotation = 'paper'; view = @{ paper_centre = @(200, 150); viewport_size = @(100, 100) } }, 'view.viewport_size is used with create_viewport only.'),
         @('get_element', @{ element_id = ' ' }, 'Empty argument: element_id'),
@@ -169,6 +197,8 @@ try {
     }
     $paper = Invoke-Tool 'generate_detail' @{ template = 'reception_counter_section'; annotation = 'paper'; view = @{ paper_centre = @(200, 150) }; return_plan = $true }
     Assert (-not $paper.isError -and $paper.content[0].text -like '*"paper_items"*' -and $paper.content[0].text -like '*linear_factor*' -and $paper.content[0].text -like '*viewport_setup*') 'generate_detail paper mode must return the geometry plan, the layout plan and the viewport set-up without AutoCAD'
+    $ao = Invoke-Tool 'generate_detail' @{ template = 'reception_counter_section'; annotation = 'paper'; layer_scheme = 'ao'; leader_block = 'Multiple Leader Lab'; view = @{ paper_centre = @(200, 150) }; return_plan = $true }
+    Assert (-not $ao.isError -and $ao.content[0].text -like '*"op":"leader"*' -and $ao.content[0].text -like '*AO-MDF_SECTION_PLAN*' -and $ao.content[0].text -like '*mm THK MDF CARCASS W/ MELAMINE FINISH*') 'generate_detail paper mode with the office scheme must return leaders on the office layers without AutoCAD'
     $custom = Invoke-Tool 'generate_detail' @{ template = 'custom_section'; params = @{ parts = @(@{ id = 'top'; material = 'corian'; x0 = 0; y0 = 870; x1 = 600; y1 = 882 }); notes = @(@{ part = 'top'; text = '12MM THK. SOLID SURFACE TOP' }) }; return_plan = $true }
     Assert (-not $custom.isError -and $custom.content[0].text -like '*12MM THK. SOLID SURFACE TOP*' -and $custom.content[0].text -like '*custom_section*') 'generate_detail custom_section must return a plan without AutoCAD'
     $curve = Invoke-Tool 'generate_detail' @{ template = 'custom_section'; scale = 20; params = @{ view = 'plan'; parts = @(@{ id = 'c'; material = 'corian'; points = @(@{ x = 1200; y = 0; radius = 800 }, @(2000, 800), @{ x = 1400; y = 800; radius = -200 }, @(1200, 600)) }) }; return_plan = $true }
