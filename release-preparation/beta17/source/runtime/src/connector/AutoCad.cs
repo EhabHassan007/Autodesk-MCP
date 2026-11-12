@@ -78,7 +78,7 @@ namespace SmartConnector
                             "create_viewport", Json.Object("type", "boolean"),
                             "layer_scheme", Json.Object("type", "string", "enum", new object[] { "auto", "generic", "ao" })),
                         new[] { "template" }, false),
-                    Schema.Tool("verify_standards", "Check a drawing and return violations only (a few tokens when all is well). required_layers [{name, color?}]; forbidden_layers [names] (nothing may be drawn on them, e.g. 0); text_height {min?, max?, layer?}; expected_counts [{layer?, type?, count}] with type line, circle, arc, polyline, text, mtext, hatch, dimension, insert or an AcDb name. Read-only; up to 2000 objects per call (offset continues).",
+                    Schema.Tool("verify_standards", "Check a drawing and return violations only (a few tokens when all is well). required_layers [{name, color?}]; forbidden_layers [names] (nothing may be drawn on them, e.g. 0); text_height {min?, max?, layer?}; expected_counts [{layer?, type?, count}] with type line, circle, arc, polyline, text, mtext, hatch, dimension, insert or an AcDb name (leave type and layer out for the whole drawing; an unknown type is refused). Read-only; up to 2000 objects per call (offset continues).",
                         Json.Object("expected_drawing", target(), "layout", str(), "offset", Json.Object("type", "integer", "minimum", 0),
                             "required_layers", Json.Object("type", "array", "items", Json.Object("type", "object")), "forbidden_layers", Json.Object("type", "array", "items", Json.Object("type", "string")),
                             "text_height", Json.Object("type", "object"), "expected_counts", Json.Object("type", "array", "items", Json.Object("type", "object"))),
@@ -365,7 +365,11 @@ namespace SmartConnector
                     if (rule == null || !rule.ContainsKey("count")) throw new ToolException("Every expected_counts entry needs a count.");
                     string wantLayer = Json.GetString(rule, "layer"), wantType = Json.GetString(rule, "type");
                     string mapped;
-                    if (wantType.Length > 0 && TypeNames.TryGetValue(wantType, out mapped)) wantType = mapped;
+                    // "total", "all" or "any" as a type means every object; an unknown type is refused, never counted as zero.
+                    if (String.Equals(wantType, "total", StringComparison.OrdinalIgnoreCase) || String.Equals(wantType, "all", StringComparison.OrdinalIgnoreCase) || String.Equals(wantType, "any", StringComparison.OrdinalIgnoreCase)) wantType = "";
+                    else if (wantType.Length > 0 && TypeNames.TryGetValue(wantType, out mapped)) wantType = mapped;
+                    else if (wantType.Length > 0 && !wantType.StartsWith("AcDb", StringComparison.OrdinalIgnoreCase))
+                        throw new ToolException("expected_counts type '" + wantType + "' is not known. Use line, circle, arc, polyline, text, mtext, hatch, dimension, insert or an AcDb name; leave type out to count every object.");
                     int found = 0;
                     foreach (KeyValuePair<string, int> pair in byLayerType)
                     {
