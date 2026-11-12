@@ -35,8 +35,13 @@ export const DASHBOARD_HTML = `<!doctype html>
   <section id="app" hidden>
     <nav class="tabs" aria-label="Dashboard views">
       <button type="button" class="tab" id="tab-team" aria-pressed="true">Team</button>
+      <button type="button" class="tab" id="tab-charts" aria-pressed="false">Charts</button>
       <button type="button" class="tab" id="tab-review" aria-pressed="false">Skill review</button>
     </nav>
+    <div id="charts-view" hidden>
+      <p class="muted">What the connector reports when people run Skills Sync: names and daily counts only, for the last 30 days. A PC that has not synced recently shows nothing yet.</p>
+      <div class="charts" id="charts"></div>
+    </div>
     <div id="review-view" hidden>
       <p class="muted">Uploaded skills that differ from the approved library, grouped by category. Content is shown as text only and is never run. Approve adds one skill to <b>main</b>, which the team library serves; reject keeps it out. An upload closes on GitHub, unmerged, once every skill in it is decided.</p>
       <div class="tiles" id="review-tiles"></div>
@@ -74,8 +79,8 @@ export const DASHBOARD_HTML = `<!doctype html>
 </body>
 </html>`;
 
-export const DASHBOARD_CSS = `:root{--bg:#f6f7f9;--card:#fff;--text:#1d2329;--muted:#5f6b77;--line:#e3e7ec;--accent:#0b6bcb;--accent-text:#fff;--good:#1f7a3d;--bad:#b42318;--chip:#eef2f6}
-@media (prefers-color-scheme:dark){:root{--bg:#121417;--card:#1b1f24;--text:#e7ebef;--muted:#9aa6b2;--line:#2b3138;--accent:#4c9ee8;--accent-text:#0b1520;--good:#5cc683;--bad:#f1847a;--chip:#252b32}}
+export const DASHBOARD_CSS = `:root{--bg:#f6f7f9;--card:#fff;--text:#1d2329;--muted:#5f6b77;--line:#e3e7ec;--accent:#0b6bcb;--accent-text:#fff;--good:#1f7a3d;--bad:#b42318;--chip:#eef2f6;--c1:#0b6bcb;--c2:#7a4fd6;--c3:#1f7a3d;--c4:#b25e00}
+@media (prefers-color-scheme:dark){:root{--bg:#121417;--card:#1b1f24;--text:#e7ebef;--muted:#9aa6b2;--line:#2b3138;--accent:#4c9ee8;--accent-text:#0b1520;--good:#5cc683;--bad:#f1847a;--chip:#252b32;--c1:#4c9ee8;--c2:#a98af0;--c3:#5cc683;--c4:#f0a04b}}
 *{box-sizing:border-box}
 /* Elements toggled with the hidden attribute must stay hidden even when a class sets display. */
 [hidden]{display:none!important}
@@ -122,6 +127,18 @@ tr.detail td{background:var(--bg)}
 .tab{background:transparent;color:var(--text);border-color:var(--line)}
 .tab[aria-pressed="true"]{background:var(--accent);color:var(--accent-text);border-color:var(--accent)}
 .category{margin-bottom:16px}
+.charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:16px}
+.chart svg{display:block;width:100%;height:auto}
+.chart svg.ch-donut{max-width:220px;margin:0 auto}
+.ch-label{fill:var(--text);font-size:12px}.ch-muted{fill:var(--muted);font-size:11px}
+.ch-total{fill:var(--text);font-size:7px;font-weight:600}
+.ch-grid{stroke:var(--line);stroke-width:1}
+.ch-skill{fill:var(--c1)}.ch-tool{fill:var(--c2)}.ch-version{fill:var(--c3)}.ch-person{fill:var(--c4)}
+.ch-d-skill,.ch-d-tool{fill:none;stroke-width:6}
+.ch-d-skill{stroke:var(--c1)}.ch-d-tool{stroke:var(--c2)}
+.legend{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-wrap:wrap;gap:4px 16px}
+.swatch{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:baseline}
+.swatch.s-skill{background:var(--c1)}.swatch.s-tool{background:var(--c2)}
 .skill{border-top:1px solid var(--line);padding-top:12px;margin-top:12px}
 .skill h3{font-size:15px;margin:0 0 6px;word-break:break-all}
 .upload{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:12px;margin:8px 0}
@@ -196,6 +213,7 @@ export const DASHBOARD_JS = `'use strict';
       $('signin').hidden = true; $('app').hidden = false; $('actions').hidden = false;
       $('updated').textContent = 'Updated ' + new Date().toLocaleTimeString();
       render();
+      if (view === 'charts') renderCharts();
       if (view === 'review') loadReviews();
     } catch (e) { if (e.message !== 'denied') alert(e.message); }
   }
@@ -276,12 +294,115 @@ export const DASHBOARD_JS = `'use strict';
   const STATUS_NAMES = {new: 'new skill', changed: 'changed', moved: 'moved to another category'};
   const lineDiff = ${lineDiff.toString()};
 
+  // ---------- charts: plain SVG built from the overview, every value inserted as text ----------
+  const SVGNS = 'http://www.w3.org/2000/svg';
+  function svg(tag, attrs, ...kids) {
+    const node = document.createElementNS(SVGNS, tag);
+    for (const [k, v] of Object.entries(attrs || {})) node.setAttribute(k, String(v));
+    for (const kid of kids.flat(Infinity)) if (kid !== null && kid !== undefined && kid !== false) node.append(kid instanceof Node ? kid : String(kid));
+    return node;
+  }
+  const shorten = (text, n) => text.length > n ? text.slice(0, n - 1) + '…' : text;
+  const nothing = text => el('p', {class: 'muted'}, text);
+
+  // Horizontal bars, largest first. rows: [{label, value}].
+  function barChart(rows, cls, label) {
+    if (!rows.length) return nothing('Nothing reported yet.');
+    const W = 560, left = 190, right = 56, row = 26, top = 4, max = Math.max(1, ...rows.map(r => r.value));
+    const node = svg('svg', {viewBox: '0 0 ' + W + ' ' + (top + rows.length * row + 4), role: 'img', 'aria-label': label});
+    rows.forEach((r, i) => {
+      const y = top + i * row, w = Math.max(2, Math.round((W - left - right) * r.value / max));
+      node.append(
+        svg('text', {x: left - 8, y: y + 16, 'text-anchor': 'end', class: 'ch-label'}, shorten(r.label, 30), svg('title', {}, r.label)),
+        svg('rect', {x: left, y: y + 3, width: w, height: 16, rx: 3, class: cls}, svg('title', {}, r.label + ': ' + r.value)),
+        svg('text', {x: left + w + 6, y: y + 16, class: 'ch-muted'}, r.value));
+    });
+    return node;
+  }
+
+  // The last n calendar days (UTC, like the service), oldest first.
+  function lastDays(n) {
+    const now = new Date(), out = [];
+    for (let i = n - 1; i >= 0; i--) out.push(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - i)).toISOString().slice(0, 10));
+    return out;
+  }
+
+  // One column per day, skills below and tools above. daily: [{day, kind, uses}].
+  function columnChart(daily) {
+    const days = lastDays(30), by = {};
+    for (const d of daily || []) { by[d.day] = by[d.day] || {skill: 0, tool: 0}; by[d.day][d.kind] = d.uses; }
+    const totals = days.map(d => by[d] ? by[d].skill + by[d].tool : 0), max = Math.max(1, ...totals);
+    if (!totals.some(Boolean)) return nothing('No usage reported in the last 30 days.');
+    const W = 560, H = 200, left = 34, top = 8, bottom = 22, plot = H - top - bottom, slot = (W - left - 8) / days.length, bw = Math.max(4, slot - 3);
+    const node = svg('svg', {viewBox: '0 0 ' + W + ' ' + H, role: 'img', 'aria-label': 'Skill and tool uses per day, last 30 days'});
+    [0, 0.5, 1].forEach(f => {
+      const y = top + plot - plot * f;
+      node.append(svg('line', {x1: left, x2: W - 8, y1: y, y2: y, class: 'ch-grid'}), svg('text', {x: left - 6, y: y + 4, 'text-anchor': 'end', class: 'ch-muted'}, Math.round(max * f)));
+    });
+    days.forEach((d, i) => {
+      const v = by[d] || {skill: 0, tool: 0}, x = left + i * slot + (slot - bw) / 2, hs = plot * v.skill / max, ht = plot * v.tool / max;
+      const g = svg('g', {}, svg('title', {}, d + ' — skills ' + v.skill + ', tools ' + v.tool));
+      if (v.skill) g.append(svg('rect', {x, y: top + plot - hs, width: bw, height: hs, class: 'ch-skill'}));
+      if (v.tool) g.append(svg('rect', {x, y: top + plot - hs - ht, width: bw, height: ht, class: 'ch-tool'}));
+      node.append(g);
+      if (i === 0 || i === 15 || i === days.length - 1) node.append(svg('text', {x: i === 0 ? x : i === days.length - 1 ? x + bw : x + bw / 2, y: H - 6, 'text-anchor': i === 0 ? 'start' : i === days.length - 1 ? 'end' : 'middle', class: 'ch-muted'}, d.slice(5)));
+    });
+    return node;
+  }
+
+  // Donut: each part is a circle arc drawn with a dash pattern (a circle of radius 15.9155 is 100 long).
+  function donutChart(parts, label) {
+    const total = parts.reduce((n, p) => n + p.value, 0);
+    if (!total) return nothing('Nothing reported yet.');
+    const node = svg('svg', {viewBox: '0 0 42 42', role: 'img', 'aria-label': label, class: 'ch-donut'});
+    let offset = 25;
+    for (const p of parts) {
+      if (!p.value) continue;
+      const pct = 100 * p.value / total;
+      node.append(svg('circle', {cx: 21, cy: 21, r: 15.9155, 'stroke-dasharray': pct + ' ' + (100 - pct), 'stroke-dashoffset': offset, class: p.cls}, svg('title', {}, p.label + ': ' + p.value)));
+      offset -= pct;
+    }
+    node.append(svg('text', {x: 21, y: 23.5, 'text-anchor': 'middle', class: 'ch-total'}, total));
+    return node;
+  }
+  const legend = items => el('ul', {class: 'legend'}, items.map(i => el('li', {}, el('span', {class: 'swatch ' + i.swatch}), i.text)));
+
+  function renderCharts() {
+    const totals = kind => {
+      const sums = {};
+      for (const u of data.usage) if (u.kind === kind && u.last30) sums[u.name] = (sums[u.name] || 0) + u.last30;
+      return Object.entries(sums).sort((a, b) => b[1] - a[1]);
+    };
+    const skills = totals('skill'), tools = totals('tool');
+    const asRows = list => list.slice(0, 10).map(([label, value]) => ({label, value}));
+    const sum = list => list.reduce((n, r) => n + r[1], 0);
+    const names = Object.fromEntries(data.devices.map(d => [d.id, d.person_name || d.label]));
+    const perPerson = {};
+    for (const u of data.usage) perPerson[u.device] = (perPerson[u.device] || 0) + u.last30;
+    const people = Object.entries(perPerson).map(([id, value]) => ({label: names[id] || 'Unknown', value})).filter(r => r.value > 0).sort((a, b) => b.value - a.value).slice(0, 10);
+    const versions = {};
+    for (const d of data.devices) { const v = d.connector_version || 'unknown'; versions[v] = (versions[v] || 0) + 1; }
+    const versionRows = Object.entries(versions).sort((a, b) => b[1] - a[1]).map(([label, value]) => ({label, value}));
+    const card = (title, body) => el('div', {class: 'card chart'}, el('h2', {}, title), body);
+    $('charts').replaceChildren(
+      card('Activity per day', [columnChart(data.daily), legend([{swatch: 's-skill', text: 'Skills'}, {swatch: 's-tool', text: 'Tools'}])]),
+      card('Skills vs tools', [donutChart([{label: 'Skills', value: sum(skills), cls: 'ch-d-skill'}, {label: 'Tools', value: sum(tools), cls: 'ch-d-tool'}], 'Share of uses, skills and tools'),
+        legend([{swatch: 's-skill', text: 'Skills — ' + sum(skills)}, {swatch: 's-tool', text: 'Tools — ' + sum(tools)}])]),
+      card('Most used skills', barChart(asRows(skills), 'ch-skill', 'Most used skills, last 30 days')),
+      card('Most used tools', barChart(asRows(tools), 'ch-tool', 'Most used tools, last 30 days')),
+      card('Uses per person', barChart(people, 'ch-person', 'Skill and tool uses per person, last 30 days')),
+      card('Connector versions in use (PCs)', barChart(versionRows, 'ch-version', 'Number of PCs on each connector version')));
+  }
+
   function showView(next) {
     view = next;
     $('tab-team').setAttribute('aria-pressed', String(next === 'team'));
     $('tab-review').setAttribute('aria-pressed', String(next === 'review'));
+    $('tab-charts').setAttribute('aria-pressed', String(next === 'charts'));
     $('team-view').hidden = next !== 'team';
     $('review-view').hidden = next !== 'review';
+    $('charts-view').hidden = next !== 'charts';
+    if (next === 'charts' && data) renderCharts();
     if (next === 'review' && !reviews) loadReviews();
   }
 
@@ -413,6 +534,7 @@ export const DASHBOARD_JS = `'use strict';
     $('signout').addEventListener('click', () => signOut(''));
     $('tab-team').addEventListener('click', () => showView('team'));
     $('tab-review').addEventListener('click', () => showView('review'));
+    $('tab-charts').addEventListener('click', () => showView('charts'));
     $('filter').addEventListener('input', () => data && renderPeople());
     if (token) load(); else $('token').focus();
   });
