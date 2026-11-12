@@ -1125,6 +1125,23 @@ namespace SmartConnector
                 throw new ToolException("The drawing is not in millimetres (INSUNITS = " + units.ToString(System.Globalization.CultureInfo.InvariantCulture) + "), so nothing was drawn. The Detail Generator works in millimetres only; start from a millimetre template such as acadiso.dwt.");
 
             if (!a.ContainsKey("use_reference_styles") || (bool)a["use_reference_styles"]) ResolveReferenceStyles(docSource, built, generated);
+            string sheetName = Json.GetString(a, "layout");
+            if (built.PaperItems.Count > 0 && sheetName.Length > 0 && built.Summary.ContainsKey("paper_footprint"))
+            {
+                // The paper size comes from the layout's page setup, not from what the brief assumes: say so before anything is drawn.
+                try
+                {
+                    double[] half = SheetCentre(docSource, sheetName);
+                    double[] foot = ((object[])built.Summary["paper_footprint"]).Select(o => Convert.ToDouble(o, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+                    generated["sheet_size_mm"] = new object[] { half[0] * 2, half[1] * 2 };
+                    if (foot[0] < -5 || foot[1] < -5 || foot[2] > half[0] * 2 + 5 || foot[3] > half[1] * 2 + 5)
+                        built.Warnings.Add("This view needs x " + foot[0].ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + " to " + foot[2].ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)
+                            + ", y " + foot[1].ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + " to " + foot[3].ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)
+                            + " mm on the sheet, but layout '" + sheetName + "' is " + (half[0] * 2).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + " x " + (half[1] * 2).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)
+                            + " mm (Page Setup). Part of the view falls outside the paper: set the layout's paper size or move the view.");
+                }
+                catch (Exception) { }
+            }
             bool update = a.ContainsKey("update_layers") && (bool)a["update_layers"];
             HashSet<string> existing = Names((object)doc.Layers);
             List<object> steps = new List<object>();
@@ -1360,7 +1377,16 @@ namespace SmartConnector
                     WaitUntilReady(docSource);
                     try { doc.ActiveSpace = 0; } catch (Exception) { }
                     try { doc.Regen(1); } catch (Exception) { }
-                    viewport = sheet.Block.AddPViewport(new double[] { v.Centre[0], v.Centre[1], 0 }, v.Width, v.Height);
+                    for (int wait = 0; wait < 10; wait++)   // the layout switch can still be settling: the paper-space block is only valid once it is current
+                    {
+                        string current = null;
+                        try { current = Convert.ToString(doc.ActiveLayout.Name); } catch (Exception) { break; }
+                        if (String.Equals(current, layout, StringComparison.OrdinalIgnoreCase)) break;
+                        Pause(300);
+                    }
+                    double[] viewportCentre = new double[] { v.Centre[0], v.Centre[1], 0 };
+                    try { viewport = sheet.Block.AddPViewport(viewportCentre, v.Width, v.Height); }
+                    catch (Microsoft.CSharp.RuntimeBinder.RuntimeBinderException) { viewport = doc.PaperSpace.AddPViewport(viewportCentre, v.Width, v.Height); }   // live: the layout's Block was not the paper space yet
                     viewport.Layer = v.LayerName;
                     viewport.Display(true);
                     string handle = Convert.ToString(viewport.Handle);
