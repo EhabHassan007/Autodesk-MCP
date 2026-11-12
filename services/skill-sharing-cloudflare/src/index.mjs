@@ -200,12 +200,15 @@ export async function handle(request, env, backend) {
       const usage = (await env.DB.prepare(`SELECT device,kind,name,
         SUM(CASE WHEN day>=? THEN count ELSE 0 END) AS last7,SUM(count) AS last30,MAX(day) AS last_day
         FROM usage WHERE day>=? GROUP BY device,kind,name ORDER BY last30 DESC`).bind(isoDay(today-6*DAY),isoDay(today-29*DAY)).all()).results;
+      // Uses per day and kind over the last 30 days, for the charts.
+      const daily = (await env.DB.prepare(`SELECT day,kind,SUM(count) AS uses FROM usage WHERE day>=? AND kind IN ('skill','tool')
+        GROUP BY day,kind ORDER BY day`).bind(isoDay(today-29*DAY)).all()).results;
       const submissions = (await env.DB.prepare('SELECT device,digest,at,skills,status FROM submission_log ORDER BY at DESC LIMIT 200').all()).results
         .map(row => ({...row,skills:JSON.parse(row.skills)}));
       // Before migration 0005 is applied the table is missing; the overview still loads.
       const notion_sync = await lastSync(env.DB).catch(()=>null);
       const notion_review_sync = await lastReviewSync(env.DB).catch(()=>null);
-      return json({generated_at:today,devices,usage,submissions,notion_sync,notion_review_sync});
+      return json({generated_at:today,devices,usage,daily,submissions,notion_sync,notion_review_sync});
     }
     if (path === '/admin/api/notion-review' && request.method === 'POST') {
       await admin(request,env);

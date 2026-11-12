@@ -48,6 +48,7 @@ Migration `0002_team_enrollment.sql` adds the person profile, last-seen data and
   - The page and its script contain no data. They load `GET /admin/api/overview` with the token and insert every value as text.
   - It shows each person, email, PC and Windows user, IP, join date, last seen, version, skills used (7 and 30 days), tools used and submissions.
   - Block/Unblock calls `POST /admin/devices/<id>/block|unblock`.
+  - **Charts tab.** Six charts of the last 30 days, drawn in the browser as plain SVG from `GET /admin/api/overview` (no chart library and nothing loaded from outside, so the strict CSP is unchanged): activity per day (skills below, tools above), skills versus tools, the ten most used skills and tools, uses per person, and the connector versions the PCs run. Light and dark mode follow the browser. The per-day series is the overview's `daily` field (uses per day and kind, summed over all PCs). Hover a bar for its exact value and full name. They show uses only: the connector does not report whether a call failed.
   - A strict CSP, `no-store` and `X-Frame-Options: DENY` apply.
 
 ## Skill review (owner approval, one skill at a time)

@@ -366,6 +366,11 @@ test('admin overview lists people, usage, submissions; block and unblock work',a
   const used=o.usage.find(u=>u.device===d.device_id&&u.name==='revit-read-write');
   assert.equal(used.last7,5);assert.equal(used.last30,5);
   assert.ok(!o.usage.some(u=>u.name==='ancient-skill'));
+  // The charts' per-day series: uses summed per day and kind over the last 30 days, never older rows.
+  s.sqlite.prepare("INSERT INTO usage(device,kind,name,day,count) VALUES(?,?,?,?,?)").run(d.device_id,'tool','list_levels',today,3);
+  s.sqlite.prepare("INSERT INTO usage(device,kind,name,day,count) VALUES(?,?,?,?,?)").run(d.device_id,'skill','other-skill','2000-02-02',9);
+  const o2=await (await s.request('/admin/api/overview','GET',admin)).json();
+  assert.deepEqual(o2.daily.map(r=>[r.day,r.kind,r.uses]).sort(),[[today,'skill',5],[today,'tool',3]].sort(),'one row per day and kind, summed across PCs');
   assert.equal(s.sqlite.prepare("SELECT COUNT(*) AS n FROM usage WHERE name='ancient-skill'").get().n,0,'usage older than 180 days is deleted');
   assert.deepEqual(o.submissions[0].skills,['revit-check']);assert.equal(o.submissions[0].status,'submitted_for_approval');
   assert.equal((await s.request('/admin/devices/'+d.device_id+'/block','POST',d.device_token)).status,403);
