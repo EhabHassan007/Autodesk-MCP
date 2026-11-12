@@ -1271,11 +1271,16 @@ function Register-ClaudeDesktopMcpServer {
             $config.mcpServers = [pscustomobject]@{}
         }
 
+        # An old name is removed only when its entry starts this connector. Another tool that happens to use the same name
+        # (a Python AutoCAD server called "AutoCAD MCP", a pyRevit server called "Revit Connector") is not ours to delete.
         foreach ($legacyName in $LegacyNames) {
-            if ($config.mcpServers.PSObject.Properties[$legacyName]) {
+            $existingEntry = $config.mcpServers.PSObject.Properties[$legacyName]
+            if (-not $existingEntry) { continue }
+            if (Test-OwnConnectorEntry ($existingEntry.Value | ConvertTo-Json -Depth 20 -Compress)) {
                 $config.mcpServers.PSObject.Properties.Remove($legacyName)
                 Write-Step ("Removed legacy Claude Desktop MCP registration: {0}." -f $legacyName)
             }
+            else { Write-Step ("Kept the Claude Desktop entry '{0}': it does not start this connector." -f $legacyName) }
         }
 
         $launch = Get-McpLaunch $Bridge $BridgeArguments
@@ -1323,7 +1328,7 @@ function Register-DetectedAiClients {
     # The compiled connector replaces the PowerShell bridge wherever it is installed.
     $compiled = Join-Path $Root 'bin\SmartConnector.exe'
     if (Test-Path -LiteralPath $compiled -PathType Leaf) { $bridge = $compiled; $arguments = @('mcp') }
-    $legacyNames = @('autocad','revit','AutoCAD MCP','Revit Connector','revit-mcp')
+    $legacyNames = @('autocad','revit','AutoCAD MCP','Revit Connector','revit-mcp','autodesk')
     # Claude Desktop shows the key as the connector's name; the previous product name is retired.
     $claudeDesktopLegacyNames = @($legacyNames + 'autodesk' + 'Autodesk MCP Connector' + 'Smart Autodesk Connector')
     $detected = 0
@@ -1336,7 +1341,7 @@ function Register-DetectedAiClients {
     if ($Clients -notcontains 'Codex') { Write-Step 'Codex was not selected in setup.'; Write-InstallResult 'codex' 'skipped' 'not selected' }
     elseif (Get-OptionalCommand 'codex') {
         try {
-            Register-McpServer 'autodesk' $bridge $arguments $legacyNames
+            Register-McpServer 'smart-connector' $bridge $arguments $legacyNames
             $detected++
             Write-InstallResult 'codex' 'ok'
         }
@@ -1352,7 +1357,7 @@ function Register-DetectedAiClients {
     if ($Clients -notcontains 'ClaudeCode') { Write-Step 'Claude Code was not selected in setup.'; Write-InstallResult 'claude_code' 'skipped' 'not selected' }
     elseif (Get-OptionalCommand 'claude') {
         try {
-            Register-ClaudeCodeMcpServer 'autodesk' $bridge $arguments $legacyNames
+            Register-ClaudeCodeMcpServer 'smart-connector' $bridge $arguments $legacyNames
             $detected++
             Write-InstallResult 'claude_code' 'ok'
         }
@@ -1619,7 +1624,7 @@ function Install-AutoCadBundleStep {
 function Test-AutodeskRegistration {
     $codex = Get-OptionalCommand 'codex'
     if ($codex) {
-        $registration = Invoke-External $codex @('mcp','get','autodesk') -AllowFailure
+        $registration = Invoke-External $codex @('mcp','get','smart-connector') -AllowFailure
         if ($registration.ExitCode -eq 0) { Write-Step 'Codex has the Smart Connector registration.' }
         else { Write-Step 'Smart Connector is not registered yet.' }
     }
@@ -1627,7 +1632,7 @@ function Test-AutodeskRegistration {
 
     $claude = Get-OptionalCommand 'claude'
     if ($claude) {
-        $registration = Invoke-External $claude @('mcp','get','autodesk') -AllowFailure
+        $registration = Invoke-External $claude @('mcp','get','smart-connector') -AllowFailure
         if ($registration.ExitCode -eq 0) { Write-Step 'Claude Code has the Smart Connector registration.' }
         else { Write-Step 'Smart Connector is not registered in Claude Code yet.' }
     }

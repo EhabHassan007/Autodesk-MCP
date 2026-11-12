@@ -18,12 +18,13 @@ $paths=@(Get-ClaudeDesktopConfigPaths)
 if($paths.Count -ne 2){throw 'Expected roaming and MSIX paths'}
 foreach($path in $paths){
  New-Item -ItemType Directory -Force (Split-Path $path) | Out-Null
- [IO.File]::WriteAllText($path,'{"mcpServers":{"keep":{"command":"keep.exe"},"autodesk":{"command":"old.exe"}}}')
- Register-ClaudeDesktopMcpServer -Name 'Autodesk MCP Connector' -Bridge "$root/src/autodesk/autodesk-bridge.ps1" -LegacyNames @('autodesk') -ConfigPath $path
+ [IO.File]::WriteAllText($path,'{"mcpServers":{"keep":{"command":"keep.exe"},"autodesk":{"command":"C:/x/BIM-CAD-MCP/bin/old.exe"},"Revit Connector":{"command":"uv.exe","args":["run","pyrevit-server"]}}}')
+ Register-ClaudeDesktopMcpServer -Name 'Autodesk MCP Connector' -Bridge "$root/src/autodesk/autodesk-bridge.ps1" -LegacyNames @('autodesk','Revit Connector') -ConfigPath $path
  $bytes=[IO.File]::ReadAllBytes($path)
  if($bytes.Length -ge 3 -and $bytes[0]-eq 239 -and $bytes[1]-eq 187 -and $bytes[2]-eq 191){throw 'Unexpected BOM'}
  $cfg=Get-Content $path -Raw | ConvertFrom-Json
  if(-not $cfg.mcpServers.keep -or -not $cfg.mcpServers.'Autodesk MCP Connector' -or $cfg.mcpServers.autodesk){throw 'Preservation/registration failed'}
+ if($cfg.mcpServers.'Revit Connector'.command -ne 'uv.exe'){throw 'An entry that only shares an old name was removed'}
 }
 'PASS: roaming/MSIX config, no BOM, preserved unrelated entry, removed legacy entry'
 function Get-ClaudeDesktopProcesses { @() }

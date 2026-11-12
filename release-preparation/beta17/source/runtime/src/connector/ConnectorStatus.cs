@@ -246,7 +246,7 @@ namespace SmartConnector
         internal static bool ClaudeCodeConnected()
         {
             object servers = PsJson.Value(PsJson.Read(Path.Combine(Env.Home, ".claude.json")), "mcpServers");
-            return servers != null && PsJson.Has(servers, "autodesk");
+            return servers != null && (PsJson.Has(servers, "smart-connector") || PsJson.Has(servers, "autodesk"));
         }
 
         internal static bool CodexConnected()
@@ -254,7 +254,7 @@ namespace SmartConnector
             string codexHome = Env.Variable("CODEX_HOME");
             if (codexHome.Length == 0) codexHome = Path.Combine(Env.Home, ".codex");
             string config = Path.Combine(codexHome, "config.toml");
-            try { return File.Exists(config) && File.ReadAllLines(config).Any(line => Regex.IsMatch(line, @"^\s*\[mcp_servers\.autodesk\]", RegexOptions.IgnoreCase)); }
+            try { return File.Exists(config) && File.ReadAllLines(config).Any(line => Regex.IsMatch(line, @"^\s*\[mcp_servers\.(smart-connector|autodesk)\]", RegexOptions.IgnoreCase)); }
             catch (Exception) { return false; }
         }
 

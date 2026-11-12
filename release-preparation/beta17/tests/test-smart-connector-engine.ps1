@@ -199,7 +199,7 @@ exit /b 0
     $roamingConfig = Join-Path $s.Roaming 'Claude\claude_desktop_config.json'
     $packageConfig = Join-Path $s.Local 'Packages\Claude_test\LocalCache\Roaming\Claude\claude_desktop_config.json'
     New-Item -ItemType Directory -Force (Split-Path $roamingConfig), (Split-Path $packageConfig) | Out-Null
-    $original = '{"mcpServers":{"keep-me":{"command":"keep.exe","args":["a"]},"Revit Connector":{"command":"legacy.exe","args":[]},"autodesk":{"command":"old-combined.exe"},"Autodesk MCP Connector":{"command":"older-name.exe"}},"theme":"dark","count":3}'
+    $original = '{"mcpServers":{"keep-me":{"command":"keep.exe","args":["a"]},"Revit Connector":{"command":"powershell.exe","args":["-File","C:/Users/x/AppData/Local/BIM-CAD-MCP/src/revit/revit-bridge.ps1"]},"autodesk":{"command":"C:/Users/x/AppData/Local/BIM-CAD-MCP/bin/old-combined.exe"},"Autodesk MCP Connector":{"command":"C:/Users/x/AppData/Local/BIM-CAD-MCP/bin/older-name.exe"},"AutoCAD MCP":{"command":"python.exe","args":["-m","autocad_mcp"]}},"theme":"dark","count":3}'
     [IO.File]::WriteAllText($roamingConfig, $original)
     [IO.File]::WriteAllText($packageConfig, $original)
     # The same config, registered by Register-ClaudeDesktopMcpServer in Setup-BimCad.ps1 into its own copy.
@@ -224,9 +224,9 @@ exit /b 0
     $order = @($run.Lines | Where-Object { $_ -match '^\[PHASE\] ' })
     Assert (($order -join ',') -eq '[PHASE] files,[PHASE] skills,[PHASE] team,[PHASE] revit,[PHASE] autocad,[PHASE] autocad,[PHASE] updates,[PHASE] codex,[PHASE] codex,[PHASE] claude_code,[PHASE] claude_desktop') ('Phases differ from Setup-BimCad.ps1: ' + ($order -join ','))
     $codexLog = (Get-Content (Join-Path $s.Fake 'codex.log') -Raw).Replace('"', '')
-    Assert ($codexLog.Contains("mcp add autodesk -- $exe mcp")) "Codex was not registered with the program: $codexLog"
+    Assert ($codexLog.Contains("mcp add smart-connector -- $exe mcp")) "Codex was not registered with the program: $codexLog"
     $claudeLog = (Get-Content (Join-Path $s.Fake 'claude.log') -Raw).Replace('"', '')
-    Assert ($claudeLog.Contains("mcp add --transport stdio --scope user autodesk -- $exe mcp")) "Claude Code was not registered with the program: $claudeLog"
+    Assert ($claudeLog.Contains("mcp add --transport stdio --scope user smart-connector -- $exe mcp")) "Claude Code was not registered with the program: $claudeLog"
     # Claude Desktop: both config files hold exactly what the PowerShell function writes, without a byte-order mark.
     $referenceJson = (Get-Content $referenceConfig -Raw | ConvertFrom-Json | ConvertTo-Json -Depth 30 -Compress)
     foreach ($config in $roamingConfig, $packageConfig) {
@@ -236,6 +236,8 @@ exit /b 0
         Assert ($parsed.mcpServers.'Smart Connector'.command -eq $exe -and (@($parsed.mcpServers.'Smart Connector'.args) -join ',') -eq 'mcp') 'The Smart Connector entry is wrong'
         Assert ($parsed.mcpServers.'keep-me'.command -eq 'keep.exe' -and $parsed.theme -eq 'dark' -and $parsed.count -eq 3) 'Unrelated servers or settings were not preserved'
         foreach ($gone in 'Revit Connector', 'autodesk', 'Autodesk MCP Connector') { Assert (-not $parsed.mcpServers.PSObject.Properties[$gone]) "Legacy entry $gone was not removed" }
+        # Another tool that only shares an old name is not ours to delete.
+        Assert ($parsed.mcpServers.'AutoCAD MCP'.command -eq 'python.exe' -and (@($parsed.mcpServers.'AutoCAD MCP'.args) -join ',') -eq '-m,autocad_mcp') 'An entry that only shares an old name (AutoCAD MCP, a Python server) was removed'
         Assert (($parsed | ConvertTo-Json -Depth 30 -Compress) -eq $referenceJson) "The config differs from what Register-ClaudeDesktopMcpServer writes:`n$($parsed | ConvertTo-Json -Depth 30 -Compress)`n$referenceJson"
     }
     # Start menu entry, install choices and update state.
@@ -247,12 +249,12 @@ exit /b 0
     Assert ($updateState.installed_version -eq $version -and $updateState.notifications_enabled -eq $true -and $updateState.notifications_user_disabled -eq $false) 'update-state.json is wrong'
     # Run again: everything is already right; Codex is left alone.
     $before = (Get-Content (Join-Path $s.Fake 'codex.log') -Raw)
-    $codexJson = @{ name = 'autodesk'; enabled = $true; transport = @{ type = 'stdio'; command = $exe; args = @('mcp') } } | ConvertTo-Json -Depth 5 -Compress
-    [IO.File]::WriteAllText((Join-Path $s.Fake 'codex-autodesk.txt'), $codexJson)
+    $codexJson = @{ name = 'smart-connector'; enabled = $true; transport = @{ type = 'stdio'; command = $exe; args = @('mcp') } } | ConvertTo-Json -Depth 5 -Compress
+    [IO.File]::WriteAllText((Join-Path $s.Fake 'codex-smart-connector.txt'), $codexJson)
     $run = Invoke-Engine -State $s -Arguments @('--action', 'Install', '--repository-path', $root, '--skills', 'Off')
     Assert ($run.Code -eq 0 -and (Has-Line $run 'The Smart Connector registration in Codex is already correct\.') -and (Has-Line $run 'Smart Connector is in the Start menu\.')) ('Second install: ' + (Show-Run $run))
     $after = (Get-Content (Join-Path $s.Fake 'codex.log') -Raw).Substring($before.Length).Replace('"', '')
-    Assert ($after -notmatch 'mcp add' -and $after -notmatch 'mcp remove autodesk') "A correct Codex registration was rewritten: $after"
+    Assert ($after -notmatch 'mcp add' -and $after -notmatch 'mcp remove (autodesk|smart-connector)') "A correct Codex registration was rewritten: $after"
     'PASS: Install runs every step with the same phases and results; Codex, Claude Code and both Claude Desktop configs match the PowerShell output (no BOM, other servers kept, legacy entries gone)'
 
     # A malformed config is left as it is, the others are still done, and setup reports it.
@@ -280,7 +282,7 @@ exit /b 0
     Assert ($run.Code -eq 1) ('Setup must exit 1 when a registration fails: ' + (Show-Run $run))
     Assert ((Has-Line $run '^\[RESULT\] codex=failed see the setup log$') -and (Has-Line $run '^\[RESULT\] claude_code=ok$')) ('Claude Code must still be registered: ' + (Show-Run $run))
     Assert ((Has-Line $run '^WARNING: Codex registration failed; continuing with other clients: ') -and (Has-Line $run 'Codex: ')) ('The Codex failure was not reported: ' + (Show-Run $run))
-    Assert (-not (Test-Path (Join-Path $s.Fake 'codex-autodesk.txt'))) 'A failed registration left an entry'
+    Assert (-not (Test-Path (Join-Path $s.Fake 'codex-smart-connector.txt'))) 'A failed registration left an entry'
     'PASS: a Codex failure is reported, Claude Code is still registered, and setup exits with an error'
 
     # ---------- 2. Install choices ----------
@@ -317,8 +319,8 @@ exit /b 0
 
     # ---------- 3. Codex that is already correct ----------
     $s = New-State 'codex-correct'
-    $codexJson = @{ name = 'autodesk'; enabled = $true; transport = @{ type = 'stdio'; command = $exe; args = @('mcp') } } | ConvertTo-Json -Depth 5 -Compress
-    [IO.File]::WriteAllText((Join-Path $s.Fake 'codex-autodesk.txt'), $codexJson)
+    $codexJson = @{ name = 'smart-connector'; enabled = $true; transport = @{ type = 'stdio'; command = $exe; args = @('mcp') } } | ConvertTo-Json -Depth 5 -Compress
+    [IO.File]::WriteAllText((Join-Path $s.Fake 'codex-smart-connector.txt'), $codexJson)
     [IO.File]::WriteAllText((Join-Path $s.Fake 'codex-AutoCAD MCP.txt'), "AutoCAD MCP`n  command: powershell.exe -File C:\Users\x\AppData\Local\BIM-CAD-MCP\src\autocad\autocad-bridge.ps1")
     [IO.File]::WriteAllText((Join-Path $s.Fake 'codex-revit-mcp.txt'), "revit-mcp`n  command: npx -y someone-elses-revit-server")
     $run = Invoke-Engine -State $s -Arguments @('--action', 'Install', '--repository-path', $root, '--skills', 'Off', '--ai-clients', 'Codex', '--product', 'Revit')
@@ -328,10 +330,23 @@ exit /b 0
     Assert ($log -match 'mcp remove AutoCAD MCP' -and (Has-Line $run "Removed the older duplicate Codex MCP entry 'AutoCAD MCP'\.")) 'The older duplicate entry was not removed'
     Assert ($log -notmatch 'mcp remove revit-mcp' -and (Test-Path (Join-Path $s.Fake 'codex-revit-mcp.txt'))) 'Another tool''s server was removed'
     # A different command is replaced without touching other servers.
-    [IO.File]::WriteAllText((Join-Path $s.Fake 'codex-autodesk.txt'), (@{ name = 'autodesk'; enabled = $true; transport = @{ type = 'stdio'; command = 'old.exe'; args = @('x') } } | ConvertTo-Json -Depth 5 -Compress))
+    [IO.File]::WriteAllText((Join-Path $s.Fake 'codex-smart-connector.txt'), (@{ name = 'smart-connector'; enabled = $true; transport = @{ type = 'stdio'; command = 'old.exe'; args = @('x') } } | ConvertTo-Json -Depth 5 -Compress))
     Remove-Item (Join-Path $s.Fake 'codex.log')
     $run = Invoke-Engine -State $s -Arguments @('--action', 'Install', '--repository-path', $root, '--skills', 'Off', '--ai-clients', 'Codex', '--product', 'Revit')
-    Assert ((Get-Content (Join-Path $s.Fake 'codex.log') -Raw).Replace('"', '').Contains("mcp add autodesk -- $exe mcp")) ('A wrong registration was not repaired: ' + (Show-Run $run))
+    Assert ((Get-Content (Join-Path $s.Fake 'codex.log') -Raw).Replace('"', '').Contains("mcp add smart-connector -- $exe mcp")) ('A wrong registration was not repaired: ' + (Show-Run $run))
+    # The earlier name "autodesk": an entry that starts this connector is replaced by smart-connector; another tool's entry of that name is kept.
+    $own = @{ name = 'autodesk'; enabled = $true; transport = @{ type = 'stdio'; command = 'powershell.exe'; args = @('-File', 'C:\x\BIM-CAD-MCP\src\autodesk\autodesk-bridge.ps1') } } | ConvertTo-Json -Depth 5 -Compress
+    [IO.File]::WriteAllText((Join-Path $s.Fake 'codex-autodesk.txt'), $own)
+    Remove-Item (Join-Path $s.Fake 'codex.log')
+    $run = Invoke-Engine -State $s -Arguments @('--action', 'Install', '--repository-path', $root, '--skills', 'Off', '--ai-clients', 'Codex', '--product', 'Revit')
+    $renameLog = (Get-Content (Join-Path $s.Fake 'codex.log') -Raw).Replace('"', '')
+    Assert ($renameLog -match 'mcp remove autodesk' -and (Has-Line $run "Removed the older duplicate Codex MCP entry 'autodesk'\.")) ('The old autodesk entry of this connector was not removed: ' + (Show-Run $run))
+    $foreign = @{ name = 'autodesk'; enabled = $true; transport = @{ type = 'stdio'; command = 'other-tool.exe'; args = @('serve') } } | ConvertTo-Json -Depth 5 -Compress
+    [IO.File]::WriteAllText((Join-Path $s.Fake 'codex-autodesk.txt'), $foreign)
+    Remove-Item (Join-Path $s.Fake 'codex.log') -ErrorAction SilentlyContinue
+    $run = Invoke-Engine -State $s -Arguments @('--action', 'Install', '--repository-path', $root, '--skills', 'Off', '--ai-clients', 'Codex', '--product', 'Revit')
+    $keepLog = if (Test-Path (Join-Path $s.Fake 'codex.log')) { (Get-Content (Join-Path $s.Fake 'codex.log') -Raw).Replace('"', '') } else { '' }
+    Assert ($keepLog -notmatch 'mcp remove autodesk' -and (Test-Path (Join-Path $s.Fake 'codex-autodesk.txt'))) ('Another tool''s entry named autodesk was removed: ' + (Show-Run $run))
     'PASS: a correct Codex registration is left alone, an older duplicate is removed, another tool''s server is kept, a wrong registration is replaced'
 
     # ChatGPT Desktop without the codex command-line tool: the connector is written straight into Codex's config.toml
@@ -346,7 +361,7 @@ exit /b 0
     $run = Invoke-Engine -State $s -Path $noCli -Arguments $chatgptArguments
     Assert ($run.Code -eq 0 -and (Has-Line $run '^\[RESULT\] codex=ok restart ChatGPT Desktop to load it$')) ('ChatGPT Desktop registration: ' + (Show-Run $run))
     $toml = [IO.File]::ReadAllText($config)
-    Assert ($toml.Contains('[mcp_servers.other]') -and $toml.Contains('[profiles.x]') -and $toml.Contains('model = "gpt-5"') -and -not $toml.Contains('[mcp_servers.revit') -and $toml.Contains('[mcp_servers.autodesk]') -and $toml.Contains('args = ["mcp"]') -and $toml.Contains('SmartConnector.exe')) ('config.toml after registration: ' + $toml)
+    Assert ($toml.Contains('[mcp_servers.other]') -and $toml.Contains('[profiles.x]') -and $toml.Contains('model = "gpt-5"') -and -not $toml.Contains('[mcp_servers.revit') -and $toml.Contains('[mcp_servers.smart-connector]') -and $toml.Contains('args = ["mcp"]') -and $toml.Contains('SmartConnector.exe')) ('config.toml after registration: ' + $toml)
     $tomlBytes = [IO.File]::ReadAllBytes($config)
     Assert (-not ($tomlBytes.Length -ge 3 -and $tomlBytes[0] -eq 239 -and $tomlBytes[1] -eq 187 -and $tomlBytes[2] -eq 191)) 'config.toml got a byte-order mark'
     $run = Invoke-Engine -State $s -Path $noCli -Arguments $chatgptArguments
@@ -584,7 +599,7 @@ exit /b 0
     Assert ($server.WaitForExit(10000)) 'The MCP server of this install was not stopped'
     Assert (-not $other.HasExited) 'A SmartConnector.exe of another install was stopped'
     # The AI apps were pointed at the new program.
-    Assert ((Get-Content (Join-Path $s.Fake 'codex.log') -Raw).Replace('"', '').Contains("mcp add autodesk -- $installedExe mcp")) 'Codex was not registered again after the update'
+    Assert ((Get-Content (Join-Path $s.Fake 'codex.log') -Raw).Replace('"', '').Contains("mcp add smart-connector -- $installedExe mcp")) 'Codex was not registered again after the update'
     # The old program (the engine's own exe while it ran) was renamed aside and could not be deleted while running; the next start of any command removes it.
     $recorded = Join-Path $s.Local 'AutodeskMcpConnector\old-files.txt'
     Assert ((Test-Path (Join-Path $installed 'bin\SmartConnector.exe.old')) -and (Test-Path $recorded)) 'The running program was not set aside as SmartConnector.exe.old'
@@ -621,7 +636,7 @@ exit /b 0
     foreach ($folder in 'skill-review', 'team-candidates', 'team-collection', 'backups') { Assert ((Get-Content (Join-Path $installed "$folder\preserve.txt") -Raw).Trim() -eq $folder) "$folder was lost in the script-free update" }
     Assert ((Get-Content (Join-Path $installed 'VERSION') -Raw).Trim() -eq '9.9.1') 'The script-free release was not installed'
     # The AI apps were pointed at the program, so nothing needs the removed scripts. The program still works and counts as installed.
-    Assert ((Get-Content (Join-Path $s.Fake 'codex.log') -Raw).Replace('"', '').Contains("mcp add autodesk -- $installedExe mcp")) 'Codex was not pointed at the program in the script-free update'
+    Assert ((Get-Content (Join-Path $s.Fake 'codex.log') -Raw).Replace('"', '').Contains("mcp add smart-connector -- $installedExe mcp")) 'Codex was not pointed at the program in the script-free update'
     $run = Invoke-Engine -State $s -Program $installedExe -Arguments @('--action', 'Status', '--product', 'Revit', '--repository-path', $installed)
     Assert ($run.Code -eq 0) ('The program does not run after the script-free update: ' + (Show-Run $run))
     # A second check sees nothing newer.

@@ -57,6 +57,9 @@ namespace SmartConnector
             }
         }
 
+        // The name Codex and Claude Code know the connector by (their server names cannot contain spaces). Claude Desktop shows "Smart Connector".
+        internal const string CliServerName = "smart-connector";
+
         // An entry under ANY name that still starts a PowerShell bridge. The retired names above are only the names earlier
         // versions used; an entry someone added under another name kept serving the old bridge, which has no apply_plan,
         // execute_autocad or generate_detail. The compiled connector is never matched (its path has no "-bridge.ps1").
@@ -518,9 +521,13 @@ namespace SmartConnector
                 OMap servers = config.Get("mcpServers") as OMap;
                 if (servers == null) throw new EngineException("The Claude Desktop config has an mcpServers value that is not an object.");
 
+                // An old name is removed only when its entry starts this connector. Another tool that happens to use the same name
+                // (a Python AutoCAD server called "AutoCAD MCP", a pyRevit server called "Revit Connector") is not ours to delete.
                 foreach (string legacyName in legacyNames)
                 {
-                    if (servers.Remove(legacyName)) Step("Removed legacy Claude Desktop MCP registration: " + legacyName + ".");
+                    if (!servers.Has(legacyName)) continue;
+                    if (IsOwnConnectorEntry(OJson.Write(servers.Get(legacyName)))) { servers.Remove(legacyName); Step("Removed legacy Claude Desktop MCP registration: " + legacyName + "."); }
+                    else Step("Kept the Claude Desktop entry '" + legacyName + "': it does not start this connector.");
                 }
 
                 if (!bridge.EndsWith(".ps1", StringComparison.OrdinalIgnoreCase))
@@ -569,7 +576,8 @@ namespace SmartConnector
             // The compiled connector replaces the PowerShell bridge wherever it is installed.
             string compiled = Path.Combine(root, "bin", "SmartConnector.exe");
             if (File.Exists(compiled)) { bridge = compiled; arguments = new[] { "mcp" }; }
-            string[] legacyNames = { "autocad", "revit", "AutoCAD MCP", "Revit Connector", "revit-mcp" };
+            // The Codex and Claude Code entry was called "autodesk" until the connector took its own name; an entry under the old name that starts this connector is replaced.
+            string[] legacyNames = { "autocad", "revit", "AutoCAD MCP", "Revit Connector", "revit-mcp", "autodesk" };
             // Claude Desktop shows the key as the connector's name; the previous product name is retired.
             string[] claudeDesktopLegacyNames = legacyNames.Concat(new[] { "autodesk", "Autodesk MCP Connector", "Smart Autodesk Connector" }).ToArray();
             int detected = 0;
@@ -584,8 +592,8 @@ namespace SmartConnector
             {
                 try
                 {
-                    RegisterMcpServer("autodesk", bridge, arguments, legacyNames);
-                    if (!bridge.EndsWith(".ps1", StringComparison.OrdinalIgnoreCase)) RemoveStaleBridgeCliEntries("Codex", FindCommand("codex"), "autodesk", new string[0]);
+                    RegisterMcpServer(CliServerName, bridge, arguments, legacyNames);
+                    if (!bridge.EndsWith(".ps1", StringComparison.OrdinalIgnoreCase)) RemoveStaleBridgeCliEntries("Codex", FindCommand("codex"), CliServerName, new string[0]);
                     detected++;
                     Result("codex", "ok");
                 }
@@ -602,7 +610,7 @@ namespace SmartConnector
                 // config.toml, so the connector is written there directly.
                 try
                 {
-                    RegisterCodexConfigFile("autodesk", bridge, arguments, legacyNames);
+                    RegisterCodexConfigFile(CliServerName, bridge, arguments, legacyNames);
                     detected++;
                     Result("codex", "ok", "restart ChatGPT Desktop to load it");
                 }
@@ -621,8 +629,8 @@ namespace SmartConnector
             {
                 try
                 {
-                    RegisterClaudeCodeMcpServer("autodesk", bridge, arguments, legacyNames);
-                    if (!bridge.EndsWith(".ps1", StringComparison.OrdinalIgnoreCase)) RemoveStaleBridgeCliEntries("Claude Code", FindCommand("claude"), "autodesk", new[] { "--scope", "user" });
+                    RegisterClaudeCodeMcpServer(CliServerName, bridge, arguments, legacyNames);
+                    if (!bridge.EndsWith(".ps1", StringComparison.OrdinalIgnoreCase)) RemoveStaleBridgeCliEntries("Claude Code", FindCommand("claude"), CliServerName, new[] { "--scope", "user" });
                     detected++;
                     Result("claude_code", "ok");
                 }
@@ -682,13 +690,13 @@ namespace SmartConnector
             string codex = FindCommand("codex");
             if (codex != null)
             {
-                External registration = InvokeAllowFailure(codex, "mcp", "get", "autodesk");
+                External registration = InvokeAllowFailure(codex, "mcp", "get", CliServerName);
                 Step(registration.ExitCode == 0 ? "Codex has the Smart Connector registration." : "Smart Connector is not registered yet.");
             }
             else if (ConnectorStatus.ChatGptDesktopInstalled())
             {
                 string config = Path.Combine(CodexHome, "config.toml");
-                bool registered = File.Exists(config) && File.ReadAllLines(config).Any(line => Regex.IsMatch(line, @"^\s*\[mcp_servers\.autodesk\]", RegexOptions.IgnoreCase));
+                bool registered = File.Exists(config) && File.ReadAllLines(config).Any(line => Regex.IsMatch(line, @"^\s*\[mcp_servers\.(smart-connector|autodesk)\]", RegexOptions.IgnoreCase));
                 Step(registered ? "ChatGPT Desktop has the Smart Connector registration (Codex settings)." : "Smart Connector is not registered for ChatGPT Desktop yet.");
             }
             else Step("Codex command was not detected.");
@@ -696,7 +704,7 @@ namespace SmartConnector
             string claude = FindCommand("claude");
             if (claude != null)
             {
-                External registration = InvokeAllowFailure(claude, "mcp", "get", "autodesk");
+                External registration = InvokeAllowFailure(claude, "mcp", "get", CliServerName);
                 Step(registration.ExitCode == 0 ? "Claude Code has the Smart Connector registration." : "Smart Connector is not registered in Claude Code yet.");
             }
             else Step("Claude Code command was not detected.");

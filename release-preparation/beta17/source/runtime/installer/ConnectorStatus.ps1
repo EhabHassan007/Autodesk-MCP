@@ -60,13 +60,13 @@ function Test-ClaudeDesktopInstalled {
 function Test-ClaudeCodeConnected {
     $config = Read-StatusJson (Join-Path $HOME '.claude.json')
     $servers = Get-StatusValue $config 'mcpServers'
-    [bool]($servers -and $servers.PSObject.Properties['autodesk'])
+    [bool]($servers -and ($servers.PSObject.Properties['smart-connector'] -or $servers.PSObject.Properties['autodesk']))
 }
 
 function Test-CodexConnected {
     $codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $HOME '.codex' }
     $config = Join-Path $codexHome 'config.toml'
-    (Test-Path -LiteralPath $config -PathType Leaf) -and [bool](Select-String -LiteralPath $config -Pattern '^\s*\[mcp_servers\.autodesk\]' -Quiet)
+    (Test-Path -LiteralPath $config -PathType Leaf) -and [bool](Select-String -LiteralPath $config -Pattern '^\s*\[mcp_servers\.(smart-connector|autodesk)\]' -Quiet)
 }
 
 function Test-CommandOnPath {
