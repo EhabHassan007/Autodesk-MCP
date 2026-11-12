@@ -167,7 +167,7 @@ try {
         @('generate_detail', @{ template = 'reception_counter_section'; annotation = 'paper'; view = @{ zoom = 2 } }, 'Unknown view field: zoom*'),
         @('generate_detail', @{ template = 'reception_counter_section'; annotation = 'paper'; view = @{ paper_centre = @(200, 150) }; apply = $true; expected_drawing = 'a.dwg' }, 'annotation paper needs layout*'),
         @('generate_detail', @{ template = 'reception_counter_section'; layout = 'Layout1' }, 'layout is used with annotation paper only.'),
-        @('generate_detail', @{ template = 'reception_counter_section'; level_block = 'LVL' }, 'level_block is used with annotation paper only.'),
+        @('generate_detail', @{ template = 'reception_counter_section'; level_block = 'LVL' }, 'level_block, leader_block, title_block, note_width and sheet are used with annotation paper only.'),
         @('generate_detail', @{ template = 'reception_counter_section'; create_viewport = $true }, 'create_viewport is used with annotation paper only.'),
         @('generate_detail', @{ template = 'reception_counter_section'; leader_block = 'MLL' }, 'level_block, leader_block, title_block, note_width and sheet are used with annotation paper only.'),
         @('generate_detail', @{ template = 'reception_counter_section'; layer_scheme = 'office' }, 'Invalid choice: layer_scheme'),
