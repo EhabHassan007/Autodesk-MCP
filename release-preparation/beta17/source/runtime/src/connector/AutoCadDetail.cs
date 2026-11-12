@@ -476,6 +476,10 @@ namespace SmartConnector
                     r.Summary["paper_centre"] = new object[] { place.PaperCentre[0], place.PaperCentre[1] };
                     r.Summary["parts_size_paper_mm"] = new object[] { Math.Round((bx1 - bx0) / d, 1), Math.Round((by1 - by0) / d, 1) };
                     r.Summary["annotation_anchor_extent_paper"] = new object[] { Math.Round(minX, 1), Math.Round(minY, 1), Math.Round(maxX, 1), Math.Round(maxY, 1) };
+                    // The room this view needs on the sheet: the anchors above plus the width of the note text to the right of the landings, and a little
+                    // above for the top level's text. Views whose footprints overlap collide (levels sit left of a view, notes to its right).
+                    bool hasLeaders = r.Ann.Any(q => Json.GetString(q, "op") == "leader");
+                    r.Summary["paper_footprint"] = new object[] { Math.Round(minX, 1), Math.Round(minY, 1), Math.Round(maxX + (hasLeaders ? place.NoteWidth : 0), 1), Math.Round(maxY + 8, 1) };
                     r.Summary["viewport_setup"] = "Viewport at scale 1:" + scale + " (CustomScale " + (1.0 / d).ToString("0.######", CultureInfo.InvariantCulture) + "), view centred on model point " + Mm(mcx) + ", " + Mm(mcy)
                         + ". Annotation is placed assuming exactly that view; AutoCAD does not let this tool set the viewport's view centre.";
                 }
