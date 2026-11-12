@@ -1,0 +1,34 @@
+{
+  "schema": 1,
+  "updated": "2026-11-11",
+  "rules": [
+    {
+      "id": "RVT-001",
+      "title": "Revision cloud tags sit beside their cloud, no leader",
+      "category": "annotation",
+      "decided_on": "",
+      "instruction": "(Partial: transcribed from a screenshot of the Notion 'Revit MCP Rules' database; the full text is in Notion.) Place every revision cloud tag directly beside its own cloud, 200 mm clear of the cloud edge, with the leader turned off. Try the side positions in this order: right (vertically centred), left, top, bottom, then the four corner-aligned side positions. Take the first position that does not overlap another tag or another cloud in the view. Set tag sizes first and regenerate once; do not regenerate inside the loop (PERF-003). Report any tag that cannot be placed clear."
+    },
+    {
+      "id": "RVT-002",
+      "title": "Never simulate dimensions with lines and text",
+      "category": "annotation",
+      "decided_on": "2026-10-25",
+      "instruction": "(Partial: transcribed from a screenshot of the Notion 'Revit MCP Rules' database; the full text is in Notion.) Do not create lines, curves, ticks, witness graphics, or text to imitate dimensions in Revit. Use native Revit Dimension elements only."
+    },
+    {
+      "id": "RVT-003",
+      "title": "Property line from linked walls: deliver detail lines, user picks",
+      "category": "areas",
+      "decided_on": "2026-10-25",
+      "instruction": "(Partial: transcribed from a screenshot of the Notion 'Revit MCP Rules' database; the full text is in Notion.) To build a property line / site outline from a linked model, take the outer edges of the link's walls and curtain walls on the relevant level(s), transform them to host coordinates, and union them into ONE closed loop with no duplicate or overlapping segments, delivered as detail lines in a plan view. The user then uses Pick Lines to create the property-line sketch. For several levels, use the outer envelope across them. Do not drive the sketch by automation."
+    },
+    {
+      "id": "RVT-004",
+      "title": "Overlapping area sets (canopy, shading, plot coverage) in their own scheme",
+      "category": "areas",
+      "decided_on": "",
+      "instruction": "(Partial: transcribed from a screenshot of the Notion 'Revit MCP Rules' database; the full text is in Notion.) Areas cannot overlap inside one area scheme. For overlay areas (gym, canopy, shading, plot coverage), use another existing area scheme, or ask the user to create one in the UI. The rest of the method (levels and templates, boundaries from elements, the schedule with footer totals and no grand total) was cut off in the screenshot and is not recorded here."
+    }
+  ]
+}
