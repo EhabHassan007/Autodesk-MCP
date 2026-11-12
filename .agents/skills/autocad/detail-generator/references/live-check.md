@@ -41,3 +41,13 @@ Run through the connector directly on a drawing made from the office template, S
 - Found: the viewport was not made, AutoCAD answered `RPC_E_CALL_REJECTED` (busy); a busy answer is now retried up to six times with growing waits. The notes overprinted each other because the office block wraps at about 19 characters a line at 45 mm and needs about 5 mm a line; the label spacing now uses those figures when the office block is used.
 - Still to confirm by eye: each leader's arrow lands on its part's edge, with the viewport showing the section.
 
+## Second office-template run, after the viewport retry and note spacing fixes (AutoCAD 24.3, 2026-11-12)
+
+Same S1 brief, same office drawing, installed build from `main` (PR 81):
+- **Viewport:** made by the zoom route (`method` zoom), `view_centre_read_back` true, no correction, `custom_scale` 0.1, `display_locked` true, centre 300, 505, on `AO-MV` (not plotted). No `viewport_error`.
+- **Section:** visible inside the viewport with its hatches. Levels, dimensions (250, 25, 725, 1000 and 512, 88, 600 at 1:10), the `DWG-VIEWTITLE` and nine leader notes all drawn; `layer_scheme` `ao`, no warnings.
+- **Notes:** nine leaders with arrowheads on separate lines, no overprinting; the arrows end at the edges of their parts (checked for the ledge, worktop and cable tray; the lowest arrows need a closer look at a larger screenshot).
+- **Left to review by eye:** the cable tray, marble and substrate leaders cross the stack of boards on the right. It is normal for a section with this many notes, but a different arrangement may be wanted on real sheets.
+- **Mistake to avoid:** the first run's geometry was still in Model space (`objects=22`), so the second run drew a second copy on top (44 objects). Start each run in an empty drawing, or close without saving between runs. The script warns when the drawing is not empty.
+- **Still not run live:** curved parts and S-shaped plans, text `justify`, elevation and plan views, and the busy-retry (it was not triggered).
+
