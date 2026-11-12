@@ -30,3 +30,13 @@ Targets: at most 3 calls to build (dry run, real run, verify), verify output und
 Fixed cost the connector adds to every session: the tool list, about 3.7k tokens (3.2k before this change: `verify_standards` adds about 0.3k; the longer descriptions of `list_entities` and `apply_plan` add about 0.3k; `generate_detail` was cut from 4.1k to 3.5k characters). Skills read on demand: `autocad-read-write` about 0.7k, its `apply-plan` reference about 1.4k.
 
 These are estimates of what the connector sends and returns. A live run with the AI app's own token counter is still needed; record it in the pull request.
+
+## Live result (AutoCAD 24.3, 2026-11-12, installed 1.1.0)
+
+Run two ways on an empty millimetre drawing, nothing saved:
+
+- **Directly against `SmartConnector.exe`** (a PowerShell script speaking the MCP protocol, no AI app): 23 tools offered, `bridge: kind=exe version=1.1.0`; a real run before any dry run was refused ("Run dry_run first and get the user's approval."); dry run valid (30 steps); real run created 26 objects, `count_matches_plan` true; the same plan again was refused; `verify_standards` returned `{"ok":true,"scanned":26}`. Sizes (characters / 4, the connector's own traffic): tool list about 5.4k tokens (all 23 tools, Revit and skills included), the seven calls about 3.3k tokens (the two refusals included; the five calls a real job needs about 2.1k).
+- **Through the Claude desktop app** (an AI session): `bridge.kind` exe, version 1.1.0, 23 tools; dry run valid; real run 26 objects, `count_matches_plan` true; 5 tool calls plus one search to load the tool schemas. The app shows no token count.
+
+Finding: `verify_standards` counted an unknown `type` ("total") as zero objects and reported a violation. A type of `total`, `all` or `any` (or no type) now counts every object, and an unknown type is refused with a message.
+
