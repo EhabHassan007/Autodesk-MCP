@@ -1134,11 +1134,18 @@ namespace SmartConnector
                 steps.Add(item);
             }
             bool dry = !a.ContainsKey("dry_run") || (bool)a["dry_run"];
-            Dictionary<string, object> planArguments = Json.Object("expected_drawing", id, "dry_run", dry, "items", steps.ToArray());
+            // The dry-run rule is checked here for the whole job, by a key over the brief (everything the generator was asked to draw), not over the
+            // steps that survive "layer already exists": drawing another view in between creates layers, which changes those steps but not the job.
+            string guardKey = DryRunGuard.Key(id, built.Items, built.PaperItems, Json.GetString(a, "layout"), a.ContainsKey("create_viewport") && (bool)a["create_viewport"], update,
+                built.Summary.ContainsKey("paper_centre") ? built.Summary["paper_centre"] : null, built.Summary.ContainsKey("model_centre") ? built.Summary["model_centre"] : null,
+                a.ContainsKey("__viewport_size") ? a["__viewport_size"] : null);
+            Dictionary<string, object> planArguments = Json.Object("expected_drawing", id, "dry_run", dry, "items", steps.ToArray(), "__guard_skip", true);
             if (kept.Count > 0) generated["existing_layers_left_unchanged"] = kept;
             if (built.PaperItems.Count == 0)
             {
+                if (!dry) DryRunGuard.Require(guardKey);
                 object planResult = ApplyPlan(docSource, planArguments);
+                if (dry) DryRunGuard.Passed_(guardKey); else DryRunGuard.Used(guardKey);
                 return Json.Object("applied", !dry, "generated", generated, "plan_result", planResult);
             }
 
@@ -1163,10 +1170,6 @@ namespace SmartConnector
                 string viewportWarning = ViewportWarning(docSource, layout, built.Scale);
                 if (viewportWarning != null) generated["viewport_warning"] = viewportWarning;
             }
-            // The dry-run rule for the whole job (geometry, annotation and viewport): one key over everything that decides what is drawn.
-            string guardKey = DryRunGuard.Key(id, steps, paperSteps, layout, createViewport,
-                built.Summary.ContainsKey("paper_centre") ? built.Summary["paper_centre"] : null, built.Summary.ContainsKey("model_centre") ? built.Summary["model_centre"] : null,
-                a.ContainsKey("__viewport_size") ? a["__viewport_size"] : null);
             if (dry)
             {
                 DryRunGuard.Passed_(guardKey);
@@ -1174,7 +1177,6 @@ namespace SmartConnector
             }
             DryRunGuard.Require(guardKey);
 
-            planArguments["__guard_skip"] = true;
             object modelResult = ApplyPlan(docSource, planArguments);
             paperArguments["dry_run"] = false;
             object paperResult;
