@@ -795,7 +795,7 @@ class StubCompiler {
     $run = Invoke-Engine -State $s -Program $revitProgram -Arguments @('--action', 'Install', '--repository-path', $revitCopy, '--skills', 'Off', '--ai-clients', 'Codex', '--product', 'Revit') -ExtraEnv @{ WINDIR = $fakeWindows }
     Assert ($run.Code -eq 0) ('Revit Install failed: ' + (Show-Run $run))
     Assert ((Has-Line $run '^\[RESULT\] revit=ok restart Revit to load it$') -and (Has-Line $run 'Building the Revit 2024 add-in against the installed Revit API\.\.\.')) ('Revit step: ' + (Show-Run $run))
-    $built = 'stand-in assembly for 15 arguments'
+    $built = 'stand-in assembly for 17 arguments'
     $hash = (Get-Sha256Bytes ([Text.Encoding]::ASCII.GetBytes($built))).Substring(0, 12).ToLowerInvariant()
     $dll = Join-Path $oldBuilds "BimCadMcp.Revit.$hash.dll"
     Assert (Test-Path $dll) ('The add-in was not installed under its content hash: ' + (Get-ChildItem $oldBuilds | ForEach-Object Name) -join ', ')

@@ -256,9 +256,9 @@ try {
     $slow = Invoke-Tool 'execute_csharp' @{ expected_document = 'doc-1'; execution_mode = 'read'; allow_model_changes = $false; code = 'return "x";'; parameters_json = '{}'; transaction_name = 'T'; wait_seconds = 500 }
     Assert ($slow.isError -and $slow.content[0].text -like 'Number out of range: wait_seconds') 'wait_seconds above 110 must be refused'
     # get_job needs no Revit rules and passes the job id and the cancel flag.
-    $job = Invoke-Tool 'get_job' @{ job_id = 'abc123' }
-    $jobFields = @(($job.content[0].text | ConvertFrom-Json).fields)
-    Assert (-not $job.isError -and ($jobFields -join '|') -eq 'abc123|False') ("get_job sent the wrong fields: " + ($jobFields -join '|'))
+    $jobAnswer = Invoke-Tool 'get_job' @{ job_id = 'abc123' }
+    $jobFields = @(($jobAnswer.content[0].text | ConvertFrom-Json).fields)
+    Assert (-not $jobAnswer.isError -and ($jobFields -join '|') -eq 'abc123|False') ("get_job sent the wrong fields: " + ($jobFields -join '|'))
     # Revision cloud tools: the boxes travel as "xmin;ymin;xmax;ymax;base64(comment);base64(note)".
     $clouds = Invoke-Tool 'create_revision_clouds' @{ expected_document = 'doc-1'; revision_id = '7'; view_id = '9'; note_side = 'left'; dry_run = $true; items = @(@{ x_min_mm = 0; y_min_mm = 0; x_max_mm = 400; y_max_mm = 300; note = 'REV' }) }
     $cloudFields = @(($clouds.content[0].text | ConvertFrom-Json).fields)
