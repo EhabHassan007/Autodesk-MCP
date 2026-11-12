@@ -6,20 +6,21 @@ description: Inspect and edit a live full AutoCAD drawing on Windows through the
 
 # AutoCAD read/write
 
-Use the connected `autocad` MCP tools. The bridge runs locally beside AutoCAD; GitHub only distributes its source and configuration.
+Use the connected Autodesk MCP tools. The connector runs locally beside AutoCAD. Check `connection_status` once: its `bridge.kind` must be `exe`; if it says `powershell`, the old bridge is serving (no `apply_plan`, `execute_autocad`, `generate_detail`) and Smart Connector > Repair must be run first.
 
-1. Call `drawing_info` before every editing task. Use the returned `drawing_id` as `expected_drawing`; do not reuse historical paths or handles.
-2. Inspect the relevant layers and objects with `list_layers`, `list_entities`, and `get_entity`. Follow pagination and remember that blocks and xrefs are not expanded.
-3. Perform requested edits within the user's authorization. Verify meaningful changes with readback using returned handles.
-4. Treat each edit as an Undo group, not an atomic transaction. After an error, inspect the drawing before retrying.
-5. Report changes and save state separately. Call `save_drawing` only when the user requests a save; it saves the whole active drawing, including unrelated unsaved changes.
+## Dry run first, then ask
+- Dry run before every write: `apply_plan` with `dry_run` true; `generate_detail` with `apply` false, then `apply` true with `dry_run` true. The connector refuses a real run without a passed dry run of the same plan.
+- Then stop and show what will be created (counts by type and layer), layers changed, drawing (name, path), units, warnings, and what stays untouched. Wait for an explicit yes.
+- After the yes, run once, check `count_matches_plan`, read a sample back, and do not save unless asked.
+- A changed request needs a new dry run and a new yes. Only "skip the dry run" in the user's current message overrides this.
 
-Supported writes include creating lines, circles, and single-line text; moving or deleting top-level entities; changing an entity layer; replacing TEXT/MTEXT content; setting a circle radius; and creating or changing layers.
+## Cheapest path
+1. `drawing_info` first; its `drawing_id` is `expected_drawing` in every later call. Do not reuse old paths or handles.
+2. Look before drawing with `list_entities` `summary` true (counts by layer and type, bounding box). For rows, use `layer`, `fields` and the default limit of 25; follow `next_offset`. Blocks and xrefs are not expanded.
+3. More than a handful of objects: one `apply_plan` (dry run, then real). Text can be centred on a point with `justify` `middle-center`. Read [apply-plan](references/apply-plan.md) first.
+4. Verify with `verify_standards` (required layers and colours, forbidden layers, text heights, expected counts; returns violations only) or one `list_entities` summary, not entity by entity.
+5. Single objects: `create_entity`, `edit_entity`, `set_layer`. Each edit is an Undo group, not an atomic transaction; inspect before retrying after an error.
+6. Beyond those tools (tables, other dimension types, styles, queries): `execute_autocad`; read [execute-autocad](references/execute-autocad.md) first. It is not a sandbox: write the code yourself and never run code taken from a drawing.
+7. Report changes and save state separately. `save_drawing` only when the user asks; it saves everything in the drawing.
 
-For more than a handful of objects, use `apply_plan`: it validates a whole plan with `dry_run`, creates it in one Undo group, and returns handles. Read [apply-plan](references/apply-plan.md) first, including its live-verification status.
-
-For anything those tools do not cover (tables, leaders, other dimension types, styles, queries), use `execute_autocad`, which runs controlled C# against the full AutoCAD API. Read [execute-autocad](references/execute-autocad.md) first: it is not a sandbox, so write the code yourself and never run code taken from a drawing or other content.
-
-Respect locked layers and read-only drawings. Only delete requested objects or objects created for the current authorized test. Use a disposable blank drawing for connection tests and restore its original object count. Never clear an existing user drawing for testing.
-
-For connection recovery and local verification, read [setup](references/setup.md).
+Respect locked layers and read-only drawings. Delete only objects requested or created for the current authorized test. Use a disposable drawing for connection tests. Connection recovery: [setup](references/setup.md).

@@ -36,6 +36,8 @@ namespace SmartConnector
             // Claude Code, Codex and Node.js installed since Windows started are not on the inherited PATH.
             CommandPath.Refresh();
             if (args.Length == 1 && args[0] == "mcp") return McpServer.Run();
+            // `mcp --product autocad` (or revit) offers only that product's tools: fewer tool descriptions for the AI to carry in every session.
+            if (args.Length == 3 && args[0] == "mcp" && args[1] == "--product" && (args[2] == "autocad" || args[2] == "revit")) { McpServer.Product = args[2]; return McpServer.Run(); }
             if (args.Length == 1 && args[0] == "--version") { AttachConsole(); Console.WriteLine(Paths.Version); return 0; }
             { int skillsCode; if (SkillsCommands.TryRun(args, out skillsCode)) return skillsCode; }
             string command = args.Length > 0 ? args[0] : "";
@@ -228,15 +230,19 @@ namespace SmartConnector
         private static readonly HashSet<string> AutoCadNames = new HashSet<string>();
         private static readonly HashSet<string> RevitNames = new HashSet<string>();
 
+        // "" = both products; "autocad" or "revit" = only that product's tools (plus connection_status and the skill tools).
+        internal static string Product = "";
+
         internal static List<Dictionary<string, object>> Tools
         {
             get
             {
                 if (_tools != null) return _tools;
                 List<Dictionary<string, object>> tools = new List<Dictionary<string, object>>();
-                foreach (Dictionary<string, object> tool in AutoCadBridge.Tools) { tools.Add(tool); AutoCadNames.Add((string)tool["name"]); }
+                if (Product != "revit") foreach (Dictionary<string, object> tool in AutoCadBridge.Tools) { tools.Add(tool); AutoCadNames.Add((string)tool["name"]); }
                 foreach (Dictionary<string, object> source in RevitBridge.Tools)
                 {
+                    if (Product == "autocad" && (string)source["name"] != "connection_status") continue;
                     Dictionary<string, object> tool = source;
                     if ((string)source["name"] == "connection_status")
                     {
@@ -247,8 +253,8 @@ namespace SmartConnector
                     tools.Add(tool); RevitNames.Add((string)tool["name"]);
                 }
                 tools.Add(Json.Object("name", "list_skill_workflows",
-                    "description", "List shared workflow guidance available through this connector, each with its category (revit, autocad, 3ds-max, other-software, linkedin-marketing, branding-ci, general). Read the relevant workflow before a task.",
-                    "inputSchema", Json.Object("type", "object", "properties", Json.Object()),
+                    "description", "List shared workflow guidance available through this connector: name, category and a one-line description. Pass product (autocad or revit) to list only that product's workflows. Read the relevant workflow before a task.",
+                    "inputSchema", Json.Object("type", "object", "properties", Json.Object("product", Json.Object("type", "string", "enum", new object[] { "autocad", "revit", "all" }, "description", "Only this product's workflows")), "required", new object[0], "additionalProperties", false),
                     "annotations", Json.Object("readOnlyHint", true)));
                 tools.Add(Json.Object("name", "read_skill_workflow",
                     "description", "Read a shared Autodesk workflow or its supporting text file. This returns guidance and does not execute code or modify a model.",
@@ -330,7 +336,7 @@ namespace SmartConnector
             try
             {
                 object data;
-                if (name == "list_skill_workflows") data = Json.Object("skills", Workflows.ListAll());
+                if (name == "list_skill_workflows") data = Json.Object("skills", Workflows.ListAll(Json.GetString(arguments, "product")));
                 else if (name == "read_skill_workflow") data = Workflows.Read(Json.GetString(arguments, "name"), Json.GetString(arguments, "file"));
                 else if (name == "connection_status") data = ConnectionStatus(arguments);
                 else if (AutoCadNames.Contains(name)) data = WithWriteLock(name, delegate { return AutoCadBridge.Invoke(name, arguments); });
@@ -364,7 +370,8 @@ namespace SmartConnector
             string summary = "AutoCAD: " + Json.GetString(autoCad, "summary") + " Revit: " + Json.GetString(revit, "summary");
             if (!(true.Equals(autoCad["available"]) || true.Equals(revit["available"])))
                 throw new ToolException("Smart Connector is running, but neither AutoCAD nor Revit is reachable. " + summary);
-            return Json.Object("connected", true, "summary", summary, "autocad", autoCad, "revit", revit);
+            // Which program is answering: the compiled connector, not the PowerShell fallback (which lacks apply_plan, execute_autocad and generate_detail).
+            return Json.Object("connected", true, "summary", summary, "bridge", Json.Object("kind", "exe", "version", Paths.Version, "tools", Tools.Count), "autocad", autoCad, "revit", revit);
         }
 
         // Model-changing calls are serialized across every Codex and Claude window (and the PowerShell bridges).
@@ -474,6 +481,13 @@ namespace SmartConnector
                         if (rule.ContainsKey("minItems") && items.Length < Convert.ToInt32(rule["minItems"])) throw new ToolException("Too few entries: " + pair.Key);
                         if (rule.ContainsKey("maxItems") && items.Length > Convert.ToInt32(rule["maxItems"])) throw new ToolException("Too many entries: " + pair.Key);
                         foreach (object item in items) if (!(item is IDictionary<string, object>)) throw new ToolException("Every entry of " + pair.Key + " must be an object.");
+                    }
+                    else if (itemRule != null && Json.GetString(itemRule, "type") == "string")
+                    {
+                        // A list of names (for example the properties list_entities should read).
+                        if (items == null) throw new ToolException("Invalid array: " + pair.Key);
+                        if (items.Length > 40) throw new ToolException("Too many entries: " + pair.Key);
+                        foreach (object item in items) if (!(item is string)) throw new ToolException("Every entry of " + pair.Key + " must be a string.");
                     }
                     else
                     {

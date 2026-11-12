@@ -12,6 +12,7 @@ namespace SmartConnector
     {
         internal int Index;
         internal string Op, Id, Layer, TextStyle, Text, BlockName, Linetype;
+        internal string Justify;               // text and mtext: where the point sits on the text (middle-center, bottom-left, ...); null = the default, left on the baseline (text) or top-left (mtext)
         internal int Color;                    // layer step only; 0 = leave as is
         internal int Lineweight = -1;          // layer step only; -1 = leave as is
         internal double[] Point, End;
@@ -42,6 +43,16 @@ namespace SmartConnector
         private static readonly Regex Name = new Regex("^[^<>/\\\\\":;?*|,=`]{1,255}$", RegexOptions.CultureInvariant);
         private static readonly Regex IdPattern = new Regex("^[A-Za-z0-9_.-]{1,40}$", RegexOptions.CultureInvariant);
         // Layer lineweights AutoCAD accepts, in hundredths of a millimetre.
+        // How the point of a text step sits on the text: AutoCAD's AcAlignment value for TEXT (ActiveX Alignment, then TextAlignmentPoint) and
+        // AcAttachmentPoint for MTEXT. "left" and "top-left" are the defaults of the two, so a step without justify is unchanged.
+        internal static readonly Dictionary<string, int[]> Justifications = new Dictionary<string, int[]>
+        {
+            { "left", new[] { 0, 7 } }, { "center", new[] { 1, 8 } }, { "right", new[] { 2, 9 } }, { "middle", new[] { 4, 5 } },
+            { "top-left", new[] { 6, 1 } }, { "top-center", new[] { 7, 2 } }, { "top-right", new[] { 8, 3 } },
+            { "middle-left", new[] { 9, 4 } }, { "middle-center", new[] { 10, 5 } }, { "middle-right", new[] { 11, 6 } },
+            { "bottom-left", new[] { 12, 7 } }, { "bottom-center", new[] { 13, 8 } }, { "bottom-right", new[] { 14, 9 } }
+        };
+
         private static readonly int[] Lineweights = { 0, 5, 9, 13, 15, 18, 20, 25, 30, 35, 40, 50, 53, 60, 70, 80, 90, 100, 106, 120, 140, 158, 200, 211 };
 
         private static readonly Dictionary<string, string[]> Allowed = new Dictionary<string, string[]>
@@ -51,8 +62,8 @@ namespace SmartConnector
             { "circle", new[] { "op", "id", "layer", "center", "radius" } },
             { "arc", new[] { "op", "id", "layer", "center", "radius", "start_angle", "end_angle" } },
             { "polyline", new[] { "op", "id", "layer", "points", "closed", "bulges" } },
-            { "text", new[] { "op", "id", "layer", "point", "text", "height", "rotation", "style" } },
-            { "mtext", new[] { "op", "id", "layer", "point", "width", "text", "height", "rotation", "style" } },
+            { "text", new[] { "op", "id", "layer", "point", "text", "height", "rotation", "style", "justify" } },
+            { "mtext", new[] { "op", "id", "layer", "point", "width", "text", "height", "rotation", "style", "justify" } },
             { "insert", new[] { "op", "id", "layer", "name", "point", "scale", "rotation", "attributes" } },
             { "leader", new[] { "op", "id", "layer", "point", "target", "text", "block", "tag", "visibility", "landing", "width", "height" } },
             { "hatch", new[] { "op", "id", "layer", "pattern", "boundary", "holes", "scale", "angle", "color" } },
@@ -157,6 +168,12 @@ namespace SmartConnector
                         if (op == "mtext") p.Width = Positive(d, "width", i);
                         if (d.ContainsKey("rotation")) p.Rotation = Number(d, "rotation", i);
                         if (d.ContainsKey("style")) p.TextStyle = NameField(d, "style", i, true);
+                        if (d.ContainsKey("justify"))
+                        {
+                            string j = Convert.ToString(d["justify"]).Trim().ToLowerInvariant();
+                            if (!Justifications.ContainsKey(j)) throw Fail(i, "justify must be one of: " + String.Join(", ", Justifications.Keys.ToArray()) + ".");
+                            p.Justify = j;
+                        }
                         break;
                     case "insert":
                         p.Layer = NameField(d, "layer", i, true);

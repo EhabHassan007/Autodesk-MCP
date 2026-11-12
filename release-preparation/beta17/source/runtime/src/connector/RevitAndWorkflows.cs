@@ -274,14 +274,42 @@ namespace SmartConnector
             return (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0;
         }
 
-        internal static List<Dictionary<string, object>> ListAll()
+        // The "description:" line of the SKILL.md frontmatter, cut to one short line; empty when there is none.
+        internal static string DescriptionOf(string skillPath)
         {
-            return All().Values.Where(s => !IsLink(s.Path))
+            try
+            {
+                string[] lines = File.ReadLines(System.IO.Path.Combine(skillPath, "SKILL.md")).Take(40).ToArray();
+                if (lines.Length == 0 || !Regex.IsMatch(lines[0].TrimStart('\uFEFF'), @"^---\s*$")) return "";
+                for (int i = 1; i < lines.Length && !Regex.IsMatch(lines[i], @"^---\s*$"); i++)
+                {
+                    Match match = Regex.Match(lines[i], @"^description:\s*(.+?)\s*$");
+                    if (!match.Success) continue;
+                    string text = match.Groups[1].Value.Trim('"', '\'');
+                    if (text.Length <= 110) return text;
+                    int cut = text.LastIndexOf(' ', 110);
+                    return text.Substring(0, cut > 60 ? cut : 110).TrimEnd(' ', ',', ';', '.') + "...";
+                }
+            }
+            catch (Exception) { }
+            return "";
+        }
+
+        // product: "" lists everything; "autocad" or "revit" lists that product's workflows only (the generic skill-finder and the
+        // library or team administration skills are not drawing or model workflows). One short line each, so the list stays small.
+        internal static List<Dictionary<string, object>> ListAll(string product)
+        {
+            product = (product ?? "").Trim().ToLowerInvariant();
+            if (product.Length > 0 && product != "autocad" && product != "revit" && product != "all") throw new ToolException("product must be autocad, revit or all.");
+            if (product == "all") product = "";
+            return All().Values.Where(s => !IsLink(s.Path) && (product.Length == 0 || s.Category == product))
                 .OrderBy(s => s.Category.Length > 0 ? s.Category : "zz", StringComparer.CurrentCultureIgnoreCase)
                 .ThenBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase)
-                .Select(s => Json.Object("name", s.Name, "category", s.Category.Length > 0 ? s.Category : "uncategorized", "file", "SKILL.md"))
+                .Select(s => Json.Object("name", s.Name, "category", s.Category.Length > 0 ? s.Category : "uncategorized", "description", DescriptionOf(s.Path)))
                 .ToList();
         }
+
+        internal static List<Dictionary<string, object>> ListAll() { return ListAll(""); }
 
         internal static Dictionary<string, object> Read(string name, string file)
         {

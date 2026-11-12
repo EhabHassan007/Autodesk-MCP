@@ -57,6 +57,90 @@ namespace SmartConnector
             }
         }
 
+        // An entry under ANY name that still starts a PowerShell bridge. The retired names above are only the names earlier
+        // versions used; an entry someone added under another name kept serving the old bridge, which has no apply_plan,
+        // execute_autocad or generate_detail. The compiled connector is never matched (its path has no "-bridge.ps1").
+        internal static readonly Regex StaleBridge = new Regex(@"(autodesk|autocad|revit)-bridge\.ps1", RegexOptions.IgnoreCase);
+
+        // The server name a `mcp list` line starts with ("name: command ..." in Claude Code, a table in Codex).
+        internal static string ListedServerName(string line)
+        {
+            Match colon = Regex.Match(line ?? "", @"^\s*([^:]+?):\s");
+            if (colon.Success) return colon.Groups[1].Value.Trim();
+            Match token = Regex.Match(line ?? "", @"^\s*(\S+)");
+            return token.Success ? token.Groups[1].Value : "";
+        }
+
+        private void RemoveStaleBridgeCliEntries(string client, string command, string keep, string[] removeArguments)
+        {
+            try
+            {
+                External list = Invoke(command, new[] { "mcp", "list" }, true, true, null);
+                if (list.ExitCode != 0) return;
+                foreach (string line in list.Output)
+                {
+                    if (!StaleBridge.IsMatch(line)) continue;
+                    string stale = ListedServerName(line);
+                    if (stale.Length == 0 || String.Equals(stale, keep, StringComparison.OrdinalIgnoreCase)) continue;
+                    List<string> arguments = new List<string> { "mcp", "remove", stale };
+                    arguments.AddRange(removeArguments);
+                    if (Invoke(command, arguments.ToArray(), true, false, null).ExitCode == 0)
+                        Step("Removed the " + client + " entry '" + stale + "': it still started the old PowerShell bridge, which lacks apply_plan, execute_autocad and generate_detail.");
+                }
+            }
+            catch (Exception exception) { Warning(client + " was not checked for old PowerShell bridge entries: " + exception.Message); }
+        }
+
+        // Asks the connector the AI apps now start what it offers, the way an app would (initialize, then tools/list), and
+        // says so if the tools that mark the compiled connector are missing.
+        private void VerifyConnectorTools(string exe)
+        {
+            string[] required = { "apply_plan", "execute_autocad", "generate_detail", "connection_status" };
+            try
+            {
+                ProcessStartInfo info = new ProcessStartInfo(exe, "mcp");
+                info.UseShellExecute = false; info.CreateNoWindow = true;
+                info.RedirectStandardInput = true; info.RedirectStandardOutput = true; info.RedirectStandardError = true;
+                info.StandardOutputEncoding = new UTF8Encoding(false);
+                info.WorkingDirectory = Paths.LocalAppData;
+                List<string> names = new List<string>();
+                using (Process process = Process.Start(info))
+                {
+                    process.ErrorDataReceived += delegate { };
+                    process.BeginErrorReadLine();
+                    process.StandardInput.WriteLine("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2024-11-05\"}}");
+                    process.StandardInput.WriteLine("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}");
+                    process.StandardInput.Flush();
+                    string answer = null;
+                    Thread reader = new Thread(delegate ()
+                    {
+                        try
+                        {
+                            string line;
+                            while ((line = process.StandardOutput.ReadLine()) != null)
+                                if (line.IndexOf("\"id\":2", StringComparison.Ordinal) >= 0) { answer = line; return; }
+                        }
+                        catch (Exception) { }
+                    });
+                    reader.IsBackground = true;
+                    reader.Start();
+                    bool done = reader.Join(20000);
+                    try { process.StandardInput.Close(); } catch (Exception) { }
+                    if (!process.WaitForExit(3000)) { try { process.Kill(); } catch (Exception) { } }
+                    if (!done || answer == null) throw new EngineException("it did not answer tools/list within 20 seconds");
+                    OMap response = OJson.Parse(answer) as OMap;
+                    OMap result = response == null ? null : response.Get("result") as OMap;
+                    List<object> tools = result == null ? null : result.Get("tools") as List<object>;
+                    if (tools == null) throw new EngineException("its tools/list answer had no tools");
+                    foreach (object tool in tools) { OMap map = tool as OMap; if (map != null) names.Add(Convert.ToString(map.Get("name"))); }
+                }
+                string[] missing = required.Where(r => !names.Contains(r)).ToArray();
+                if (missing.Length > 0) Warning("The connector the AI apps start does not offer: " + String.Join(", ", missing) + ". Run Repair again; if it persists, reinstall from the latest setup exe.");
+                else Step("Checked the connector the AI apps start: it offers " + names.Count + " tools, including apply_plan, execute_autocad and generate_detail.");
+            }
+            catch (Exception exception) { Warning("The connector the AI apps start could not be checked: " + exception.Message); }
+        }
+
         // The Codex config folder: CODEX_HOME, else .codex in the home folder.
         private static string CodexHome
         {
@@ -439,6 +523,15 @@ namespace SmartConnector
                     if (servers.Remove(legacyName)) Step("Removed legacy Claude Desktop MCP registration: " + legacyName + ".");
                 }
 
+                if (!bridge.EndsWith(".ps1", StringComparison.OrdinalIgnoreCase))
+                {
+                    List<string> stale = new List<string>();
+                    for (int i = 0; i < servers.Count; i++)
+                        if (!String.Equals(servers.KeyAt(i), name, StringComparison.Ordinal) && StaleBridge.IsMatch(OJson.Write(servers.ValueAt(i)))) stale.Add(servers.KeyAt(i));
+                    foreach (string staleName in stale)
+                        if (servers.Remove(staleName)) Step("Removed the Claude Desktop entry '" + staleName + "': it still started the old PowerShell bridge, which lacks apply_plan, execute_autocad and generate_detail.");
+                }
+
                 McpLaunch launch = GetMcpLaunch(bridge, bridgeArguments);
                 OMap entry = new OMap();
                 entry.Set("command", launch.Command);
@@ -492,6 +585,7 @@ namespace SmartConnector
                 try
                 {
                     RegisterMcpServer("autodesk", bridge, arguments, legacyNames);
+                    if (!bridge.EndsWith(".ps1", StringComparison.OrdinalIgnoreCase)) RemoveStaleBridgeCliEntries("Codex", FindCommand("codex"), "autodesk", new string[0]);
                     detected++;
                     Result("codex", "ok");
                 }
@@ -528,6 +622,7 @@ namespace SmartConnector
                 try
                 {
                     RegisterClaudeCodeMcpServer("autodesk", bridge, arguments, legacyNames);
+                    if (!bridge.EndsWith(".ps1", StringComparison.OrdinalIgnoreCase)) RemoveStaleBridgeCliEntries("Claude Code", FindCommand("claude"), "autodesk", new[] { "--scope", "user" });
                     detected++;
                     Result("claude_code", "ok");
                 }
@@ -571,6 +666,8 @@ namespace SmartConnector
                     Result("claude_desktop", "skipped", "Claude Desktop is not installed");
                 }
             }
+
+            if (detected > 0 && File.Exists(compiled)) VerifyConnectorTools(compiled);
 
             if (registrationErrors.Count > 0)
                 throw new EngineException("Some AI client registrations failed. Other registrations were still attempted. Repair these clients and run setup again: " + String.Join("; ", registrationErrors));
