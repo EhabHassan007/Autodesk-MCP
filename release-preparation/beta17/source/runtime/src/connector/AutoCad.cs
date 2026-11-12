@@ -1114,6 +1114,7 @@ namespace SmartConnector
         internal static object ApplyGenerated(object docSource, IDictionary<string, object> a, DetailResult built, Dictionary<string, object> generated)
         {
             dynamic doc = docSource;
+            WaitUntilReady(docSource);
             string id = DrawingId(docSource);
             if (!String.Equals(id, Json.GetString(a, "expected_drawing"), StringComparison.OrdinalIgnoreCase))
                 throw new ToolException("Active drawing changed or expected_drawing is incorrect. Read drawing_info again.");
@@ -1220,6 +1221,19 @@ namespace SmartConnector
                 }
             }
             return false;
+        }
+
+        // Waits (up to about 15 seconds) until AutoCAD answers and no command is running. Right after a viewport zoom or a regeneration AutoCAD can
+        // reject the next call for a moment; the run then starts from a quiet state instead of failing on its first read. Reads only.
+        internal static void WaitUntilReady(object docSource)
+        {
+            dynamic doc = docSource;
+            for (int attempt = 1; attempt <= 15; attempt++)
+            {
+                try { if (Convert.ToInt32(doc.GetVariable("CMDACTIVE")) == 0) return; }
+                catch (Exception e) { if (!IsAutoCadBusy(e)) return; }
+                Pause(1000);
+            }
         }
 
         internal static T RetryWhenBusy<T>(Func<T> operation)
@@ -1343,32 +1357,37 @@ namespace SmartConnector
                         layer.Plottable = false;
                     }
                     doc.ActiveLayout = sheet;
+                    WaitUntilReady(docSource);
                     try { doc.ActiveSpace = 0; } catch (Exception) { }
                     try { doc.Regen(1); } catch (Exception) { }
                     viewport = sheet.Block.AddPViewport(new double[] { v.Centre[0], v.Centre[1], 0 }, v.Width, v.Height);
                     viewport.Layer = v.LayerName;
                     viewport.Display(true);
                     string handle = Convert.ToString(viewport.Handle);
-                    string method, zoomError = null;
-                    try
+                    string method = null, zoomError = null;
+                    for (int zoomTry = 1; method == null; zoomTry++)
                     {
-                        doc.Regen(1);
-                        doc.MSpace = true;
-                        doc.ActivePViewport = viewport;
-                        doc.Application.ZoomCenter(new double[] { v.ViewCentre[0], v.ViewCentre[1], 0 }, v.Height * v.Scale);
-                        viewport.CustomScale = 1.0 / v.Scale;
-                        doc.MSpace = false;
-                        method = "zoom";
-                    }
-                    catch (Exception e)
-                    {
-                        zoomError = e.Message;
-                        try { doc.MSpace = false; } catch (Exception) { }
-                        double[] offset = ReadViewportView(docSource, handle, 12000);
-                        if (Math.Abs(offset[4]) > 1e-9) throw new ToolException("the new viewport's view is twisted; only plan views are supported.");
-                        viewport.Target = new double[] { v.ViewCentre[0] - offset[0], v.ViewCentre[1] - offset[1], 0 };
-                        viewport.CustomScale = 1.0 / v.Scale;
-                        method = "target";
+                        try
+                        {
+                            doc.Regen(1);
+                            doc.MSpace = true;
+                            doc.ActivePViewport = viewport;
+                            doc.Application.ZoomCenter(new double[] { v.ViewCentre[0], v.ViewCentre[1], 0 }, v.Height * v.Scale);
+                            viewport.CustomScale = 1.0 / v.Scale;
+                            doc.MSpace = false;
+                            method = "zoom";
+                        }
+                        catch (Exception e)
+                        {
+                            zoomError = e.Message;
+                            try { doc.MSpace = false; } catch (Exception) { }
+                            if (zoomTry < 2) { Pause(1500); continue; }   // the layout switch can still be settling: one more try before the fallback
+                            double[] offset = ReadViewportView(docSource, handle, 12000);
+                            if (Math.Abs(offset[4]) > 1e-9) throw new ToolException("the new viewport's view is twisted; only plan views are supported.");
+                            viewport.Target = new double[] { v.ViewCentre[0] - offset[0], v.ViewCentre[1] - offset[1], 0 };
+                            viewport.CustomScale = 1.0 / v.Scale;
+                            method = "target";
+                        }
                     }
 
                     // read the view back; correct it through Target if it is off; without an answer, say it was not read back
