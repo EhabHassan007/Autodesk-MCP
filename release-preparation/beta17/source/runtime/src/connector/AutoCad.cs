@@ -1184,7 +1184,7 @@ namespace SmartConnector
             if (viewport == null) return Json.Object("applied", true, "generated", generated, "plan_result", modelResult, "paper_plan_result", paperResult);
             try
             {
-                object viewportResult = CreateViewport(docSource, layout, viewport);
+                object viewportResult = RetryWhenBusy(delegate { return CreateViewport(docSource, layout, viewport); });
                 return Json.Object("applied", true, "generated", generated, "plan_result", modelResult, "paper_plan_result", paperResult, "viewport_result", viewportResult);
             }
             catch (Exception e)
@@ -1197,6 +1197,39 @@ namespace SmartConnector
                     + " at paper point " + viewport.Centre[0].ToString(System.Globalization.CultureInfo.InvariantCulture) + ", " + viewport.Centre[1].ToString(System.Globalization.CultureInfo.InvariantCulture)
                     + ", or type U twice in AutoCAD to remove the annotation and the geometry.";
                 return Json.Object("applied", true, "generated", generated, "plan_result", modelResult, "paper_plan_result", paperResult, "viewport_result", null);
+            }
+        }
+
+        // AutoCAD answers a COM call with "Call was rejected by callee" (RPC_E_CALL_REJECTED) or "server busy" while it is busy for a moment
+        // (right after a large drawing step, a regeneration or a user command). Such a call is tried again after a short wait; a failed attempt
+        // has already removed what it made (CreateViewport cleans up before it rethrows), so trying again is safe. Any other error is not retried.
+        internal static Action<int> Pause = delegate (int milliseconds) { System.Threading.Thread.Sleep(milliseconds); };
+        internal const int BusyRetries = 6;
+
+        internal static bool IsAutoCadBusy(Exception exception)
+        {
+            for (Exception e = exception; e != null; e = e.InnerException)
+            {
+                COMException com = e as COMException;
+                if (com != null)
+                {
+                    uint code = (uint)com.ErrorCode;
+                    return code == 0x80010001 || code == 0x8001010A;   // RPC_E_CALL_REJECTED, RPC_E_SERVERCALL_RETRYLATER
+                }
+            }
+            return false;
+        }
+
+        internal static T RetryWhenBusy<T>(Func<T> operation)
+        {
+            for (int attempt = 1; ; attempt++)
+            {
+                try { return operation(); }
+                catch (Exception e)
+                {
+                    if (attempt >= BusyRetries || !IsAutoCadBusy(e)) throw;
+                    Pause(1000 * attempt);
+                }
             }
         }
 

@@ -390,12 +390,15 @@ namespace SmartConnector
                     return;
                 }
                 double width = (r.Place ?? new DetailAnnotation()).NoteWidth;
-                int perLine = Math.Max(8, (int)Math.Floor(width / 1.64));
+                // The office label block sets its own text, larger than the 2.5 mm of a native leader (live check: about 19 characters a line
+                // at a 45 mm width, about 5 mm a line); a native leader takes 2.5 mm text. Spacing is sized for the block that will be used.
+                double charWidth = leaderBlock != null ? 2.4 : 1.64, lineHeight = leaderBlock != null ? 5.0 : 4.0, gapMm = leaderBlock != null ? 2.0 : 2.5;
+                int perLine = Math.Max(8, (int)Math.Floor(width / charWidth));
                 Dictionary<NoteSpec, double> anchorY = new Dictionary<NoteSpec, double>();
                 double limit = Double.PositiveInfinity;
                 foreach (NoteSpec n in notes.OrderByDescending(n => n.TargetY))
                 {
-                    double h = Lines(n.Text, perLine) * 4.0 * d, gap = 2.5 * d;
+                    double h = Lines(n.Text, perLine) * lineHeight * d, gap = gapMm * d;
                     double y = Math.Min(n.TargetY, limit - h / 2);
                     anchorY[n] = y;
                     limit = y - h / 2 - gap;

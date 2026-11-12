@@ -32,3 +32,12 @@ Run in a **disposable millimetre drawing**: first the blank template `acadiso.dw
 - **Viewport:** the tool reads the view centre back and corrects it. If `view_centre_read_back` is false (AutoCAD did not answer the read-only query), check by eye that the section sits in the middle of the viewport and report a shift with a screenshot. If the viewport cannot be made at all, the result carries `viewport_error` and `viewport_next_step`; the geometry and annotation stay.
 - **Sheet centre:** the default centre comes from the paper size and can sit a few millimetres off the true sheet centre because of printer margins. Pass `view.paper_centre` to place the detail exactly.
 - Report anything that looks different from what is listed, with a screenshot of the layout.
+
+## Result of the first office-template run (AutoCAD 24.3, 2026-11-12)
+
+Run through the connector directly on a drawing made from the office template, S1 brief (custom section, paper annotation, sheet fields):
+- `layer_scheme` `ao`; section and hatch layers were the office's (`AO-MDF_SECTION_PLAN`, `AO_N_HATCH`, `AO_ELEVATION 3`); only `AO-STONE_SECTION_PLAN` was created (marble has no layer on the sheets). Both plans validated and drew with matching counts (22 in Model, 20 in the layout).
+- Levels drew as `level indicator` blocks (elevation and description on two lines), the title as `DWG-VIEWTITLE` with project, sheet number and view number, notes as `Multiple Leader Lab` leaders with arrows, dimensions 250, 25, 725, 1000 and 512, 88, 600.
+- Found: the viewport was not made, AutoCAD answered `RPC_E_CALL_REJECTED` (busy); a busy answer is now retried up to six times with growing waits. The notes overprinted each other because the office block wraps at about 19 characters a line at 45 mm and needs about 5 mm a line; the label spacing now uses those figures when the office block is used.
+- Still to confirm by eye: each leader's arrow lands on its part's edge, with the viewport showing the section.
+
