@@ -723,7 +723,14 @@ namespace SmartConnector
 
         // Validates the whole plan against this drawing, then (unless dry_run) creates it in one Undo group. Anything
         // created is removed again if a step fails, and the object count is read back to confirm the result.
+        // A plan that AutoCAD rejects as busy is tried again as a whole: a failed attempt has already rolled back what it made (see ApplyPlanOnce),
+        // and a dry run only reads. After the retries the failure says where it happened.
         internal static object ApplyPlan(object source, IDictionary<string, object> a)
+        {
+            return RetryWhenBusy<object>(delegate { return ApplyPlanOnce(source, a); });
+        }
+
+        private static object ApplyPlanOnce(object source, IDictionary<string, object> a)
         {
             dynamic doc = source;
             List<PlanItem> plan = AutoCadPlan.Parse(a["items"]);
@@ -818,7 +825,7 @@ namespace SmartConnector
                 catch (Exception)
                 {
                     for (int i = created.Count - 1; i >= 0; i--) { int at = i; try { RetryWhenBusy<bool>(delegate { ((dynamic)created[at]).Delete(); return true; }); } catch (Exception) { } }   // a busy AutoCAD must not leave half of a plan behind
-                    foreach (string layerName in layersCreated) { try { doc.Layers.Item(layerName).Delete(); } catch (Exception) { } }
+                    foreach (string layerName in layersCreated) { string ln = layerName; try { RetryWhenBusy<bool>(delegate { doc.Layers.Item(ln).Delete(); return true; }); } catch (Exception) { } }
                     throw;
                 }
             }
@@ -1006,7 +1013,7 @@ namespace SmartConnector
                 // The viewport is ours, so the detail can go in the middle of the sheet: that needs the layout's paper size from AutoCAD.
                 if (!apply0(a)) throw new ToolException("view.paper_centre is needed to preview without AutoCAD. With apply and create_viewport it defaults to the centre of the layout's sheet.");
                 if (Json.GetString(a, "expected_drawing").Length == 0) throw new ToolException("expected_drawing is required when apply is true.");
-                doc = ActiveDrawing();
+                doc = RetryWhenBusy<object>(delegate { return (object)ActiveDrawing(); });
                 if (!String.Equals(DrawingId((object)doc), Json.GetString(a, "expected_drawing"), StringComparison.OrdinalIgnoreCase))
                     throw new ToolException("Active drawing changed or expected_drawing is incorrect. Read drawing_info again.");
                 place.PaperCentre = SheetCentre((object)doc, Json.GetString(a, "layout"));
@@ -1018,8 +1025,8 @@ namespace SmartConnector
             {
                 // The brief is valid. Now the drawing's own layers and blocks decide which layer set is used, so read them and build again.
                 if (Json.GetString(a, "expected_drawing").Length == 0) throw new ToolException("expected_drawing is required when apply is true.");
-                if (doc == null) doc = ActiveDrawing();
-                place.Facts = ReadFacts((object)doc);
+                if (doc == null) doc = RetryWhenBusy<object>(delegate { return (object)ActiveDrawing(); });
+                place.Facts = RetryWhenBusy<DrawingFacts>(delegate { return ReadFacts((object)doc); });
                 built = AutoCadDetail.Build(Json.GetString(a, "template"), parameters, scale, ox, oy, dimStyle, textStyle, dimScale, place);
             }
 
@@ -1117,7 +1124,7 @@ namespace SmartConnector
         {
             dynamic doc = docSource;
             WaitUntilReady(docSource);
-            string id = DrawingId(docSource);
+            string id = RetryWhenBusy<string>(delegate { return DrawingId(docSource); });
             if (!String.Equals(id, Json.GetString(a, "expected_drawing"), StringComparison.OrdinalIgnoreCase))
                 throw new ToolException("Active drawing changed or expected_drawing is incorrect. Read drawing_info again.");
             int units;
@@ -1126,7 +1133,7 @@ namespace SmartConnector
             if (units != 4)
                 throw new ToolException("The drawing is not in millimetres (INSUNITS = " + units.ToString(System.Globalization.CultureInfo.InvariantCulture) + "), so nothing was drawn. The Detail Generator works in millimetres only; start from a millimetre template such as acadiso.dwt.");
 
-            if (!a.ContainsKey("use_reference_styles") || (bool)a["use_reference_styles"]) ResolveReferenceStyles(docSource, built, generated);
+            if (!a.ContainsKey("use_reference_styles") || (bool)a["use_reference_styles"]) RetryWhenBusy<bool>(delegate { ResolveReferenceStyles(docSource, built, generated); return true; });
             string sheetName = Json.GetString(a, "layout");
             if (built.PaperItems.Count > 0 && sheetName.Length > 0 && built.Summary.ContainsKey("paper_footprint"))
             {
@@ -1145,7 +1152,7 @@ namespace SmartConnector
                 catch (Exception) { }
             }
             bool update = a.ContainsKey("update_layers") && (bool)a["update_layers"];
-            HashSet<string> existing = Names((object)doc.Layers);
+            HashSet<string> existing = RetryWhenBusy<HashSet<string>>(delegate { return Names((object)doc.Layers); });
             List<object> steps = new List<object>();
             List<string> kept = new List<string>();
             foreach (Dictionary<string, object> item in built.Items)
@@ -1182,12 +1189,12 @@ namespace SmartConnector
             ViewportPlan viewport = null;
             if (createViewport)
             {
-                viewport = PlanViewport(docSource, a, built);
+                viewport = RetryWhenBusy<ViewportPlan>(delegate { return PlanViewport(docSource, a, built); });
                 generated["viewport"] = viewport.Describe();
             }
             else
             {
-                string viewportWarning = ViewportWarning(docSource, layout, built.Scale);
+                string viewportWarning = RetryWhenBusy<string>(delegate { return ViewportWarning(docSource, layout, built.Scale); });
                 if (viewportWarning != null) generated["viewport_warning"] = viewportWarning;
             }
             if (dry)
@@ -1262,7 +1269,12 @@ namespace SmartConnector
                 try { return operation(); }
                 catch (Exception e)
                 {
-                    if (attempt >= BusyRetries || !IsAutoCadBusy(e)) throw;
+                    if (!IsAutoCadBusy(e)) throw;
+                    if (attempt >= BusyRetries)
+                    {
+                        string where = (e.StackTrace ?? "").Split('\n').Select(l => l.Trim()).FirstOrDefault(l => l.Length > 0) ?? "";
+                        throw new ToolException("AutoCAD kept rejecting calls for about 15 seconds (" + e.Message + "). Where: " + where + ". Close any dialog or command in AutoCAD, check the drawing, and run again.");
+                    }
                     Pause(1000 * attempt);
                 }
             }
