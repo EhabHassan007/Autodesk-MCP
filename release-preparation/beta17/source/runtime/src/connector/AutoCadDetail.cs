@@ -481,7 +481,7 @@ namespace SmartConnector
                     bool hasLeaders = r.Ann.Any(q => Json.GetString(q, "op") == "leader");
                     r.Summary["paper_footprint"] = new object[] { Math.Round(minX, 1), Math.Round(minY, 1), Math.Round(maxX + (hasLeaders ? place.NoteWidth : 0), 1), Math.Round(maxY + 8, 1) };
                     r.Summary["viewport_setup"] = "Viewport at scale 1:" + scale + " (CustomScale " + (1.0 / d).ToString("0.######", CultureInfo.InvariantCulture) + "), view centred on model point " + Mm(mcx) + ", " + Mm(mcy)
-                        + ". Annotation is placed assuming exactly that view; AutoCAD does not let this tool set the viewport's view centre.";
+                        + ". Annotation is placed assuming exactly that view. With create_viewport the tool sets that view and reads it back (viewport_result.method zoom or target, view_centre_read_back); a viewport you make yourself must show that centre at that scale.";
                 }
             }
         }
