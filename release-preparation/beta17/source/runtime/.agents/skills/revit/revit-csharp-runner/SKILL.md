@@ -19,17 +19,23 @@ Use dynamic C# only when a narrower MCP command cannot complete the authorized t
 
 - Use the document variable and transaction context supplied by the runner; do not create a second project-document transaction.
 - A separately opened family document may require its own transaction.
-- Prefer broadly compatible language and API constructs for the target Revit year.
+- The runner's document variable is `document` (not `doc`). A script that uses an undefined name can surface as "MCP session is not available" even though the session is fine; check the script first.
+- The runner compiles at an older C# language level: avoid `?.` and other newer syntax. Prefer broadly compatible language and API constructs for the target Revit year.
+- Read parameters by `LookupParameter("Name")` when a `BuiltInParameter` is uncertain; for example `BuiltInParameter.REVISION_CLOUD_COMMENTS` does not exist in Revit 2024.
+- Test any unfamiliar API call on one element before running a batch.
 - Read all geometry and bounding boxes before writes to avoid regeneration inside loops.
 - Use category filters and small batches rather than scanning entire views or models.
+- Keep each call to about 25 creations, resumable through a remaining-count loop, with one regeneration per batch. Never delete and rebuild a whole set (for example every cloud and note) in one transaction: in a model with hundreds of links this exceeded the 120 s runner limit and left Revit unresponsive for about 15 minutes.
 - Return a short result with changed, skipped, failed, and remaining counts. Write large diagnostics only to an approved project working folder.
 
 ## Verification and recovery
 
 A success response does not prove Revit committed the changes. Perform a separate read-back after every write batch. If values did not persist, capture Revit failure messages for the affected document and retry only after understanding the reason.
 
-After a timeout, stop issuing writes. Confirm the MCP is responsive, discard any stale response, and inspect the model before deciding whether to retry. If Revit remains blocked, ask the user to check for an open dialog. Never use blind retries or Ctrl+Z during an uncertain call.
+After a timeout, stop issuing writes. While Revit regenerates graphics, even read-only calls can time out (about 80 s) and the add-in may not answer; wait for the status bar to clear, then retry. Confirm the MCP is responsive, discard any stale response, and inspect the model before deciding whether to retry. If Revit remains blocked, ask the user to check for an open dialog. Never use blind retries or Ctrl+Z during an uncertain call.
 
 Keep batches proportional to model complexity and use remaining-count loops. Ask the user to synchronize at major milestones, then reacquire ids or resolve objects by stable names where appropriate.
+
+Never report a count or a loss from a single check. Confirm it with a second method before telling the user.
 
 Verification status: safety rules captured from repeated operational use; each new script still requires task-specific review and live read-back.

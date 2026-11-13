@@ -27,6 +27,11 @@ Deletion, parameter removal, and purge require explicit approval of the exact de
 - Report checked-out elements and their owner; do not retry changes until the user resolves ownership.
 - Synchronization clears Undo history and can change ids of newly created elements. Resolve durable objects by approved names or unique identifiers after synchronization.
 - Only one Revit process can own a fixed MCP port. Match the listening process id to the intended Revit session before a model-changing run.
+- With two Revit windows open, every call can be refused with "More than one Revit session is running" even when `session_id` is passed. Ask the user to close the extra (for example empty) window, then call `list_sessions` again.
+- Revit may restart between sessions. Resolve revisions by sequence number and description, views by name and template, and types by name; never by an element id remembered from earlier. A count made with a stale revision id reports zero.
+- Edits made after the last synchronisation can be lost on restart. Ask the user to synchronise after each milestone, and after a restart recount what survived before rebuilding.
+- If the tool prefix changes mid-session (the connector link was re-established under a different name), reload the tools and call `get_revit_rules` again before any write.
+- Annotations placed in a primary view also appear in its dependent views. Work on primary views only, or the same markup is created twice.
 
 Report checkpoints, committed batches, unresolved ownership, remaining work, and recovery steps. Saving, detaching, synchronization, purge, and deletion remain explicit user actions or approvals.
 
