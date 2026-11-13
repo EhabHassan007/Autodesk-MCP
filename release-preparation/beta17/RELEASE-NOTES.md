@@ -1,5 +1,17 @@
-Smart Connector for Autodesk Revit and AutoCAD 1.1.0
+Smart Connector for Autodesk Revit and AutoCAD 1.2.0
 
+New in 1.2.0 (AutoCAD Detail Generator and connector safety; everything from 1.1.0 below is included):
+- Several views on one sheet: a plan and two sections now draw together on one layout, each with its own viewport and the office annotation. Each result reports `paper_footprint` (the sheet area the view needs) so views can be checked for overlap, and `sheet_size_mm`; a view that does not fit the layout's paper, or that overlaps a viewport already on the layout, gets a warning before anything is drawn.
+- `prepare_layout` (new tool): sets a layout's paper size and orientation (ISO A0 to A4, landscape or portrait) through its page setup, for a freshly opened drawing whose layout reads 0 x 0. It needs a dry run and the user's yes like every change, reads the size back, and does not save.
+- `drawing_info` now returns each layout's sheet size after rotation, plot rotation, paper-space object count and existing viewports, and marks a layout with no usable paper size.
+- The dry-run rule works across views: the approval is kept for the whole brief, so a view drawn after another (which creates layers) is no longer refused after its own dry run.
+- A busy AutoCAD no longer breaks a run: a call that AutoCAD rejects ("call rejected by callee") is waited out and retried step by step, a plan that fails is rolled back completely (including when AutoCAD stays busy during the rollback), and if AutoCAD stays busy the message says where.
+- Viewports: the first viewport on a fresh layout is made even when the layout's block is not yet paper space, the zoom is tried twice before the Target fallback, and the result says which method was used.
+- Docs: the detail-generator skill and references describe the sheet layout rules (no doubled overall dimensions, one note per part), the viewport layer (`AO-MV` with the office scheme) and the live-check results.
+
+Not verified on a real AutoCAD: `prepare_layout` and the overlap warning with an existing viewport. Everything else above ran live on AutoCAD 2024 (24.3) with the S-shaped reception counter: plan 1:20, sections A-A and B-B 1:10 on one A1 sheet.
+
+1.1.0:
 Lean core: Smart Connector now runs nothing in the background. This removes the behaviour that antivirus programs such as Kaspersky treat as a PowerShell "agent", and it gives IT a much smaller footprint to approve.
 
 - No scheduled tasks and no notification-area agent. Updating from 1.0.0 or an earlier beta removes the four tasks earlier versions created (connector agent, usage report, weekly Skills Sync, update alerts) and the agent's restart copy. The running agent exits after the update.
@@ -32,4 +44,4 @@ Lean core: Smart Connector now runs nothing in the background. This removes the 
 - `verify_standards`: an `expected_counts` type of `total`, `all` or `any` (or none) counts every object; an unknown type is refused instead of being counted as zero.
 - Detail Generator, found in the first run on the office template: the viewport step is retried when AutoCAD answers "call rejected" (busy), and leader notes are spaced for the office label block's real text size so wrapped notes no longer overprint.
 
-SHA-256: B0E1197F5601728E81542B45BA30EF6D7FF5C76DACB7EDD5CBC8CB7EB9E64E34
+SHA-256: E637BB6E5F405F5680501A89960A7A97C5E59F03465AA152C1E4F7EEE3F8C9E7
