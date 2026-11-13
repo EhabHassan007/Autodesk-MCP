@@ -787,9 +787,11 @@ namespace SmartConnector
                             if (p.Lineweight >= 0) layer.Lineweight = p.Lineweight;
                             continue;
                         }
-                        dynamic entity = p.Op == "hatch" ? CreateHatch((object)space, p, byId, loopForms) : CreateItem((object)space, p);
+                        try { RetryWhenBusy<bool>(delegate { doc.GetVariable("CMDACTIVE"); return true; }); } catch (Exception) { }   // AutoCAD can reject a call for a moment after the previous step: wait until it answers, so the step starts clean
+                        // A single-call item is made again if AutoCAD rejects the call (a rejected call created nothing); a hatch is several calls and is not repeated.
+                        dynamic entity = p.Op == "hatch" ? CreateHatch((object)space, p, byId, loopForms) : RetryWhenBusy<object>(delegate { return CreateItem((object)space, p); });
                         created.Add((object)entity);
-                        entity.Layer = p.Layer;
+                        RetryWhenBusy<bool>(delegate { entity.Layer = p.Layer; return true; });
                         if (p.TextStyle != null) entity.StyleName = p.TextStyle;
                         if (p.DimStyle != null) entity.StyleName = p.DimStyle;
                         if (p.DimScale > 0)
@@ -815,7 +817,7 @@ namespace SmartConnector
                 }
                 catch (Exception)
                 {
-                    for (int i = created.Count - 1; i >= 0; i--) { try { ((dynamic)created[i]).Delete(); } catch (Exception) { } }
+                    for (int i = created.Count - 1; i >= 0; i--) { int at = i; try { RetryWhenBusy<bool>(delegate { ((dynamic)created[at]).Delete(); return true; }); } catch (Exception) { } }   // a busy AutoCAD must not leave half of a plan behind
                     foreach (string layerName in layersCreated) { try { doc.Layers.Item(layerName).Delete(); } catch (Exception) { } }
                     throw;
                 }
@@ -1200,7 +1202,7 @@ namespace SmartConnector
             object paperResult;
             DryRunGuard.Used(guardKey);
             try { paperResult = ApplyPlan(docSource, paperArguments); }
-            catch (ToolException e) { throw new ToolException("The geometry was drawn in model space, but the annotation in layout '" + layout + "' failed and was rolled back: " + e.Message + " Undo once (U) to remove the geometry, fix the cause, then run again."); }
+            catch (Exception e) { throw new ToolException("The geometry was drawn in model space, but the annotation in layout '" + layout + "' failed and was rolled back: " + e.Message + " Undo once (U) to remove the geometry, fix the cause, then run again."); }
             if (viewport == null) return Json.Object("applied", true, "generated", generated, "plan_result", modelResult, "paper_plan_result", paperResult);
             try
             {
