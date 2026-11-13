@@ -4,12 +4,18 @@ on:
   pull_request:
     branches: [main]
 
+# A newer push to the same branch or pull request cancels the older run, so superseded commits use no minutes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 jobs:
   validate:
     runs-on: windows-latest
+    timeout-minutes: 10   # a hung job stops here instead of using minutes until the 6-hour limit
     steps:
       - uses: actions/checkout@v4
         with:
