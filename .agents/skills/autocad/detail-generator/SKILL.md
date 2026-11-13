@@ -15,6 +15,7 @@ description: Generate a draft construction detail in AutoCAD from a short brief,
 
 ## Workflow
 1. `drawing_info`; the drawing must be in millimetres (`units_code` 4) or nothing is drawn.
+   Read the sheet layout's `layout_details`: `sheet_size_mm` (after rotation) must be the paper the user wants, and `ready` true. A layout with no usable paper size (a freshly opened drawing reads 0 x 0, `ready` false, `sheet_size_mm` null) or the wrong size needs `prepare_layout`: ask which paper (A0 to A4) and orientation; run it with `dry_run` true and show what it would set; after the user's yes, run it for real and check `sheet_size_mm` in the result (A1 landscape reads [841, 594]). It changes the layout's page setup, so it needs its own dry run and yes, and one `UNDO` may not revert it. Also check `existing_viewports`: a viewport covering the sheet must be moved or deleted first.
 2. Agree the parameters; ask for what is open (depth, top height, top material, raised bar, accessible section). Never guess a number.
 3. Dry run as above, with `origin` (where the floor meets the staff face) in a free area.
 4. Tell the user the drawing is unsaved; one `UNDO` removes the detail.

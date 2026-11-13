@@ -83,6 +83,10 @@ namespace SmartConnector
                             "required_layers", Json.Object("type", "array", "items", Json.Object("type", "object")), "forbidden_layers", Json.Object("type", "array", "items", Json.Object("type", "string")),
                             "text_height", Json.Object("type", "object"), "expected_counts", Json.Object("type", "array", "items", Json.Object("type", "object"))),
                         new[] { "expected_drawing" }, true),
+                    Schema.Tool("prepare_layout", "Set a layout's paper size and orientation through its page setup (plot device, ISO media without full bleed, millimetres, rotation) so paper-space annotation has a real sheet. Use when drawing_info shows a layout with no usable sheet_size_mm, or generate_detail warns about it: ask the user which paper (A0 to A4) and orientation. dry_run defaults to true and only reports the current size and what would be set; a real run changes the layout and is refused unless the same job passed a dry run on this drawing in the last 30 minutes: show the dry run and wait for the user's yes. Does not save.",
+                        Json.Object("expected_drawing", target(), "layout", str(), "paper", Json.Object("type", "string", "enum", new object[] { "A0", "A1", "A2", "A3", "A4" }), "orientation", Json.Object("type", "string", "enum", new object[] { "landscape", "portrait" }),
+                            "plot_device", str(), "dry_run", Json.Object("type", "boolean")),
+                        new[] { "expected_drawing", "layout", "paper", "orientation" }, false),
                     Schema.Tool("save_drawing", "Explicitly save the expected drawing to its EXISTING path. Invoke only when saving is requested; no Save As.", Json.Object("expected_drawing", target()), new[] { "expected_drawing" }, false)
                 };
                 return _tools;
@@ -1116,6 +1120,94 @@ namespace SmartConnector
             return found;
         }
 
+        private static readonly string[] PaperNames = { "A0", "A1", "A2", "A3", "A4" };
+        private static readonly double[][] PaperMm = { new[] { 841.0, 1189.0 }, new[] { 594.0, 841.0 }, new[] { 420.0, 594.0 }, new[] { 297.0, 420.0 }, new[] { 210.0, 297.0 } };
+
+        // The canonical media name for an ISO paper size (short side, long side in mm): one whose name carries that size, never a full-bleed variant.
+        internal static string PickMedia(IEnumerable<string> names, double shortSide, double longSide)
+        {
+            System.Text.RegularExpressions.Regex size = new System.Text.RegularExpressions.Regex(@"(\d+(?:\.\d+)?)_x_(\d+(?:\.\d+)?)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            foreach (string name in names)
+            {
+                if (name == null || name.IndexOf("bleed", StringComparison.OrdinalIgnoreCase) >= 0) continue;
+                System.Text.RegularExpressions.Match m = size.Match(name);
+                if (!m.Success) continue;
+                double x = Double.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture), y = Double.Parse(m.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture);
+                double lo = Math.Min(x, y), hi = Math.Max(x, y);
+                if (Math.Abs(lo - shortSide) < 0.6 && Math.Abs(hi - longSide) < 0.6) return name;
+            }
+            return null;
+        }
+
+        // Sets a layout's paper size and orientation through its page setup: the plot device, its canonical media, millimetres and the rotation.
+        // Dry run (default) reports the current state and what would be set and changes nothing; a real run needs a passed dry run of the same job.
+        internal static object PrepareLayout(object docSource, IDictionary<string, object> a)
+        {
+            dynamic doc = docSource;
+            string layout = Json.GetString(a, "layout");
+            if (layout.Length == 0 || layout == "Model" || !Names((object)doc.Layouts).Contains(layout)) throw new ToolException("Layout not found: " + layout + ". Model space has no sheet.");
+            string paper = Json.GetString(a, "paper").ToUpperInvariant();
+            int index = Array.IndexOf(PaperNames, paper);
+            if (index < 0) throw new ToolException("paper must be one of A0, A1, A2, A3, A4 (ISO).");
+            string orientation = Json.GetString(a, "orientation").ToLowerInvariant();
+            if (orientation != "landscape" && orientation != "portrait") throw new ToolException("orientation must be landscape or portrait.");
+            string device = Json.GetString(a, "plot_device");
+            if (device.Length == 0) device = "DWG To PDF.pc3";
+            bool dry = !a.ContainsKey("dry_run") || (bool)a["dry_run"];
+            bool landscape = orientation == "landscape";
+            double wantW = landscape ? PaperMm[index][1] : PaperMm[index][0], wantH = landscape ? PaperMm[index][0] : PaperMm[index][1];
+            string id = DrawingId((object)doc);
+            double[] current = null; string currentNote = null;
+            try { current = SheetSize((object)doc, layout); } catch (ToolException e) { currentNote = e.Message; }
+            bool already = current != null && Math.Abs(current[0] - wantW) < 1 && Math.Abs(current[1] - wantH) < 1;
+            string key = DryRunGuard.Key(id, "prepare_layout", layout, paper, orientation, device);
+            Dictionary<string, object> state = Json.Object("drawing", id, "layout", layout, "current_sheet_size_mm", current == null ? null : new object[] { Math.Round(current[0], 1), Math.Round(current[1], 1) });
+            if (currentNote != null) state["current_note"] = currentNote;
+            if (dry)
+            {
+                DryRunGuard.Passed_(key);
+                state["applied"] = false; state["already_correct"] = already;
+                state["would_set"] = Json.Object("plot_device", device, "paper", "ISO " + paper, "orientation", orientation, "sheet_size_mm", new object[] { wantW, wantH },
+                    "steps", new object[] { "make the layout current", "plot device " + device + " and refresh its media list", "canonical media for " + wantH.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + " x " + wantW.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + " mm without full bleed", "paper units millimetres", "plot rotation for " + orientation });
+                state["note"] = "This changes the layout's page setup (not the geometry). Show the user this and wait for their yes before the real run.";
+                return state;
+            }
+            DryRunGuard.Require(key);
+            if (already) { DryRunGuard.Used(key); state["applied"] = false; state["already_correct"] = true; return state; }
+
+            string media = null; int rotation = 0; double[] after;
+            doc.StartUndoMark();
+            try
+            {
+                dynamic sheet = doc.Layouts.Item(layout);
+                RetryWhenBusy<bool>(delegate { doc.ActiveLayout = sheet; return true; });
+                WaitUntilReady((object)doc);
+                RetryWhenBusy<bool>(delegate { sheet.ConfigName = device; return true; });
+                RetryWhenBusy<bool>(delegate { sheet.RefreshPlotDeviceInfo(); return true; });
+                List<string> names = new List<string>();
+                foreach (object o in (System.Collections.IEnumerable)RetryWhenBusy<object>(delegate { return sheet.GetCanonicalMediaNames(); })) names.Add(Convert.ToString(o));
+                media = PickMedia(names, PaperMm[index][0], PaperMm[index][1]);
+                if (media == null) throw new ToolException("Plot device '" + device + "' has no " + paper + " media (" + PaperMm[index][0] + " x " + PaperMm[index][1] + " mm, not full bleed), so nothing was changed. Give another plot_device, or set the paper in AutoCAD's Page Setup.");
+                string chosen = media;
+                RetryWhenBusy<bool>(delegate { sheet.CanonicalMediaName = chosen; return true; });
+                RetryWhenBusy<bool>(delegate { sheet.PaperUnits = 1; return true; });
+                double w = 0, h = 0;
+                sheet.GetPaperSize(out w, out h);
+                rotation = ((w < h) == landscape) ? 1 : 0;   // the media is stored portrait or landscape; rotate it into the wanted orientation
+                int rot = rotation;
+                RetryWhenBusy<bool>(delegate { sheet.PlotRotation = rot; return true; });
+                after = SheetSize((object)doc, layout);
+                if (Math.Abs(after[0] - wantW) > 1 || Math.Abs(after[1] - wantH) > 1)
+                    throw new ToolException("The layout reads " + after[0].ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + " x " + after[1].ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + " mm after the page setup instead of " + wantW.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + " x " + wantH.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + ". Check the layout's Page Setup in AutoCAD.");
+            }
+            finally { try { doc.EndUndoMark(); } catch (Exception) { } }
+            DryRunGuard.Used(key);
+            state["applied"] = true; state["media"] = media; state["plot_rotation"] = rotation; state["plot_device"] = device;
+            state["sheet_size_mm"] = new object[] { Math.Round(after[0], 1), Math.Round(after[1], 1) };
+            state["note"] = "The layout's page setup was changed. Page setup changes may not be undone by one U; nothing was saved.";
+            return state;
+        }
+
         // Each layout's sheet size, plot rotation, paper-space object count and existing viewports, for drawing_info.
         internal static List<object> LayoutDetails(object docSource)
         {
@@ -1127,11 +1219,15 @@ namespace SmartConnector
                 string name = Convert.ToString(doc.Layouts.Item(i).Name);
                 if (name == "Model") continue;
                 Dictionary<string, object> d = Json.Object("name", name);
-                try { double[] size = SheetSize(docSource, name); d["sheet_size_mm"] = new object[] { Math.Round(size[0], 1), Math.Round(size[1], 1) }; }
-                catch (Exception e) { d["sheet_size_mm"] = null; d["sheet_size_note"] = e.Message; }
+                try { double[] size = SheetSize(docSource, name); d["sheet_size_mm"] = new object[] { Math.Round(size[0], 1), Math.Round(size[1], 1) }; d["ready"] = true; }
+                catch (Exception e)
+                {
+                    d["sheet_size_mm"] = null; d["sheet_size_note"] = e.Message; d["ready"] = false;
+                    d["setup_needed"] = "This layout has no usable paper size. Ask the user which paper size (A0 to A4) and orientation the sheet should be, then run prepare_layout (dry run first, then their yes).";
+                }
                 try { d["plot_rotation"] = Convert.ToInt32(doc.Layouts.Item(name).PlotRotation); } catch (Exception) { }
                 try { d["paper_space_objects"] = Convert.ToInt32(doc.Layouts.Item(name).Block.Count); } catch (Exception) { }
-                try { d["viewports"] = ReadViewports(docSource, name); } catch (Exception) { }
+                try { d["existing_viewports"] = ReadViewports(docSource, name); } catch (Exception) { }
                 details.Add(d);
             }
             return details;
@@ -1201,6 +1297,11 @@ namespace SmartConnector
                             + ", y " + foot[1].ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + " to " + foot[3].ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)
                             + " mm on the sheet, but layout '" + sheetName + "' is " + (half[0] * 2).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + " x " + (half[1] * 2).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)
                             + " mm (Page Setup). Part of the view falls outside the paper: set the layout's paper size or move the view.");
+                }
+                catch (ToolException e)
+                {
+                    generated["layout_needs_setup"] = true;
+                    built.Warnings.Add("Layout '" + sheetName + "' has no usable paper size (" + e.Message + ") so the sheet size and the fit of this view could not be checked. Ask the user which paper size (A0 to A4) and orientation the sheet should be, then run prepare_layout on it (dry run first, then their yes).");
                 }
                 catch (Exception) { }
             }
@@ -1596,6 +1697,7 @@ namespace SmartConnector
 
             if (name == "apply_plan") return ApplyPlan((object)doc, a);
             if ((bool)doc.ReadOnly) throw new ToolException("Drawing is read-only.");
+            if (name == "prepare_layout") return PrepareLayout((object)doc, a);
             if (name == "save_drawing")
             {
                 if (String.IsNullOrEmpty(Convert.ToString(doc.Path))) throw new ToolException("Save this drawing to a file in AutoCAD first.");
