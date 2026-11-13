@@ -14,3 +14,10 @@ Each view reports `paper_footprint` in the summary: [x0, y0, x1, y1] in paper mi
 - **Per job, not cumulative:** each dry run is checked against the drawing as it stands, so `layer_to_create` is true for the viewport layer on all three dry runs of a three-view sheet even though only the first real run creates it (later runs report `layer_created` false).
 - **Two plans:** `plan_result` is the model-space geometry and `paper_plan_result` the annotation in the layout. Each carries `layout` and `space` (model space or paper space of layout X).
 - **`hatch_loop_array_form`:** informational. It names the form in which AutoCAD accepted the hatch boundary arrays (`dispatch-array` is the normal one). Nothing to act on.
+
+## Preparing the layout (`prepare_layout`)
+
+A freshly opened drawing can have a layout with no paper size (read as 0 x 0, no media, rotation 0). `drawing_info` then returns `ready` false, `sheet_size_mm` null and a `setup_needed` message, with the other layout fields still present, and `generate_detail` warns and sets `layout_needs_setup`. Ask the user for the paper (A0 to A4) and orientation, then:
+1. `prepare_layout` with `dry_run` true (the default): reports the current size and what would be set. Show it and wait for the user's yes.
+2. The same call with `dry_run` false: makes the layout current, sets the plot device (`DWG To PDF.pc3` unless `plot_device` says otherwise), refreshes its media list, picks the ISO canonical medium of that size that is not full bleed (`ISO_A1_(594.00_x_841.00_MM)` for A1, stored portrait), sets paper units to millimetres, and rotates it for landscape (`PlotRotation` 1) or leaves it for portrait. It reads the size back and fails if it is not the size asked for; A1 landscape reads [841, 594].
+It changes the layout's page setup, not the geometry; one `UNDO` may not revert it, and nothing is saved. A layout that is already correct is reported as `already_correct` and not touched. If the plot device has no such medium, nothing is changed and the message says so.

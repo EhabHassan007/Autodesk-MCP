@@ -65,7 +65,7 @@ try {
     $expected = @(Get-AutodeskMcpTools)
     $allTools = @((Invoke-Mcp 'tools/list').result.tools)
     # Tools that only SmartConnector.exe has; the PowerShell fallback bridge does not. Every other tool must match exactly.
-    $exeOnlyTools = @('apply_plan', 'execute_autocad', 'generate_detail', 'verify_standards')
+    $exeOnlyTools = @('apply_plan', 'execute_autocad', 'generate_detail', 'prepare_layout', 'verify_standards')
     # Tools the exe has improved on purpose (summary and fields for the readers, a product filter for the workflow list); the fallback bridge keeps the old form. Only their names and order must match.
     $exeChangedTools = @('list_entities', 'get_entity', 'list_skill_workflows')
     Assert (@($allTools | Where-Object { $exeOnlyTools -contains $_.name }).Count -eq $exeOnlyTools.Count) ('An exe-only tool is missing from the tool list: ' + (($allTools | ForEach-Object name) -join ','))
@@ -150,6 +150,8 @@ try {
         @('list_entities', @{ summary = 'yes' }, 'Invalid boolean: summary'),
         @('verify_standards', @{}, 'Missing argument: expected_drawing'),
         @('generate_detail', @{}, 'Missing argument: template'),
+        @('prepare_layout', @{ layout = 'Layout1'; paper = 'A1'; orientation = 'landscape' }, 'Missing argument: expected_drawing'),
+        @('prepare_layout', @{ expected_drawing = 'x'; layout = 'Layout1'; paper = 'A9'; orientation = 'landscape' }, 'Invalid choice: paper'),
         @('generate_detail', @{ template = 'kitchen' }, 'Invalid choice: template'),
         @('generate_detail', @{ template = 'reception_counter_section'; params = @{ height = 100 } }, 'params.height must be between 300 and 1500 mm.'),
         @('generate_detail', @{ template = 'reception_counter_section'; params = @{ section = 'accessible' } }, 'The accessible section needs*'),
