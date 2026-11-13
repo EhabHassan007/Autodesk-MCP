@@ -22,7 +22,7 @@ The live application still runs on the computer where AutoCAD is installed. GitH
 
 The repository includes a Revit 2024 add-in, a named-pipe MCP bridge, an installer path, and Revit-specific skills. Its narrow tools read document information, levels, selected elements, and element parameters and can set one writable parameter in a Revit transaction. The guarded `execute_csharp` tool adds full Revit API access for workflows that are not covered by a narrow tool. It supports read-only execution, one automatic project transaction, or an explicit manual mode for family-document and advanced transaction workflows. Every call is tied to the expected active document, and model changes require an explicit write flag.
 
-Revit gets a dedicated **Autodesk MCP Connector** ribbon tab. Open its **Connection** panel and click **Connection Status** to see whether the server is running, whether a client connected recently, the active document, request count, last operation, and last error. The connector does not save or synchronize unless a manual API call explicitly requests that operation.
+Revit gets a dedicated **Smart Connector** ribbon tab. Click **Status** on its **Connector** panel to see whether the server is running, whether a client connected recently, the active document, request count, last operation, and last error. The connector does not save or synchronize unless a manual API call explicitly requests that operation.
 
 The same panel includes **Check Updates**. It opens the setup app directly on the approved update check. The check never changes the model or installs files automatically; select **Update** in the setup app when an approved version is available, then restart Revit so the new add-in DLL loads.
 
@@ -109,7 +109,7 @@ For the Revit bridge protocol, multi-session routing, and tool schema:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\src\revit\work\test-bridge.ps1"
 ```
 
-After restarting Revit, open the **Autodesk MCP Connector** ribbon tab and click **Connection Status**. In Codex or Claude, call `list_sessions`, then use `document_info` for the intended session. Verify a write with a separate read.
+After restarting Revit, open the **Smart Connector** ribbon tab and click **Status**. In Codex or Claude, call `list_sessions`, then use `document_info` for the intended session. Verify a write with a separate read.
 
 ## Current limitations
 
