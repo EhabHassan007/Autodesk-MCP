@@ -5,9 +5,9 @@
       <Macro type="Any">
         <Revision MajorVersion="16" MinorVersion="2" UserVersion="0" />
         <ModifiedRev MajorVersion="19" MinorVersion="1" UserVersion="0" />
-        <Name xlate="true" UID="XLS_SAC_OPEN_NAME">Open Connector</Name>
+        <Name xlate="true" UID="XLS_SAC_OPEN_NAME">Connect</Name>
         <Command>^C^C_SACOPEN</Command>
-        <HelpString xlate="true" UID="XLS_SAC_OPEN_HELP">Open the Smart Connector app: status of Revit, AutoCAD, Claude and Codex, skills, updates and settings.</HelpString>
+        <HelpString xlate="true" UID="XLS_SAC_OPEN_HELP">Open Smart Connector: connect AutoCAD, Revit, Claude and Codex, see what is ready, and reach skills, updates and settings.</HelpString>
         <SmallImage Name="sac-open-connector-16.png" />
         <LargeImage Name="sac-open-connector-32.png" />
         <CLICommand xlate="true" UID="XLS_SAC_OPEN_CLI">SACOPEN</CLICommand>
@@ -53,9 +53,9 @@
       <Macro type="Any">
         <Revision MajorVersion="16" MinorVersion="2" UserVersion="0" />
         <ModifiedRev MajorVersion="19" MinorVersion="1" UserVersion="0" />
-        <Name xlate="true" UID="XLS_SAC_STATUS_NAME">Connection Status</Name>
+        <Name xlate="true" UID="XLS_SAC_STATUS_NAME">Status</Name>
         <Command>^C^C_SACSTATUS</Command>
-        <HelpString xlate="true" UID="XLS_SAC_STATUS_HELP">See whether AutoCAD, Codex, Claude and the connector agent are connected.</HelpString>
+        <HelpString xlate="true" UID="XLS_SAC_STATUS_HELP">See whether AutoCAD, Codex and Claude are connected.</HelpString>
         <SmallImage Name="sac-connection-status-16.png" />
         <LargeImage Name="sac-connection-status-32.png" />
         <CLICommand xlate="true" UID="XLS_SAC_STATUS_CLI">SACSTATUS</CLICommand>

@@ -26,7 +26,7 @@ If setup cannot find its payload, extract `Autodesk-MCP-Connector-<version>.zip`
 
 1. Open Revit 2024 with a test project.
 2. Open the **Smart Connector** ribbon tab and select **Status**.
-3. Select **Check Updates** in the Revit ribbon and confirm the setup app opens directly with the approved update status. Do not install an update during a model operation.
+3. Select **More → Check updates** in the Revit ribbon and confirm the setup app opens directly with the approved update status. Do not install an update during a model operation.
 4. In the setup app, select **Test connection**.
 5. If testing AutoCAD, open a blank drawing before selecting **Test connection**.
 6. Confirm Codex and Claude Code expose `autodesk`; Claude Desktop exposes **Autodesk MCP Connector**.

@@ -498,7 +498,7 @@ namespace BimCadMcp.Revit
         }
 
         // A flat line icon from the icon family: no tile, one stroke colour (the accent blue for the main action, a slate
-        // for the rest). Both are mid-tones so they read on Revit's light and dark themes. An invisible square fixes the
+        // for the rest). Both are mid-tones with about 3:1 contrast on Revit's light and dark themes. An invisible square fixes the
         // image size (32 for large buttons, 16 for menu items), because Revit shows an image at its own size.
         internal static Media.ImageSource Line(string name, bool small, bool accent)
         {
@@ -508,7 +508,7 @@ namespace BimCadMcp.Revit
                 double scale = small ? 16.0 / 24.0 : 32.0 / 24.0;
                 context.PushTransform(new Media.ScaleTransform(scale, scale));
                 context.DrawRectangle(Media.Brushes.Transparent, null, new System.Windows.Rect(0, 0, 24, 24));
-                Media.Color color = accent ? Media.Color.FromRgb(47, 128, 237) : Media.Color.FromRgb(102, 120, 138);
+                Media.Color color = accent ? Media.Color.FromRgb(74, 144, 240) : Media.Color.FromRgb(125, 141, 160);
                 Media.Pen pen = new Media.Pen(new Media.SolidColorBrush(color), small ? 2.0 : 1.6);
                 pen.StartLineCap = Media.PenLineCap.Round; pen.EndLineCap = Media.PenLineCap.Round; pen.LineJoin = Media.PenLineJoin.Round;
                 context.DrawGeometry(null, pen, Media.Geometry.Parse(Paths[name]));
@@ -650,7 +650,7 @@ namespace BimCadMcp.Revit
             using (Media.DrawingContext context = group.Open())
             {
                 context.DrawRectangle(Media.Brushes.Transparent, null, new System.Windows.Rect(0, 0, 32, 32));
-                Media.SolidColorBrush brush = new Media.SolidColorBrush(Media.Color.FromRgb(102, 120, 138));
+                Media.SolidColorBrush brush = new Media.SolidColorBrush(Media.Color.FromRgb(125, 141, 160));
                 foreach (double x in new double[] { 8, 16, 24 }) context.DrawEllipse(brush, null, new System.Windows.Point(x, 16), 2.2, 2.2);
             }
             group.Freeze();

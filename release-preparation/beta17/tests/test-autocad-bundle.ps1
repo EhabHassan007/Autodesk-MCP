@@ -37,7 +37,12 @@ try{
  $macros=@{}; foreach($m in $menu.SelectNodes('//MenuMacro')){ $macros[$m.UID]=$m }
  Assert ($macros.Count -eq 7) "Expected 7 menu macros, found $($macros.Count)"
  $buttons=@($ribbon.SelectNodes('//RibbonCommandButton'))
- Assert ($buttons.Count -eq 7) "Expected 7 ribbon buttons, found $($buttons.Count)"
+ Assert ($buttons.Count -eq 5) "Expected 5 ribbon buttons, found $($buttons.Count)"
+ # AI Markup first (the tools used while drawing), then Connect, Status and Skills Sync. Check Updates and Settings keep their macros and commands.
+ $panelText=@{}; foreach($p in $ribbon.SelectNodes('//RibbonPanelSource')){ $panelText[$p.UID]=($p.SelectNodes('.//RibbonCommandButton')|ForEach-Object{$_.Text}) -join ',' }
+ $order=@($ribbon.SelectNodes('//RibbonPanelSourceReference')|ForEach-Object{$_.PanelId})
+ Assert (($order -join ',') -eq 'RBN_SAC_MARKUP_PANEL,RBN_SAC_PANEL') "Panels are not AI Markup then Smart Connector: $($order -join ',')"
+ Assert ($panelText['RBN_SAC_MARKUP_PANEL'] -eq 'AI Markup,Clear Markup' -and $panelText['RBN_SAC_PANEL'] -eq 'Connect,Status,Skills Sync') "Panel buttons differ: $($panelText['RBN_SAC_MARKUP_PANEL']) | $($panelText['RBN_SAC_PANEL'])"
  foreach($b in $buttons){
   Assert ($macros.ContainsKey($b.MenuMacroID)) "Ribbon button $($b.UID) references missing macro $($b.MenuMacroID)"
   Assert ($b.ButtonStyle -eq 'LargeWithText') "Ribbon button $($b.UID) is not a large button"
