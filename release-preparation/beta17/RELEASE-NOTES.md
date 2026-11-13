@@ -9,6 +9,15 @@ New in 1.2.0 (AutoCAD Detail Generator and connector safety; everything from 1.1
 - Viewports: the first viewport on a fresh layout is made even when the layout's block is not yet paper space, the zoom is tried twice before the Target fallback, and the result says which method was used.
 - Docs: the detail-generator skill and references describe the sheet layout rules (no doubled overall dimensions, one note per part), the viewport layer (`AO-MV` with the office scheme) and the live-check results.
 
+Revit execute_csharp (from a field report on building custom column families):
+- Errors come first: a compile or runtime error from the Revit add-in is returned as it is. "Revit 2024 MCP session is not available" now appears only when the connector cannot reach Revit.
+- Runtime errors name the script line (`mcp_code.cs line N`), the Revit API method that failed, the exception type, and any Revit failure messages posted during the run with their element ids.
+- `manual` mode with `allow_model_changes=false` is now a probe: family documents can be created, edited, saved and closed without granting model changes. Every project change in a probe is rolled back and reported as an error.
+- The tool description lists the predefined variables (`document`, `application`, `parametersJson`) and the modes.
+- Skills: the C# runner skill records the variables, modes and the geometry Options rule (DetailLevel and View cannot be set together); the family modelling skill adds the custom column from a plan polygon workflow and the reliable way to load an API-created family (`famDoc.LoadFamily(document)`).
+
+Not verified in a live Revit: the probe mode, the line numbers in runtime errors and the failure-message capture. They compile against the Revit 2024 API in CI; run the "Revit execute_csharp regression" in TESTING.md before release.
+
 Not verified on a real AutoCAD: `prepare_layout` and the overlap warning with an existing viewport. Everything else above ran live on AutoCAD 2024 (24.3) with the S-shaped reception counter: plan 1:20, sections A-A and B-B 1:10 on one A1 sheet.
 
 1.1.0:

@@ -214,7 +214,7 @@ try {
     # 6. Revit add-in pipe: a stand-in add-in answers on the pipe name a single Revit 2024 session uses.
     $job = Start-Job -ScriptBlock {
         $server = New-Object IO.Pipes.NamedPipeServerStream('BimCadMcp.Revit.2024', [IO.Pipes.PipeDirection]::InOut, 1)
-        for ($n = 0; $n -lt 3; $n++) {
+        for ($n = 0; $n -lt 4; $n++) {
             $server.WaitForConnection()
             $reader = New-Object IO.StreamReader($server, [Text.Encoding]::UTF8, $false, 4096, $true)
             $writer = New-Object IO.StreamWriter($server, (New-Object Text.UTF8Encoding($false)), 4096, $true); $writer.AutoFlush = $true
@@ -224,7 +224,10 @@ try {
             switch ($fields[0]) {
                 'document_info' { $writer.WriteLine('OK' + "`t" + (& $encode '{"document_id":"doc-1","title":"Test \u00e9.rvt"}')) }
                 'get_element' { $writer.WriteLine('ERR' + "`t" + (& $encode ('Element ' + $decoded[0] + ' was not found.'))) }
-                'execute_csharp' { $writer.WriteLine('OK' + "`t" + (& $encode ((@{ fields = $decoded } | ConvertTo-Json -Compress)))) }
+                'execute_csharp' {
+                    if ($decoded[3] -like '*doc.Title*') { $writer.WriteLine('ERR' + "`t" + (& $encode "C# compilation failed:`nLine 1: The name 'doc' does not exist in the current context")) }
+                    else { $writer.WriteLine('OK' + "`t" + (& $encode ((@{ fields = $decoded } | ConvertTo-Json -Compress)))) }
+                }
             }
             $reader.Dispose(); $writer.Dispose(); $server.Disconnect()
         }
@@ -236,11 +239,14 @@ try {
     $doc = Invoke-Tool 'document_info'
     Assert (-not $doc.isError -and ($doc.content[0].text | ConvertFrom-Json).title -eq ('Test ' + [char]0xE9 + '.rvt')) ("document_info over the pipe failed: " + $doc.content[0].text)
     $missing = Invoke-Tool 'get_element' @{ element_id = '42' }
-    Assert ($missing.isError -and $missing.content[0].text -like '*Element 42 was not found.') ("Add-in errors are not passed on: " + $missing.content[0].text)
+    # An add-in error is the real cause and comes back unchanged, never behind "session is not available" (the session is connected).
+    Assert ($missing.isError -and $missing.content[0].text -eq 'Element 42 was not found.') ("Add-in errors are not passed on unchanged: " + $missing.content[0].text)
     $run = Invoke-Tool 'execute_csharp' @{ expected_document = 'doc-1'; execution_mode = 'READ'; allow_model_changes = $false; code = 'return "x";'; parameters_json = '{}'; transaction_name = 'T' }
     $sent = @(($run.content[0].text | ConvertFrom-Json).fields)
     Assert (-not $run.isError -and ($sent -join '|') -eq 'doc-1|READ|False|return "x";|{}|T') ("execute_csharp sent the wrong fields: " + ($sent -join '|'))
-    'PASS: Revit add-in pipe: answers, add-in errors and execute_csharp fields as the bridge sends them'
+    $compile = Invoke-Tool 'execute_csharp' @{ expected_document = 'doc-1'; execution_mode = 'read'; allow_model_changes = $false; code = 'return doc.Title;'; parameters_json = '{}'; transaction_name = 'T' }
+    Assert ($compile.isError -and $compile.content[0].text -like 'C# compilation failed:*' -and $compile.content[0].text -notlike '*session is not available*') ("A compile error must come first, not as a disconnect: " + $compile.content[0].text)
+    'PASS: Revit add-in pipe: answers, add-in errors passed on unchanged and execute_csharp fields as the bridge sends them'
 }
 finally {
     $env:LOCALAPPDATA = $saved

@@ -17,6 +17,14 @@ Inspect existing families, types, hosts, levels, geometry, and project standards
 5. Load or reload through the supported API or Revit UI. Existing-family replacement may require the UI and a worksharing ownership prompt.
 6. Verify loaded family name, type count, geometry or label positions, and parameter values.
 
+## Loading a family created by the API
+
+Load a family you created or edited through the API from its open family document: `Family family = famDoc.LoadFamily(document);` (or the overload with `IFamilyLoadOptions` when a family of that name is already loaded), then `famDoc.Close(false)`. `document.LoadFamily(path, out family)` has been seen to return false with no exception and no family for a freshly saved temporary .rfa. Revit gives no reason. Likely causes (not confirmed): a family with the same name is already in the project, or the .rfa is still open as a document in the same session. If you must load from a path, check both first (`FilteredElementCollector(document).OfClass(typeof(Family))` by name; `application.Application.Documents` by `PathName`) and report which applies.
+
+Loading changes the project, so the load step needs `execute_csharp` with `manual` and `allow_model_changes=true`. The family-document steps before it can run as a probe (`manual`, `allow_model_changes=false`).
+
+For a custom-shaped structural column built from a plan polygon, follow [references/custom-column-from-polygon.md](references/custom-column-from-polygon.md).
+
 ## Curved and sloped architectural elements
 
 - Preserve true curves when the user requires native curved walls. Do not approximate them with many straight segments without approval.

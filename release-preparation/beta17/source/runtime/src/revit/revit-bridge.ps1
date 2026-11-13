@@ -23,7 +23,7 @@ $toolList = @(
     (New-Tool 'list_selected' 'Read the elements currently selected in Revit.' @{session_id=$session} @() $true),
     (New-Tool 'get_element' 'Read an element and up to 200 parameters by integer element id.' @{session_id=$session;element_id=$str} @('element_id') $true),
     (New-Tool 'set_parameter' 'Set one writable element parameter in a Revit transaction. Numeric values use Revit internal units. Does not save or synchronize.' @{session_id=$session;expected_document=$str;element_id=$str;parameter=$str;value=@{type='string'}} @('expected_document','element_id','parameter','value') $false),
-    (New-Tool 'execute_csharp' 'Execute controlled Revit 2024 C# against the active document. Use read for inspection, transaction for writes inside one automatic transaction, and manual only for workflows that must manage their own transactions or family documents. Read document_info first. Code must return a string. Model changes require allow_model_changes=true. Does not save or synchronize unless the supplied manual code explicitly does so.' @{session_id=$session;expected_document=$str;execution_mode=@{type='string';enum=@('read','transaction','manual')};allow_model_changes=$bool;code=@{type='string';minLength=1;maxLength=100000};parameters_json=$plainString;transaction_name=$str} @('expected_document','execution_mode','allow_model_changes','code','parameters_json','transaction_name') $false)
+    (New-Tool 'execute_csharp' 'Execute controlled Revit 2024 C# against the active document. The code is the body of a method with three predefined variables: document (the active project Document; there is no doc), application (UIApplication; use application.Application for NewFamilyDocument) and parametersJson (string). It must return a string. Modes: read (inspection; allow_model_changes=false), transaction (writes inside one automatic project transaction; allow_model_changes=true), manual (code manages its own transactions or family documents). manual with allow_model_changes=false is a probe: family documents may be created, saved to a temporary path and closed, but any project change is rolled back and reported as an error; loading a family into the project needs allow_model_changes=true. Read document_info first. Read back every write with a separate call. Runtime errors name the script line (mcp_code.cs), the exception type and any Revit failure messages. Does not save or synchronize unless the supplied manual code explicitly does so.' @{session_id=$session;expected_document=$str;execution_mode=@{type='string';enum=@('read','transaction','manual')};allow_model_changes=$bool;code=@{type='string';minLength=1;maxLength=100000};parameters_json=$plainString;transaction_name=$str} @('expected_document','execution_mode','allow_model_changes','code','parameters_json','transaction_name') $false)
 )
 
 function Assert-Args($name,$arguments) {
@@ -69,7 +69,12 @@ function Invoke-RevitPipeName([string]$pipeName, [string]$operation, [string[]]$
         $parts = $line -split "`t", 2
         if ($parts.Count -ne 2) { throw 'Revit add-in returned an invalid response.' }
         $payload = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($parts[1]))
-        if ($parts[0] -eq 'ERR') { throw $payload }
+        if ($parts[0] -eq 'ERR') {
+            # The add-in answered with its own error: marked so Invoke-RevitPipe passes it on as the real cause.
+            $addinError = New-Object InvalidOperationException $payload
+            $addinError.Data['RevitAddinError'] = $true
+            throw $addinError
+        }
         if ($parts[0] -ne 'OK') { throw 'Revit add-in returned an unknown response.' }
         $payload | ConvertFrom-Json
     }
@@ -157,7 +162,11 @@ function Resolve-RevitPipe([string]$sessionId) {
 function Invoke-RevitPipe([string]$operation, [string[]]$arguments, [string]$sessionId) {
     $pipeName = Resolve-RevitPipe $sessionId
     try { Invoke-RevitPipeName $pipeName $operation $arguments }
-    catch { throw "Revit $RevitVersion MCP session is not available. Start Revit or call list_sessions. $($_.Exception.Message)" }
+    catch {
+        # An add-in error (compile or runtime error, refused argument) is the real cause; only an unreachable pipe is a disconnect.
+        if ($_.Exception.Data['RevitAddinError']) { throw $_.Exception.Message }
+        throw "Revit $RevitVersion MCP session is not available. Start Revit or call list_sessions. $($_.Exception.Message)"
+    }
 }
 
 # Read-only Revit part of the combined connection_status. Never throws; reports why Revit is unavailable.

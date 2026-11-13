@@ -10,6 +10,7 @@ using System.Text;
 using Microsoft.CSharp;
 using Autodesk.Revit.Attributes;
 using Autodesk.Revit.DB;
+using Autodesk.Revit.DB.Events;
 using Autodesk.Revit.UI;
 using System.Windows;
 using System.Windows.Media;
@@ -243,8 +244,11 @@ namespace BimCadMcp.Revit
             bool allowChanges;
             if (!Boolean.TryParse(allowModelChanges, out allowChanges))
                 throw new InvalidOperationException("allow_model_changes must be true or false.");
-            if ((mode == "transaction" || mode == "manual") && !allowChanges)
-                throw new InvalidOperationException("Model-changing execution requires allow_model_changes=true.");
+            if (mode == "transaction" && !allowChanges)
+                throw new InvalidOperationException("Model-changing execution requires allow_model_changes=true. To work only in family documents, use manual with allow_model_changes=false.");
+            // manual with allow_model_changes=false is a probe: the code may create, edit, save and close family documents,
+            // but every change to the project document is rolled back and reported (see RunProbe).
+            bool probe = mode == "manual" && !allowChanges;
             if (mode == "read" && allowChanges)
                 throw new InvalidOperationException("Read execution requires allow_model_changes=false.");
             if (String.IsNullOrWhiteSpace(transactionName)) transactionName = "Execute controlled C#";
@@ -267,9 +271,9 @@ namespace BimCadMcp.Revit
             CompilerParameters compilerParameters = new CompilerParameters();
             compilerParameters.GenerateExecutable = false;
             compilerParameters.GenerateInMemory = true;
-            compilerParameters.IncludeDebugInformation = false;
+            // Debug information lets a runtime error name the script line (the #line directive maps it to mcp_code.cs).
+            compilerParameters.IncludeDebugInformation = true;
             compilerParameters.TreatWarningsAsErrors = false;
-            compilerParameters.CompilerOptions = "/optimize";
 
             HashSet<string> references = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             AddReference(references, compilerParameters, typeof(Object).Assembly.Location);
@@ -292,6 +296,7 @@ namespace BimCadMcp.Revit
                     if (error.IsWarning) continue;
                     errors.Append("\nLine ").Append(error.Line.ToString(CultureInfo.InvariantCulture)).Append(": ").Append(error.ErrorText);
                 }
+                errors.Append("\nPredefined variables: document (Document), application (UIApplication), parametersJson (string). The code must return a string.");
                 throw new InvalidOperationException(errors.ToString());
             }
 
@@ -300,28 +305,35 @@ namespace BimCadMcp.Revit
             if (run == null) throw new InvalidOperationException("Compiled C# entry point was not found.");
 
             string resultText;
-            if (mode == "transaction")
+            using (RevitFailureLog failures = new RevitFailureLog(application.Application))
             {
-                using (Transaction transaction = new Transaction(document, "Smart Connector: " + transactionName))
+                if (mode == "transaction")
                 {
-                    transaction.Start();
-                    try
+                    using (Transaction transaction = new Transaction(document, "Smart Connector: " + transactionName))
                     {
-                        resultText = Invoke(run, application, document, parametersJson);
-                        TransactionStatus status = transaction.Commit();
-                        if (status != TransactionStatus.Committed)
-                            throw new InvalidOperationException("Revit did not commit the transaction. Status: " + status.ToString());
-                    }
-                    catch
-                    {
-                        if (transaction.GetStatus() == TransactionStatus.Started) transaction.RollBack();
-                        throw;
+                        transaction.Start();
+                        try
+                        {
+                            resultText = Invoke(run, application, document, parametersJson, failures);
+                            TransactionStatus status = transaction.Commit();
+                            if (status != TransactionStatus.Committed)
+                                throw new InvalidOperationException("Revit did not commit the transaction. Status: " + status.ToString() + failures.Describe());
+                        }
+                        catch
+                        {
+                            if (transaction.GetStatus() == TransactionStatus.Started) transaction.RollBack();
+                            throw;
+                        }
                     }
                 }
-            }
-            else
-            {
-                resultText = Invoke(run, application, document, parametersJson);
+                else if (probe)
+                {
+                    resultText = RunProbe(run, application, document, parametersJson, transactionName, failures);
+                }
+                else
+                {
+                    resultText = Invoke(run, application, document, parametersJson, failures);
+                }
             }
 
             return "{" +
@@ -331,7 +343,40 @@ namespace BimCadMcp.Revit
                 "}";
         }
 
-        private static string Invoke(MethodInfo run, UIApplication application, Document document, string parametersJson)
+        // manual with allow_model_changes=false. The code runs inside a project transaction group that is always rolled back,
+        // so nothing it commits to the project survives. Family documents it opens are separate documents and are not affected.
+        // A project change is reported as an error, because the caller declared a run without model changes.
+        private static string RunProbe(MethodInfo run, UIApplication application, Document document, string parametersJson, string transactionName, RevitFailureLog failures)
+        {
+            List<string> projectTransactions = new List<string>();
+            EventHandler<DocumentChangedEventArgs> watch = (sender, args) =>
+            {
+                Document changed = args.GetDocument();
+                if (changed != null && changed.Equals(document)) projectTransactions.AddRange(args.GetTransactionNames());
+            };
+            string resultText;
+            using (TransactionGroup group = new TransactionGroup(document, "Smart Connector probe: " + transactionName))
+            {
+                group.Start();
+                application.Application.DocumentChanged += watch;
+                try
+                {
+                    resultText = Invoke(run, application, document, parametersJson, failures);
+                }
+                finally
+                {
+                    application.Application.DocumentChanged -= watch;
+                    if (group.GetStatus() == TransactionStatus.Started) group.RollBack();
+                }
+            }
+            if (projectTransactions.Count > 0)
+                throw new InvalidOperationException("The code changed the project document (" +
+                    String.Join(", ", projectTransactions.Distinct().ToArray()) + ") while allow_model_changes=false. All project changes were rolled back. " +
+                    "Family documents the code saved or closed are not affected. Rerun with allow_model_changes=true if the project change is intended (for example loading a family).");
+            return resultText;
+        }
+
+        private static string Invoke(MethodInfo run, UIApplication application, Document document, string parametersJson, RevitFailureLog failures)
         {
             try
             {
@@ -341,14 +386,80 @@ namespace BimCadMcp.Revit
             catch (TargetInvocationException exception)
             {
                 Exception inner = exception.InnerException ?? exception;
-                throw new InvalidOperationException("C# execution failed: " + inner.Message, inner);
+                throw new InvalidOperationException(DescribeRuntimeError(inner) + failures.Describe(), inner);
             }
+        }
+
+        // "C# execution failed at mcp_code.cs line 12, in FamilyManager.AssociateElementParameterToFamilyParameter
+        // (Autodesk.Revit.Exceptions.InvalidOperationException): Document regeneration failed."
+        internal static string DescribeRuntimeError(Exception error)
+        {
+            StringBuilder text = new StringBuilder("C# execution failed");
+            try
+            {
+                StackFrame[] frames = new StackTrace(error, true).GetFrames() ?? new StackFrame[0];
+                for (int i = 0; i < frames.Length; i++)
+                {
+                    string file = frames[i].GetFileName();
+                    if (file == null || !file.EndsWith("mcp_code.cs", StringComparison.OrdinalIgnoreCase) || frames[i].GetFileLineNumber() <= 0) continue;
+                    text.Append(" at mcp_code.cs line ").Append(frames[i].GetFileLineNumber().ToString(CultureInfo.InvariantCulture));
+                    MethodBase called = i > 0 ? frames[i - 1].GetMethod() : null;
+                    if (called != null && called.DeclaringType != null)
+                        text.Append(", in ").Append(called.DeclaringType.Name).Append('.').Append(called.Name);
+                    break;
+                }
+            }
+            catch (Exception) { }
+            text.Append(" (").Append(error.GetType().FullName).Append("): ").Append(error.Message);
+            return text.ToString();
         }
 
         private static void AddReference(HashSet<string> known, CompilerParameters parameters, string path)
         {
             if (String.IsNullOrWhiteSpace(path) || !File.Exists(path) || !known.Add(path)) return;
             parameters.ReferencedAssemblies.Add(path);
+        }
+    }
+
+    // Collects the Revit failure messages (warnings and errors) posted in any document while a script runs, so an error such as
+    // "Document regeneration failed" comes back with what Revit reported and the element ids involved. Observes only.
+    internal sealed class RevitFailureLog : IDisposable
+    {
+        private const int Limit = 20;
+        private readonly Autodesk.Revit.ApplicationServices.Application _application;
+        private readonly List<string> _messages = new List<string>();
+
+        internal RevitFailureLog(Autodesk.Revit.ApplicationServices.Application application)
+        {
+            _application = application;
+            _application.FailuresProcessing += OnFailuresProcessing;
+        }
+
+        private void OnFailuresProcessing(object sender, FailuresProcessingEventArgs args)
+        {
+            try
+            {
+                FailuresAccessor accessor = args.GetFailuresAccessor();
+                Document failing = accessor.GetDocument();
+                foreach (FailureMessageAccessor message in accessor.GetFailureMessages())
+                {
+                    if (_messages.Count >= Limit) return;
+                    string ids = String.Join(", ", message.GetFailingElementIds().Select(id => id.Value.ToString(CultureInfo.InvariantCulture)).ToArray());
+                    _messages.Add(message.GetSeverity().ToString() + " in " + (failing == null ? "?" : failing.Title) + ": " +
+                        message.GetDescriptionText() + (ids.Length > 0 ? " (elements " + ids + ")" : ""));
+                }
+            }
+            catch (Exception) { }
+        }
+
+        internal string Describe()
+        {
+            return _messages.Count == 0 ? String.Empty : "\nRevit failure messages during the run:\n- " + String.Join("\n- ", _messages.ToArray());
+        }
+
+        public void Dispose()
+        {
+            _application.FailuresProcessing -= OnFailuresProcessing;
         }
     }
 }
