@@ -17,7 +17,9 @@ permissions:
 
 jobs:
   tests:
-    runs-on: windows-latest
+    # GitHub's Windows machine by default. Set the repository variable WINDOWS_RUNNER (Settings > Secrets and variables >
+    # Actions > Variables) to the label of a self-hosted runner, such as smart-connector, to run on your own PC for free.
+    runs-on: ${{ vars.WINDOWS_RUNNER || 'windows-latest' }}
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
