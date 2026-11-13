@@ -6,6 +6,8 @@ on:
   # Run it by hand on any branch with workflow_dispatch.
   pull_request:
     branches: [main]
+    # Draft pull requests use no minutes: the jobs run when the PR is opened ready or marked Ready for review.
+    types: [opened, synchronize, reopened, ready_for_review]
 
 # A newer push to the same branch or pull request cancels the older run, so superseded commits use no minutes.
 concurrency:
@@ -20,6 +22,7 @@ jobs:
     # GitHub's Windows machine by default. Set the repository variable WINDOWS_RUNNER (Settings > Secrets and variables >
     # Actions > Variables) to the label of a self-hosted runner, such as smart-connector, to run on your own PC for free.
     runs-on: ${{ vars.WINDOWS_RUNNER || 'windows-latest' }}
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     timeout-minutes: 15   # a hung job stops here instead of using minutes until the 6-hour limit
     steps:
       - uses: actions/checkout@v4
