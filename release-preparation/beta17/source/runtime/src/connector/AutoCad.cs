@@ -40,7 +40,7 @@ namespace SmartConnector
                 Func<Dictionary<string, object>> target = () => Json.Object("type", "string", "minLength", 1, "description", "Exact drawing path returned by drawing_info (name for an unsaved drawing).");
                 _tools = new List<Dictionary<string, object>>
                 {
-                    Schema.Tool("drawing_info", "Read active drawing identity, units, layouts, object count and save state. Call before writes.", Json.Object(), new string[0], true),
+                    Schema.Tool("drawing_info", "Read active drawing identity, units, layouts (each with its effective sheet size, plot rotation, paper-space object count and existing viewports), object count and save state. Call before writes.", Json.Object(), new string[0], true),
                     Schema.Tool("list_layers", "Read all layers in the active drawing.", Json.Object(), new string[0], true),
                     Schema.Tool("list_entities", "Read top-level model-space or named-layout objects. summary=true returns only counts by layer and type plus the bounding box (cheapest way to see what a drawing holds or to verify a result). Otherwise objects, 25 per call by default (limit up to 200); fields (such as [\"TextString\",\"Height\"]) limits the properties read; values that are only the inherited default (ByLayer colour, linetype, lineweight) are left out. total_count is everything in the space; with a layer filter, filtered_count is the matches found. Does not expand blocks or xrefs. Offset refers to collection index; one call examines at most 2000 objects, so continue from next_offset when it is set.",
                         Json.Object("layout", str(), "layer", str(), "offset", Json.Object("type", "integer", "minimum", 0), "limit", Json.Object("type", "integer", "minimum", 1, "maximum", 200), "summary", Json.Object("type", "boolean"), "fields", Json.Object("type", "array", "items", Json.Object("type", "string"))), new string[0], true),
@@ -834,7 +834,7 @@ namespace SmartConnector
             if (guarded) DryRunGuard.Used(guardKey);   // a plan is drawn once per dry run
             int after = Convert.ToInt32(space.Count);
             Dictionary<string, object> data = Json.Object("steps", plan.Count, "objects_created", objects, "layers_created", layersCreated, "counts", counts, "handles", handles,
-                "layout", layout.Length == 0 ? "Model" : layout, "object_count_before", before, "object_count_after", after, "count_matches_plan", after - before == objects);
+                "layout", layout.Length == 0 ? "Model" : layout, "space", layout.Length == 0 || layout == "Model" ? "model space" : "paper space of layout " + layout, "object_count_before", before, "object_count_after", after, "count_matches_plan", after - before == objects);
             if (loopForms.Count > 0) data["hatch_loop_array_form"] = loopForms;
             if (warnings.Count > 0) data["warnings"] = warnings;
             return Json.Object("drawing", DrawingId((object)doc), "result", data, "save_performed", false);
@@ -1071,6 +1071,14 @@ namespace SmartConnector
         {
             dynamic doc = docSource;
             if (layout.Length == 0 || layout == "Model" || !Names((object)doc.Layouts).Contains(layout)) throw new ToolException("Layout not found: " + layout);
+            double[] size = SheetSize(docSource, layout);
+            return new[] { Math.Round(size[0] / 2.0, 1), Math.Round(size[1] / 2.0, 1) };
+        }
+
+        // The effective sheet size of a layout in millimetres (width, height), after units and plot rotation.
+        internal static double[] SheetSize(object docSource, string layout)
+        {
+            dynamic doc = docSource;
             dynamic sheet = doc.Layouts.Item(layout);
             double w = 0, h = 0;
             try { sheet.GetPaperSize(out w, out h); }
@@ -1081,7 +1089,52 @@ namespace SmartConnector
             int rotation = Convert.ToInt32(sheet.PlotRotation);
             if (rotation == 1 || rotation == 3) { double t = w; w = h; h = t; }
             if (w < 50 || h < 50) throw new ToolException("Layout '" + layout + "' has no usable paper size (" + w.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + " x " + h.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + " mm). Choose a paper size in Page Setup, or give view.paper_centre.");
-            return new[] { Math.Round(w / 2.0, 1), Math.Round(h / 2.0, 1) };
+            return new[] { w, h };
+        }
+
+        // The viewports a layout already has (not its own paper viewport): handle, centre, size and scale, in paper millimetres.
+        internal static List<Dictionary<string, object>> ReadViewports(object docSource, string layout)
+        {
+            List<Dictionary<string, object>> found = new List<Dictionary<string, object>>();
+            dynamic block = ((dynamic)docSource).Layouts.Item(layout).Block;
+            int count = Convert.ToInt32(block.Count);
+            if (count > 3000) return found;   // a very full layout: not worth the time
+            for (int i = 0; i < count; i++)
+            {
+                try
+                {
+                    dynamic entity = block.Item(i);
+                    if (Convert.ToString(entity.ObjectName) != "AcDbViewport") continue;
+                    double custom = Convert.ToDouble(entity.CustomScale);
+                    if (custom <= 0) continue;
+                    double[] centre = ((double[])entity.Center);
+                    found.Add(Json.Object("handle", Convert.ToString(entity.Handle), "centre", new object[] { Math.Round(centre[0], 1), Math.Round(centre[1], 1) },
+                        "size", new object[] { Math.Round(Convert.ToDouble(entity.Width), 1), Math.Round(Convert.ToDouble(entity.Height), 1) }, "scale", "1:" + Math.Round(1.0 / custom, 2).ToString(System.Globalization.CultureInfo.InvariantCulture)));
+                }
+                catch (Exception) { }
+            }
+            return found;
+        }
+
+        // Each layout's sheet size, plot rotation, paper-space object count and existing viewports, for drawing_info.
+        internal static List<object> LayoutDetails(object docSource)
+        {
+            dynamic doc = docSource;
+            List<object> details = new List<object>();
+            int count = Convert.ToInt32(doc.Layouts.Count);
+            for (int i = 0; i < count; i++)
+            {
+                string name = Convert.ToString(doc.Layouts.Item(i).Name);
+                if (name == "Model") continue;
+                Dictionary<string, object> d = Json.Object("name", name);
+                try { double[] size = SheetSize(docSource, name); d["sheet_size_mm"] = new object[] { Math.Round(size[0], 1), Math.Round(size[1], 1) }; }
+                catch (Exception e) { d["sheet_size_mm"] = null; d["sheet_size_note"] = e.Message; }
+                try { d["plot_rotation"] = Convert.ToInt32(doc.Layouts.Item(name).PlotRotation); } catch (Exception) { }
+                try { d["paper_space_objects"] = Convert.ToInt32(doc.Layouts.Item(name).Block.Count); } catch (Exception) { }
+                try { d["viewports"] = ReadViewports(docSource, name); } catch (Exception) { }
+                details.Add(d);
+            }
+            return details;
         }
 
         // The reference sheets use dimension style na1, text style EN-S for notes and EN-SCB for titles. A step the caller gave an
@@ -1197,6 +1250,26 @@ namespace SmartConnector
                 string viewportWarning = RetryWhenBusy<string>(delegate { return ViewportWarning(docSource, layout, built.Scale); });
                 if (viewportWarning != null) generated["viewport_warning"] = viewportWarning;
             }
+            try
+            {
+                // Views already on the sheet (earlier views, the template's own viewport): say so when one overlaps this view's viewport or annotation.
+                List<Dictionary<string, object>> others = RetryWhenBusy<List<Dictionary<string, object>>>(delegate { return ReadViewports(docSource, layout); });
+                if (others.Count > 0) generated["existing_viewports"] = others;
+                double[] foot = built.Summary.ContainsKey("paper_footprint") ? ((object[])built.Summary["paper_footprint"]).Select(o => Convert.ToDouble(o, System.Globalization.CultureInfo.InvariantCulture)).ToArray() : null;
+                foreach (Dictionary<string, object> other in others)
+                {
+                    object[] c = (object[])other["centre"], z = (object[])other["size"];
+                    double ox0 = (double)c[0] - (double)z[0] / 2, oy0 = (double)c[1] - (double)z[1] / 2, ox1 = (double)c[0] + (double)z[0] / 2, oy1 = (double)c[1] + (double)z[1] / 2;
+                    Func<double, double, double, double, bool> hits = (x0, y0, x1, y1) => x0 < ox1 && ox0 < x1 && y0 < oy1 && oy0 < y1;
+                    string what = null;
+                    if (viewport != null && hits(viewport.Centre[0] - viewport.Width / 2, viewport.Centre[1] - viewport.Height / 2, viewport.Centre[0] + viewport.Width / 2, viewport.Centre[1] + viewport.Height / 2)) what = "the new viewport";
+                    else if (foot != null && hits(foot[0], foot[1], foot[2], foot[3])) what = "this view's annotation";
+                    if (what != null)
+                        built.Warnings.Add("Viewport " + other["handle"] + " (centre " + ((double)c[0]).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + ", " + ((double)c[1]).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)
+                            + ", size " + ((double)z[0]).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + " x " + ((double)z[1]).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + ") already overlaps " + what + " on layout '" + layout + "'. Move one of them, or delete the old viewport if it is not wanted.");
+                }
+            }
+            catch (Exception) { }
             if (dry)
             {
                 DryRunGuard.Passed_(guardKey);
@@ -1510,7 +1583,7 @@ namespace SmartConnector
                 case "drawing_info":
                     return Json.Object("name", Convert.ToString(doc.Name), "path", Convert.ToString(doc.FullName), "drawing_id", DrawingId((object)doc), "version", Convert.ToString(cad.Version),
                         "units_code", Plain(doc.GetVariable("INSUNITS")), "model_space_objects", Convert.ToInt32(doc.ModelSpace.Count), "saved", (bool)doc.Saved, "read_only", (bool)doc.ReadOnly,
-                        "active_layout", Convert.ToString(doc.ActiveLayout.Name), "layouts", Each((object)doc.Layouts, l => Convert.ToString(l.Name)));
+                        "active_layout", Convert.ToString(doc.ActiveLayout.Name), "layouts", Each((object)doc.Layouts, l => Convert.ToString(l.Name)), "layout_details", LayoutDetails((object)doc));
                 case "list_layers":
                     return Json.Object("drawing", DrawingId((object)doc), "layers", Each((object)doc.Layers, l => Json.Object("name", Convert.ToString(l.Name), "color", Plain(l.Color), "on", (bool)l.LayerOn, "frozen", (bool)l.Freeze, "locked", (bool)l.Lock)));
                 case "list_entities":

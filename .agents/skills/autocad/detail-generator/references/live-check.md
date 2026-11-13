@@ -51,3 +51,12 @@ Same S1 brief, same office drawing, installed build from `main` (PR 81):
 - **Mistake to avoid:** the first run's geometry was still in Model space (`objects=22`), so the second run drew a second copy on top (44 objects). Start each run in an empty drawing, or close without saving between runs. The script warns when the drawing is not empty.
 - **Still not run live:** curved parts and S-shaped plans, text `justify`, elevation and plan views, and the busy-retry (it was not triggered).
 
+## S-shaped reception counter, three views on one A1 sheet (AutoCAD 24.3, 2026-11-13)
+
+Plan 1:20 (five parts, two arc-polyline curves, four notes, two chained dimensions), section A-A and section B-B 1:10, paper centres [260,420], [200,190], [480,190], new empty drawing, Layout1 set to ISO A1 (841 x 594), `layer_scheme` ao. The numbers are estimates for the test.
+- **Direct run** (a script speaking MCP to the installed connector, build from PR 84): dry run of the three views, the user's yes, three real runs. `count_matches_plan` true for the model and the layout on every view, all three viewports by the zoom route with the centre read back (plan 2450, 800; A-A 6300, 400; B-B 8300, 600), no guard refusal, no busy rejection.
+- **Through Claude Desktop** (the real workflow, same brief): all three dry runs valid, yes, three real runs one at a time; the same counts (model 8, 13, 13; layout 9, 11, 11), `paper_footprint` values inside the sheet and not overlapping, nothing saved.
+- **Found on the way and fixed:** a view drawn after another was refused by the dry-run guard; AutoCAD rejected calls as busy between views (plan steps, reads and the rollback now retry); the first viewport on a fresh layout failed with `AddPViewport` not found; a layout set to A4 while the brief assumed A1 (now reported before drawing).
+- **Still to check by eye on the sheet:** dimension values and text size in the 1:20 and 1:10 viewports, the leader, level and title blocks with their attribute text (the view number was left blank when no `view_no` was given), the arc radii 800 and 200 and the rise on `curve_2`, the note leaders and the ledge's hidden lines.
+- **Not yet run live:** text `justify`, elevation views, and the default `reception_counter_section`.
+
