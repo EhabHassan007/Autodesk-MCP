@@ -723,7 +723,14 @@ namespace SmartConnector
 
         // Validates the whole plan against this drawing, then (unless dry_run) creates it in one Undo group. Anything
         // created is removed again if a step fails, and the object count is read back to confirm the result.
+        // A plan that AutoCAD rejects as busy is tried again as a whole: a failed attempt has already rolled back what it made (see ApplyPlanOnce),
+        // and a dry run only reads. After the retries the failure says where it happened.
         internal static object ApplyPlan(object source, IDictionary<string, object> a)
+        {
+            return RetryWhenBusy<object>(delegate { return ApplyPlanOnce(source, a); });
+        }
+
+        private static object ApplyPlanOnce(object source, IDictionary<string, object> a)
         {
             dynamic doc = source;
             List<PlanItem> plan = AutoCadPlan.Parse(a["items"]);
@@ -787,9 +794,11 @@ namespace SmartConnector
                             if (p.Lineweight >= 0) layer.Lineweight = p.Lineweight;
                             continue;
                         }
-                        dynamic entity = p.Op == "hatch" ? CreateHatch((object)space, p, byId, loopForms) : CreateItem((object)space, p);
+                        try { RetryWhenBusy<bool>(delegate { doc.GetVariable("CMDACTIVE"); return true; }); } catch (Exception) { }   // AutoCAD can reject a call for a moment after the previous step: wait until it answers, so the step starts clean
+                        // A single-call item is made again if AutoCAD rejects the call (a rejected call created nothing); a hatch is several calls and is not repeated.
+                        dynamic entity = p.Op == "hatch" ? CreateHatch((object)space, p, byId, loopForms) : RetryWhenBusy<object>(delegate { return CreateItem((object)space, p); });
                         created.Add((object)entity);
-                        entity.Layer = p.Layer;
+                        RetryWhenBusy<bool>(delegate { entity.Layer = p.Layer; return true; });
                         if (p.TextStyle != null) entity.StyleName = p.TextStyle;
                         if (p.DimStyle != null) entity.StyleName = p.DimStyle;
                         if (p.DimScale > 0)
@@ -815,8 +824,8 @@ namespace SmartConnector
                 }
                 catch (Exception)
                 {
-                    for (int i = created.Count - 1; i >= 0; i--) { try { ((dynamic)created[i]).Delete(); } catch (Exception) { } }
-                    foreach (string layerName in layersCreated) { try { doc.Layers.Item(layerName).Delete(); } catch (Exception) { } }
+                    for (int i = created.Count - 1; i >= 0; i--) { int at = i; try { RetryWhenBusy<bool>(delegate { ((dynamic)created[at]).Delete(); return true; }); } catch (Exception) { } }   // a busy AutoCAD must not leave half of a plan behind
+                    foreach (string layerName in layersCreated) { string ln = layerName; try { RetryWhenBusy<bool>(delegate { doc.Layers.Item(ln).Delete(); return true; }); } catch (Exception) { } }
                     throw;
                 }
             }
@@ -1004,7 +1013,7 @@ namespace SmartConnector
                 // The viewport is ours, so the detail can go in the middle of the sheet: that needs the layout's paper size from AutoCAD.
                 if (!apply0(a)) throw new ToolException("view.paper_centre is needed to preview without AutoCAD. With apply and create_viewport it defaults to the centre of the layout's sheet.");
                 if (Json.GetString(a, "expected_drawing").Length == 0) throw new ToolException("expected_drawing is required when apply is true.");
-                doc = ActiveDrawing();
+                doc = RetryWhenBusy<object>(delegate { return (object)ActiveDrawing(); });
                 if (!String.Equals(DrawingId((object)doc), Json.GetString(a, "expected_drawing"), StringComparison.OrdinalIgnoreCase))
                     throw new ToolException("Active drawing changed or expected_drawing is incorrect. Read drawing_info again.");
                 place.PaperCentre = SheetCentre((object)doc, Json.GetString(a, "layout"));
@@ -1016,8 +1025,8 @@ namespace SmartConnector
             {
                 // The brief is valid. Now the drawing's own layers and blocks decide which layer set is used, so read them and build again.
                 if (Json.GetString(a, "expected_drawing").Length == 0) throw new ToolException("expected_drawing is required when apply is true.");
-                if (doc == null) doc = ActiveDrawing();
-                place.Facts = ReadFacts((object)doc);
+                if (doc == null) doc = RetryWhenBusy<object>(delegate { return (object)ActiveDrawing(); });
+                place.Facts = RetryWhenBusy<DrawingFacts>(delegate { return ReadFacts((object)doc); });
                 built = AutoCadDetail.Build(Json.GetString(a, "template"), parameters, scale, ox, oy, dimStyle, textStyle, dimScale, place);
             }
 
@@ -1114,7 +1123,8 @@ namespace SmartConnector
         internal static object ApplyGenerated(object docSource, IDictionary<string, object> a, DetailResult built, Dictionary<string, object> generated)
         {
             dynamic doc = docSource;
-            string id = DrawingId(docSource);
+            WaitUntilReady(docSource);
+            string id = RetryWhenBusy<string>(delegate { return DrawingId(docSource); });
             if (!String.Equals(id, Json.GetString(a, "expected_drawing"), StringComparison.OrdinalIgnoreCase))
                 throw new ToolException("Active drawing changed or expected_drawing is incorrect. Read drawing_info again.");
             int units;
@@ -1123,9 +1133,26 @@ namespace SmartConnector
             if (units != 4)
                 throw new ToolException("The drawing is not in millimetres (INSUNITS = " + units.ToString(System.Globalization.CultureInfo.InvariantCulture) + "), so nothing was drawn. The Detail Generator works in millimetres only; start from a millimetre template such as acadiso.dwt.");
 
-            if (!a.ContainsKey("use_reference_styles") || (bool)a["use_reference_styles"]) ResolveReferenceStyles(docSource, built, generated);
+            if (!a.ContainsKey("use_reference_styles") || (bool)a["use_reference_styles"]) RetryWhenBusy<bool>(delegate { ResolveReferenceStyles(docSource, built, generated); return true; });
+            string sheetName = Json.GetString(a, "layout");
+            if (built.PaperItems.Count > 0 && sheetName.Length > 0 && built.Summary.ContainsKey("paper_footprint"))
+            {
+                // The paper size comes from the layout's page setup, not from what the brief assumes: say so before anything is drawn.
+                try
+                {
+                    double[] half = SheetCentre(docSource, sheetName);
+                    double[] foot = ((object[])built.Summary["paper_footprint"]).Select(o => Convert.ToDouble(o, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+                    generated["sheet_size_mm"] = new object[] { half[0] * 2, half[1] * 2 };
+                    if (foot[0] < -5 || foot[1] < -5 || foot[2] > half[0] * 2 + 5 || foot[3] > half[1] * 2 + 5)
+                        built.Warnings.Add("This view needs x " + foot[0].ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + " to " + foot[2].ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)
+                            + ", y " + foot[1].ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + " to " + foot[3].ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)
+                            + " mm on the sheet, but layout '" + sheetName + "' is " + (half[0] * 2).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + " x " + (half[1] * 2).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)
+                            + " mm (Page Setup). Part of the view falls outside the paper: set the layout's paper size or move the view.");
+                }
+                catch (Exception) { }
+            }
             bool update = a.ContainsKey("update_layers") && (bool)a["update_layers"];
-            HashSet<string> existing = Names((object)doc.Layers);
+            HashSet<string> existing = RetryWhenBusy<HashSet<string>>(delegate { return Names((object)doc.Layers); });
             List<object> steps = new List<object>();
             List<string> kept = new List<string>();
             foreach (Dictionary<string, object> item in built.Items)
@@ -1134,11 +1161,18 @@ namespace SmartConnector
                 steps.Add(item);
             }
             bool dry = !a.ContainsKey("dry_run") || (bool)a["dry_run"];
-            Dictionary<string, object> planArguments = Json.Object("expected_drawing", id, "dry_run", dry, "items", steps.ToArray());
+            // The dry-run rule is checked here for the whole job, by a key over the brief (everything the generator was asked to draw), not over the
+            // steps that survive "layer already exists": drawing another view in between creates layers, which changes those steps but not the job.
+            string guardKey = DryRunGuard.Key(id, built.Items, built.PaperItems, Json.GetString(a, "layout"), a.ContainsKey("create_viewport") && (bool)a["create_viewport"], update,
+                built.Summary.ContainsKey("paper_centre") ? built.Summary["paper_centre"] : null, built.Summary.ContainsKey("model_centre") ? built.Summary["model_centre"] : null,
+                a.ContainsKey("__viewport_size") ? a["__viewport_size"] : null);
+            Dictionary<string, object> planArguments = Json.Object("expected_drawing", id, "dry_run", dry, "items", steps.ToArray(), "__guard_skip", true);
             if (kept.Count > 0) generated["existing_layers_left_unchanged"] = kept;
             if (built.PaperItems.Count == 0)
             {
+                if (!dry) DryRunGuard.Require(guardKey);
                 object planResult = ApplyPlan(docSource, planArguments);
+                if (dry) DryRunGuard.Passed_(guardKey); else DryRunGuard.Used(guardKey);
                 return Json.Object("applied", !dry, "generated", generated, "plan_result", planResult);
             }
 
@@ -1155,18 +1189,14 @@ namespace SmartConnector
             ViewportPlan viewport = null;
             if (createViewport)
             {
-                viewport = PlanViewport(docSource, a, built);
+                viewport = RetryWhenBusy<ViewportPlan>(delegate { return PlanViewport(docSource, a, built); });
                 generated["viewport"] = viewport.Describe();
             }
             else
             {
-                string viewportWarning = ViewportWarning(docSource, layout, built.Scale);
+                string viewportWarning = RetryWhenBusy<string>(delegate { return ViewportWarning(docSource, layout, built.Scale); });
                 if (viewportWarning != null) generated["viewport_warning"] = viewportWarning;
             }
-            // The dry-run rule for the whole job (geometry, annotation and viewport): one key over everything that decides what is drawn.
-            string guardKey = DryRunGuard.Key(id, steps, paperSteps, layout, createViewport,
-                built.Summary.ContainsKey("paper_centre") ? built.Summary["paper_centre"] : null, built.Summary.ContainsKey("model_centre") ? built.Summary["model_centre"] : null,
-                a.ContainsKey("__viewport_size") ? a["__viewport_size"] : null);
             if (dry)
             {
                 DryRunGuard.Passed_(guardKey);
@@ -1174,13 +1204,12 @@ namespace SmartConnector
             }
             DryRunGuard.Require(guardKey);
 
-            planArguments["__guard_skip"] = true;
             object modelResult = ApplyPlan(docSource, planArguments);
             paperArguments["dry_run"] = false;
             object paperResult;
             DryRunGuard.Used(guardKey);
             try { paperResult = ApplyPlan(docSource, paperArguments); }
-            catch (ToolException e) { throw new ToolException("The geometry was drawn in model space, but the annotation in layout '" + layout + "' failed and was rolled back: " + e.Message + " Undo once (U) to remove the geometry, fix the cause, then run again."); }
+            catch (Exception e) { throw new ToolException("The geometry was drawn in model space, but the annotation in layout '" + layout + "' failed and was rolled back: " + e.Message + " Undo once (U) to remove the geometry, fix the cause, then run again."); }
             if (viewport == null) return Json.Object("applied", true, "generated", generated, "plan_result", modelResult, "paper_plan_result", paperResult);
             try
             {
@@ -1220,6 +1249,19 @@ namespace SmartConnector
             return false;
         }
 
+        // Waits (up to about 15 seconds) until AutoCAD answers and no command is running. Right after a viewport zoom or a regeneration AutoCAD can
+        // reject the next call for a moment; the run then starts from a quiet state instead of failing on its first read. Reads only.
+        internal static void WaitUntilReady(object docSource)
+        {
+            dynamic doc = docSource;
+            for (int attempt = 1; attempt <= 15; attempt++)
+            {
+                try { if (Convert.ToInt32(doc.GetVariable("CMDACTIVE")) == 0) return; }
+                catch (Exception e) { if (!IsAutoCadBusy(e)) return; }
+                Pause(1000);
+            }
+        }
+
         internal static T RetryWhenBusy<T>(Func<T> operation)
         {
             for (int attempt = 1; ; attempt++)
@@ -1227,7 +1269,12 @@ namespace SmartConnector
                 try { return operation(); }
                 catch (Exception e)
                 {
-                    if (attempt >= BusyRetries || !IsAutoCadBusy(e)) throw;
+                    if (!IsAutoCadBusy(e)) throw;
+                    if (attempt >= BusyRetries)
+                    {
+                        string where = (e.StackTrace ?? "").Split('\n').Select(l => l.Trim()).FirstOrDefault(l => l.Length > 0) ?? "";
+                        throw new ToolException("AutoCAD kept rejecting calls for about 15 seconds (" + e.Message + "). Where: " + where + ". Close any dialog or command in AutoCAD, check the drawing, and run again.");
+                    }
                     Pause(1000 * attempt);
                 }
             }
@@ -1341,32 +1388,46 @@ namespace SmartConnector
                         layer.Plottable = false;
                     }
                     doc.ActiveLayout = sheet;
+                    WaitUntilReady(docSource);
                     try { doc.ActiveSpace = 0; } catch (Exception) { }
                     try { doc.Regen(1); } catch (Exception) { }
-                    viewport = sheet.Block.AddPViewport(new double[] { v.Centre[0], v.Centre[1], 0 }, v.Width, v.Height);
+                    for (int wait = 0; wait < 10; wait++)   // the layout switch can still be settling: the paper-space block is only valid once it is current
+                    {
+                        string current = null;
+                        try { current = Convert.ToString(doc.ActiveLayout.Name); } catch (Exception) { break; }
+                        if (String.Equals(current, layout, StringComparison.OrdinalIgnoreCase)) break;
+                        Pause(300);
+                    }
+                    double[] viewportCentre = new double[] { v.Centre[0], v.Centre[1], 0 };
+                    try { viewport = sheet.Block.AddPViewport(viewportCentre, v.Width, v.Height); }
+                    catch (Microsoft.CSharp.RuntimeBinder.RuntimeBinderException) { viewport = doc.PaperSpace.AddPViewport(viewportCentre, v.Width, v.Height); }   // live: the layout's Block was not the paper space yet
                     viewport.Layer = v.LayerName;
                     viewport.Display(true);
                     string handle = Convert.ToString(viewport.Handle);
-                    string method, zoomError = null;
-                    try
+                    string method = null, zoomError = null;
+                    for (int zoomTry = 1; method == null; zoomTry++)
                     {
-                        doc.Regen(1);
-                        doc.MSpace = true;
-                        doc.ActivePViewport = viewport;
-                        doc.Application.ZoomCenter(new double[] { v.ViewCentre[0], v.ViewCentre[1], 0 }, v.Height * v.Scale);
-                        viewport.CustomScale = 1.0 / v.Scale;
-                        doc.MSpace = false;
-                        method = "zoom";
-                    }
-                    catch (Exception e)
-                    {
-                        zoomError = e.Message;
-                        try { doc.MSpace = false; } catch (Exception) { }
-                        double[] offset = ReadViewportView(docSource, handle, 12000);
-                        if (Math.Abs(offset[4]) > 1e-9) throw new ToolException("the new viewport's view is twisted; only plan views are supported.");
-                        viewport.Target = new double[] { v.ViewCentre[0] - offset[0], v.ViewCentre[1] - offset[1], 0 };
-                        viewport.CustomScale = 1.0 / v.Scale;
-                        method = "target";
+                        try
+                        {
+                            doc.Regen(1);
+                            doc.MSpace = true;
+                            doc.ActivePViewport = viewport;
+                            doc.Application.ZoomCenter(new double[] { v.ViewCentre[0], v.ViewCentre[1], 0 }, v.Height * v.Scale);
+                            viewport.CustomScale = 1.0 / v.Scale;
+                            doc.MSpace = false;
+                            method = "zoom";
+                        }
+                        catch (Exception e)
+                        {
+                            zoomError = e.Message;
+                            try { doc.MSpace = false; } catch (Exception) { }
+                            if (zoomTry < 2) { Pause(1500); continue; }   // the layout switch can still be settling: one more try before the fallback
+                            double[] offset = ReadViewportView(docSource, handle, 12000);
+                            if (Math.Abs(offset[4]) > 1e-9) throw new ToolException("the new viewport's view is twisted; only plan views are supported.");
+                            viewport.Target = new double[] { v.ViewCentre[0] - offset[0], v.ViewCentre[1] - offset[1], 0 };
+                            viewport.CustomScale = 1.0 / v.Scale;
+                            method = "target";
+                        }
                     }
 
                     // read the view back; correct it through Target if it is off; without an answer, say it was not read back
