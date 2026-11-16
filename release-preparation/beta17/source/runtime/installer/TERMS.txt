@@ -1,5 +1,5 @@
 SMART AUTODESK CONNECTOR - TERMS OF USE
-Version 2026-11-08 (DRAFT - to be reviewed by the owner and company legal/HR before rollout)
+Version 2026-11-16 (DRAFT - to be reviewed by the owner and company legal/HR before rollout)
 
 Please read these terms. Ticking "I accept" and installing means you agree to them.
 
@@ -17,7 +17,8 @@ When this computer joins the team service, the following is sent to your company
  - the connector version
  - which connector skills and tools are used, as names and daily counts only
  - the skills you save that are submitted for review
-The tool does NOT send your drawings, models, file names or paths, the text of your chats, or anything you type into Revit, AutoCAD, Codex or Claude. The administrator can view this information on a private dashboard and can block a computer. The dashboard is kept in the company's Notion workspace, where it is updated every hour; only the people who administer Smart Connector have access to it. Usage records are deleted from the team service after 180 days, and the dashboard shows the last 30 days.
+ - when a connector tool fails: the tool name, the error type and a short error message with names, numbers, paths, file names and quoted text removed, and whether the same tool worked later. These reports are sent shortly after the error, or at the next Skills Sync if this computer is offline
+The tool does NOT send your drawings, models, file names or paths, the text of your chats, or anything you type into Revit, AutoCAD, Codex or Claude. The administrator can view this information on a private dashboard and can block a computer. The dashboard is kept in the company's Notion workspace, where it is updated every hour; only the people who administer Smart Connector have access to it. Usage and error records are deleted from the team service after 180 days, and the dashboard shows the last 30 days.
 
 4. Skills you share
 Skills you save may be collected weekly (or when you choose Skills Sync) and sent to the administrator for review. Do not put client names, project data, passwords or personal information into skills. You can keep a personal skill private by listing it in the exclusion list described in the user guide. Nothing you submit is shared with the team until the administrator approves it.

@@ -107,6 +107,24 @@ Owner setup (after the Notion dashboard steps above, so the integration already 
 3. `npm run migrate:remote`, then `npm run deploy` (registers the second cron).
 4. Run `POST /admin/api/notion-review` once. Rows appear for uploads that wait.
 
+## Connector error reports
+
+Migration `0007_failures.sql` adds `failures` (one cleaned message per fingerprint), `failure_counts` (counts per fingerprint, device, day and connector version) and `notion_failure_sync` (the last run). Run `npm run migrate:remote` before deploying this version.
+
+- **What arrives.** `POST /v1/failures` (device token, at most 60 requests per device per hour, 1 to 100 events each). An event has exactly `tool`, `product` (revit, autocad or connector), `code`, `message` (at most 300 characters, already cleaned by the connector), `outcome` (failed or recovered), `day` and `count`. The service cleans each message again, also removing the sender's name, Windows user and PC name, then groups it by `sha256(product, tool, code, message)`. The same error from many PCs or versions is one row. `tests/error-messages.json` holds the examples that the C# and JavaScript cleaners must both pass.
+- **Retention.** Counts older than 180 days are deleted. The dashboard and Notion show the last 30 days.
+- **Notion.** A third cron, `7 * * * *`, copies the last 30 days into a "Connector failures" database whose data source ID is the `NOTION_FAILURES_SOURCE` var. Without that var or `NOTION_TOKEN` the run skips itself. A run writes at most 40 rows; the rest carries over. `POST /admin/api/notion-failures` (admin token) runs it now. Errors that stopped happening keep their row with zero counts.
+- **Columns.** Name (title), Status (select: New, plus any options you add), Product (select), Tool, Error code, Message, Who, Versions, Fingerprint (text), Failures (30 days), Recovered (30 days), People (30 days) (number), First seen, Last seen (date). The service sets Status to New only when it creates a row and never changes it afterwards, so you can use Status for your own triage.
+
+Owner setup:
+
+1. In Notion, create the "Connector failures" database on the "Smart Connector – Team Insights" page with the columns above, and copy its data source ID.
+2. Add `"NOTION_FAILURES_SOURCE": "<id>"` to `vars` in `wrangler.jsonc`.
+3. `npm run migrate:remote`, then `npm run deploy` (registers the third cron).
+4. Run `POST /admin/api/notion-failures` once.
+
+Check before deploying that the account's plan allows a third cron trigger. Error reports are still stored in D1 without the Notion step.
+
 ## Connect team PCs
 
 On Windows, use `tools/New-DeviceEnrollment.ps1`; it needs no Python and defaults to the deployed URL. Each PC/user gets a unique revocable device token:

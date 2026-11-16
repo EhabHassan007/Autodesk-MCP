@@ -79,8 +79,8 @@ async function desiredRows(db, today) {
   return {members,usage};
 }
 
-// Rows to create or update for one data source, comparing with what Notion holds.
-function plan(schema, keyProp, desired, pages, zeroed) {
+// Rows to create or update for one data source, comparing with what Notion holds. Also used by failures.mjs.
+export function plan(schema, keyProp, desired, pages, zeroed) {
   const existing = new Map();
   for (const page of pages) {
     if (page.archived || page.in_trash) continue;

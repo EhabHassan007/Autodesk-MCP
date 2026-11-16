@@ -491,7 +491,7 @@ namespace SmartConnector
             AddText(_content, "Skills on this list stay on your computer: Skills Sync never sends them for review.", 32, 266, 760, 9, false, true);
             AddActionButton(_content, "Edit private skills", "PrivateSkills", 32, 294, false, 150);
             AddText(_content, "Team skill service", 32, 350, 0, 10, true);
-            AddText(_content, s.TeamJoined ? "This computer has joined. Your administrator sees its name, your name and email, and which skills and tools are used (names and counts only). Usage counts are sent only when you run Skills Sync." : "Not joined. Ask your administrator for the team setup file to join.", 32, 374, 760, 9, false, true);
+            AddText(_content, s.TeamJoined ? "This computer has joined. Your administrator sees its name, your name and email, and which skills and tools are used (names and counts only). Usage counts are sent only when you run Skills Sync. If a tool fails, a short cleaned error report is sent soon after." : "Not joined. Ask your administrator for the team setup file to join.", 32, 374, 760, 9, false, true);
         }
 
         private void ShowDiagnostics(Snapshot s)

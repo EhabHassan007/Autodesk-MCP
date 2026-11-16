@@ -5,6 +5,7 @@ import { groupReviews, reviewSummary, undecided } from './review.mjs';
 import { DASHBOARD_CSS, DASHBOARD_HTML, DASHBOARD_JS } from './dashboard.mjs';
 import { lastSync, saveSync, syncToNotion } from './notion.mjs';
 import { lastReviewSync, saveReviewSync, syncReviews } from './notion-review.mjs';
+import { lastFailureSync, recentFailures, recordFailures, saveFailureSync, syncFailures, validateFailures } from './failures.mjs';
 
 class HTTPError extends Error {
   constructor(status, message) { super(message); this.status = status; }
@@ -76,6 +77,7 @@ async function readJSON(request) {
 }
 
 const REVIEW_CRON = '47 * * * *';   // Must match wrangler.jsonc.
+const FAILURE_CRON = '7 * * * *';   // Connector errors to Notion, with its own subrequest budget. Must match wrangler.jsonc.
 // Decided uploads ("pr/skill") and rejected content ("skill/key"), so neither comes back for review.
 async function reviewState(db) {
   const rows = (await db.prepare('SELECT pr,skill,decision,content_key FROM review_decisions').all()).results;
@@ -208,11 +210,19 @@ export async function handle(request, env, backend) {
       // Before migration 0005 is applied the table is missing; the overview still loads.
       const notion_sync = await lastSync(env.DB).catch(()=>null);
       const notion_review_sync = await lastReviewSync(env.DB).catch(()=>null);
-      return json({generated_at:today,devices,usage,daily,submissions,notion_sync,notion_review_sync});
+      // Connector errors of the last 30 days, one entry per distinct error. Before migration 0007 the tables are missing.
+      const failures = await recentFailures(env.DB,today).catch(()=>[]);
+      const notion_failure_sync = await lastFailureSync(env.DB).catch(()=>null);
+      return json({generated_at:today,devices,usage,daily,submissions,notion_sync,notion_review_sync,failures,notion_failure_sync});
     }
     if (path === '/admin/api/notion-review' && request.method === 'POST') {
       await admin(request,env);
       const summary = await runReviewSync(env,{gh:backend});
+      return json(summary,summary.error ? 502 : 200);
+    }
+    if (path === '/admin/api/notion-failures' && request.method === 'POST') {
+      await admin(request,env);
+      const summary = await saveFailureSync(env.DB,await syncFailures(env));
       return json(summary,summary.error ? 502 : 200);
     }
     if (path === '/admin/api/notion-sync' && request.method === 'POST') {
@@ -252,6 +262,16 @@ export async function handle(request, env, backend) {
       await env.DB.batch(events.map(e => env.DB.prepare(`INSERT INTO usage(device,kind,name,day,count) VALUES(?,?,?,?,?)
         ON CONFLICT(device,kind,name,day) DO UPDATE SET count=usage.count+excluded.count`).bind(id,e.kind,e.name,e.day,e.count)));
       return json({accepted:events.length});
+    }
+    if (path === '/v1/failures' && request.method === 'POST') {
+      // Sent right after a tool fails, so it has its own budget and never delays library downloads or submissions.
+      const id = await device(request,env.DB,false);
+      await limit(env.DB,'failures:'+id,60);
+      let events;
+      try { events = validateFailures(await readJSON(request),isoDay(now())); }
+      catch (error) { throw error instanceof HTTPError ? error : new HTTPError(422,error.message); }
+      const version = request.headers.get('X-Connector-Version');
+      return json({accepted:await recordFailures(env.DB,id,version && VERSION.test(version) ? version : 'unknown',events,now())});
     }
     if (path === '/admin/status' && request.method === 'GET') {
       await admin(request,env);
@@ -337,9 +357,11 @@ export async function handle(request, env, backend) {
 export default {
   fetch(request,env) { return handle(request,env); },
   // Hourly cron (wrangler.jsonc): copy the team summaries to Notion and keep the result for the dashboard.
-  // A second cron (minute 47) handles skill review, so each run has its own subrequest budget.
+  // A second cron (minute 47) handles skill review and a third (minute 7) connector errors, so each run has its own
+  // subrequest budget.
   scheduled(event,env,ctx) {
     if (event.cron === REVIEW_CRON) ctx.waitUntil(runReviewSync(env));
+    else if (event.cron === FAILURE_CRON) ctx.waitUntil(syncFailures(env).then(summary=>saveFailureSync(env.DB,summary)));
     else ctx.waitUntil(syncToNotion(env).then(summary=>saveSync(env.DB,summary)));
   }
 };

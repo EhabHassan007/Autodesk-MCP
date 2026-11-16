@@ -603,6 +603,8 @@ namespace SmartConnector
                 if (action == "Run" || action == "Sync")
                 {
                     try { UsageSender.Run(o.StateRoot, sink, true); } catch (Exception) { }
+                    // Error reports normally go right after the failure; Skills Sync sends any that could not go then.
+                    try { FailureSender.Run(o.StateRoot, sink, true); } catch (Exception) { }
                 }
                 List<string> categories = SkillLibrary.SyncCategories(o.Product, SkillLibrary.InstalledProducts());
                 // Collect lines as they arrive so the summary survives even when the sync then fails.

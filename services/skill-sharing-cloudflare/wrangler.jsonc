@@ -17,7 +17,7 @@
     "NOTION_USAGE_SOURCE": "369aab91-4554-42c4-9754-401299888a3f",
     "NOTION_REVIEW_SOURCE": "ca563d75-3682-47a0-a994-d574182fb2b3"
   },
-  "triggers": { "crons": ["17 * * * *", "47 * * * *"] },
+  "triggers": { "crons": ["17 * * * *", "47 * * * *", "7 * * * *"] },
   "d1_databases": [{
     "binding": "DB",
     "database_name": "autodesk-skills",
