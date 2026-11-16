@@ -214,7 +214,7 @@ namespace SmartConnector
     }
 
     // A tool error that is reported to the AI client as the tool's text, as the PowerShell bridges did.
-    internal sealed class ToolException : Exception
+    internal class ToolException : Exception
     {
         internal ToolException(string message) : base(message) { }
     }
@@ -222,7 +222,7 @@ namespace SmartConnector
     internal static class McpServer
     {
         private static readonly string[] Protocols = { "2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25", "2026-07-28" };
-        private const string Instructions = "Before any Revit work call get_revit_rules and follow every rule it returns; the Revit model tools refuse to run until it has been called. Use list_skill_workflows and read_skill_workflow to load relevant shared guidance before CAD/BIM tasks; no separate skill upload is required to read this guidance. Authenticated Autodesk connector for Codex and Claude with AutoCAD and Revit tools. Model-changing calls are serialized across AI clients. For AutoCAD, read drawing_info before edits and save only when explicitly requested. For Revit, call list_sessions when multiple sessions may be open, read document_info before writes, pass expected_document, and verify every write with a separate read.";
+        private const string Instructions = "Before any Revit work call get_revit_rules and follow every rule it returns; the Revit model tools refuse to run until it has been called. Use list_skill_workflows and read_skill_workflow to load relevant shared guidance before CAD/BIM tasks; no separate skill upload is required to read this guidance. Authenticated Autodesk connector for Codex and Claude with AutoCAD and Revit tools. Model-changing calls are serialized across AI clients. For AutoCAD, read drawing_info before edits and save only when explicitly requested. For Revit, call list_sessions when multiple sessions may be open, read document_info before writes, pass expected_document, and verify every write with a separate read. Revit errors are typed: [compile_error] and [runtime_error] are problems in the submitted code, not a lost connection. After a timeout or an answer with completed=false never run the request again: call connection_status (it says whether Revit is busy) and get_job.";
         private const string CombinedStatus = "Check whether the Smart Connector can reach AutoCAD and Revit. Reports AutoCAD (running full AutoCAD over COM, version, active drawing) and Revit (add-in sessions, active document, last error) separately. Succeeds when either product is reachable; a product that is closed is reported, not an error. Optional session_id selects a Revit session.";
 
         // Every Revit model tool needs the Revit rules to have been read in this session, and again after two hours.
@@ -352,7 +352,7 @@ namespace SmartConnector
                 else if (AutoCadNames.Contains(name)) data = WithWriteLock(name, delegate { return AutoCadBridge.Invoke(name, arguments); });
                 else if (RevitNames.Contains(name))
                 {
-                    if (name != "list_sessions" && DateTime.UtcNow - _revitRulesReadAt > RevitRulesFresh) throw new ToolException(RevitRulesFirst);
+                    if (name != "list_sessions" && name != "get_job" && DateTime.UtcNow - _revitRulesReadAt > RevitRulesFresh) throw new ToolException(RevitRulesFirst);
                     data = WithWriteLock(name, delegate { return RevitBridge.Invoke(name, arguments); });
                 }
                 else throw new ToolException("Unknown Autodesk MCP tool: " + name);

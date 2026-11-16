@@ -65,7 +65,7 @@ try {
     $expected = @(Get-AutodeskMcpTools)
     $allTools = @((Invoke-Mcp 'tools/list').result.tools)
     # Tools that only SmartConnector.exe has; the PowerShell fallback bridge does not. Every other tool must match exactly.
-    $exeOnlyTools = @('apply_plan', 'execute_autocad', 'generate_detail', 'prepare_layout', 'verify_standards')
+    $exeOnlyTools = @('apply_plan', 'execute_autocad', 'generate_detail', 'prepare_layout', 'verify_standards', 'get_job', 'revision_cloud_info', 'create_revision_clouds')
     # Tools the exe has improved on purpose (summary and fields for the readers, a product filter for the workflow list); the fallback bridge keeps the old form. Only their names and order must match.
     $exeChangedTools = @('list_entities', 'get_entity', 'list_skill_workflows')
     Assert (@($allTools | Where-Object { $exeOnlyTools -contains $_.name }).Count -eq $exeOnlyTools.Count) ('An exe-only tool is missing from the tool list: ' + (($allTools | ForEach-Object name) -join ','))
@@ -214,7 +214,7 @@ try {
     # 6. Revit add-in pipe: a stand-in add-in answers on the pipe name a single Revit 2024 session uses.
     $job = Start-Job -ScriptBlock {
         $server = New-Object IO.Pipes.NamedPipeServerStream('BimCadMcp.Revit.2024', [IO.Pipes.PipeDirection]::InOut, 1)
-        for ($n = 0; $n -lt 3; $n++) {
+        for ($n = 0; $n -lt 8; $n++) {
             $server.WaitForConnection()
             $reader = New-Object IO.StreamReader($server, [Text.Encoding]::UTF8, $false, 4096, $true)
             $writer = New-Object IO.StreamWriter($server, (New-Object Text.UTF8Encoding($false)), 4096, $true); $writer.AutoFlush = $true
@@ -224,7 +224,13 @@ try {
             switch ($fields[0]) {
                 'document_info' { $writer.WriteLine('OK' + "`t" + (& $encode '{"document_id":"doc-1","title":"Test \u00e9.rvt"}')) }
                 'get_element' { $writer.WriteLine('ERR' + "`t" + (& $encode ('Element ' + $decoded[0] + ' was not found.'))) }
-                'execute_csharp' { $writer.WriteLine('OK' + "`t" + (& $encode ((@{ fields = $decoded } | ConvertTo-Json -Compress)))) }
+                'execute_csharp' {
+                    if ($decoded[3] -like '*doc.Title*') { $writer.WriteLine('ERR' + "`t" + (& $encode "[compile_error] C# compilation failed:`nLine 1: The name 'doc' does not exist")) }
+                    else { $writer.WriteLine('OK' + "`t" + (& $encode ((@{ fields = $decoded } | ConvertTo-Json -Compress)))) }
+                }
+                'get_job' { $writer.WriteLine('OK' + "`t" + (& $encode ((@{ fields = $decoded; completed = $false; state = 'running' } | ConvertTo-Json -Compress)))) }
+                'create_revision_clouds' { $writer.WriteLine('OK' + "`t" + (& $encode ((@{ fields = $decoded } | ConvertTo-Json -Compress)))) }
+                'revision_cloud_info' { $writer.WriteLine('OK' + "`t" + (& $encode ((@{ fields = $decoded } | ConvertTo-Json -Compress)))) }
             }
             $reader.Dispose(); $writer.Dispose(); $server.Disconnect()
         }
@@ -236,11 +242,34 @@ try {
     $doc = Invoke-Tool 'document_info'
     Assert (-not $doc.isError -and ($doc.content[0].text | ConvertFrom-Json).title -eq ('Test ' + [char]0xE9 + '.rvt')) ("document_info over the pipe failed: " + $doc.content[0].text)
     $missing = Invoke-Tool 'get_element' @{ element_id = '42' }
-    Assert ($missing.isError -and $missing.content[0].text -like '*Element 42 was not found.') ("Add-in errors are not passed on: " + $missing.content[0].text)
+    Assert ($missing.isError -and $missing.content[0].text.StartsWith('[revit_error] Element 42 was not found.')) ("An untyped add-in error must reach the client as [revit_error], not as a lost connection: " + $missing.content[0].text)
     $run = Invoke-Tool 'execute_csharp' @{ expected_document = 'doc-1'; execution_mode = 'READ'; allow_model_changes = $false; code = 'return "x";'; parameters_json = '{}'; transaction_name = 'T' }
     $sent = @(($run.content[0].text | ConvertFrom-Json).fields)
     Assert (-not $run.isError -and ($sent -join '|') -eq 'doc-1|READ|False|return "x";|{}|T') ("execute_csharp sent the wrong fields: " + ($sent -join '|'))
-    'PASS: Revit add-in pipe: answers, add-in errors and execute_csharp fields as the bridge sends them'
+    # A mistake in the submitted code is a typed error of its own, never "session is not available".
+    $bad = Invoke-Tool 'execute_csharp' @{ expected_document = 'doc-1'; execution_mode = 'read'; allow_model_changes = $false; code = 'return doc.Title;'; parameters_json = '{}'; transaction_name = 'T' }
+    Assert ($bad.isError -and $bad.content[0].text.StartsWith('[compile_error] ') -and $bad.content[0].text -notlike '*session is not available*') ("A compile error was not reported as itself: " + $bad.content[0].text)
+    # Options travel as a seventh field, only when one is set.
+    $dry = Invoke-Tool 'execute_csharp' @{ expected_document = 'doc-1'; execution_mode = 'transaction'; allow_model_changes = $true; code = 'return "x";'; parameters_json = '{}'; transaction_name = 'T'; dry_run = $true; wait_seconds = 30 }
+    $dryFields = @(($dry.content[0].text | ConvertFrom-Json).fields)
+    Assert (-not $dry.isError -and $dryFields.Count -eq 7 -and $dryFields[6] -eq 'dry_run=true;wait_seconds=30') ("execute_csharp options were not sent as the seventh field: " + ($dryFields -join '|'))
+    $dryRead = Invoke-Tool 'execute_csharp' @{ expected_document = 'doc-1'; execution_mode = 'read'; allow_model_changes = $false; code = 'return "x";'; parameters_json = '{}'; transaction_name = 'T'; dry_run = $true }
+    Assert ($dryRead.isError -and $dryRead.content[0].text -like 'dry_run needs execution_mode transaction*') ("dry_run outside transaction mode must be refused: " + $dryRead.content[0].text)
+    $slow = Invoke-Tool 'execute_csharp' @{ expected_document = 'doc-1'; execution_mode = 'read'; allow_model_changes = $false; code = 'return "x";'; parameters_json = '{}'; transaction_name = 'T'; wait_seconds = 500 }
+    Assert ($slow.isError -and $slow.content[0].text -like 'Number out of range: wait_seconds') 'wait_seconds above 110 must be refused'
+    # get_job needs no Revit rules and passes the job id and the cancel flag.
+    $jobAnswer = Invoke-Tool 'get_job' @{ job_id = 'abc123' }
+    $jobFields = @(($jobAnswer.content[0].text | ConvertFrom-Json).fields)
+    Assert (-not $jobAnswer.isError -and ($jobFields -join '|') -eq 'abc123|False') ("get_job sent the wrong fields: " + ($jobFields -join '|'))
+    # Revision cloud tools: the boxes travel as "xmin;ymin;xmax;ymax;base64(comment);base64(note)".
+    $clouds = Invoke-Tool 'create_revision_clouds' @{ expected_document = 'doc-1'; revision_id = '7'; view_id = '9'; note_side = 'left'; dry_run = $true; items = @(@{ x_min_mm = 0; y_min_mm = 0; x_max_mm = 400; y_max_mm = 300; note = 'REV' }) }
+    $cloudFields = @(($clouds.content[0].text | ConvertFrom-Json).fields)
+    Assert (-not $clouds.isError -and $cloudFields.Count -eq 5 -and $cloudFields[3] -eq 'note_side=left;dry_run=true' -and $cloudFields[4] -eq ('0;0;400;300;;' + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes('REV')))) ("create_revision_clouds sent the wrong fields: " + ($cloudFields -join '|'))
+    $badBox = Invoke-Tool 'create_revision_clouds' @{ expected_document = 'doc-1'; revision_id = '7'; view_id = '9'; items = @(@{ x_min_mm = 10; y_min_mm = 0; x_max_mm = 5; y_max_mm = 3 }) }
+    Assert ($badBox.isError -and $badBox.content[0].text -like 'items[[]0] needs x_max_mm > x_min_mm*') ("An inverted box must be refused: " + $badBox.content[0].text)
+    $info = Invoke-Tool 'revision_cloud_info' @{ view_ids = @('12', '13') }
+    Assert (-not $info.isError -and (@(($info.content[0].text | ConvertFrom-Json).fields) -join '|') -eq '12|13') ('revision_cloud_info sent the wrong fields: ' + $info.content[0].text)
+    'PASS: Revit add-in pipe: answers, typed add-in errors, execute_csharp options, get_job and the revision cloud tools as the bridge sends them'
 }
 finally {
     $env:LOCALAPPDATA = $saved

@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "updated": "2026-11-11",
+  "updated": "2026-11-12",
   "rules": [
     {
       "id": "RVT-001",
@@ -29,6 +29,55 @@
       "category": "areas",
       "decided_on": "",
       "instruction": "(Partial: transcribed from a screenshot of the Notion 'Revit MCP Rules' database; the full text is in Notion.) Areas cannot overlap inside one area scheme. For overlay areas (gym, canopy, shading, plot coverage), use another existing area scheme, or ask the user to create one in the UI. The rest of the method (levels and templates, boundaries from elements, the schedule with footer totals and no grand total) was cut off in the screenshot and is not recorded here."
+    },
+    {
+      "id": "RVT-005",
+      "title": "Write execute_csharp code to the runner's contract",
+      "category": "execution",
+      "decided_on": "2026-11-12",
+      "instruction": "The code is the body of Run(UIApplication application, Document document, string parametersJson). The document variable is `document` (not `doc`), there is no `uidoc` (use application.ActiveUIDocument), and the language level is C# 5: no `?.`, no string interpolation, no nameof, no expression-bodied members. Read parameters with LookupParameter by name; a BuiltInParameter that exists in another Revit version may not exist in 2024 (REVISION_CLOUD_COMMENTS does not), so test any unfamiliar API call or parameter on one element before looping over many. A [compile_error] or [runtime_error] answer is a problem in the code, not a lost connection: fix the code, do not restart Revit or the connector."
+    },
+    {
+      "id": "RVT-006",
+      "title": "Keep each write call to about 40 creations and regenerate once",
+      "category": "performance",
+      "decided_on": "2026-11-12",
+      "instruction": "In a heavily linked model, one transaction that deletes and recreates everything blocks Revit for minutes (Generating graphics on every view) and the call times out. Do no more than about 40 creations or deletions per call, one or two views at a time, and regenerate once per batch, never inside the loop. Never delete and recreate everything in one transaction: change what differs. For large jobs use a remaining-count loop (create_revision_clouds takes at most 40 items per call) and report created, skipped, failed and remaining counts after each batch."
+    },
+    {
+      "id": "RVT-007",
+      "title": "After a timeout never re-run the request",
+      "category": "recovery",
+      "decided_on": "2026-11-12",
+      "instruction": "A timeout does not mean the work failed: Revit often finishes it. Do not send the same request again and do not press Ctrl+Z. If the answer says completed=false or gives a job_id, call get_job until it completes and read its result. If the answer is [busy], Revit never started the request and nothing changed. Otherwise wait for the status bar to clear (no Generating graphics), call connection_status (it reports whether Revit is busy), read the model to see what actually changed, and only then continue with what is missing."
+    },
+    {
+      "id": "RVT-008",
+      "title": "Annotate primary views only",
+      "category": "annotation",
+      "decided_on": "2026-11-12",
+      "instruction": "A dependent view shows the annotations of its primary view and cannot hold its own. Before creating revision clouds, tags, text or dimensions, resolve each target view with View.GetPrimaryViewId() (revision_cloud_info does this) and annotate the primary view only; otherwise the same cloud and note appear twice. When counting or verifying annotations, count per primary view."
+    },
+    {
+      "id": "RVT-009",
+      "title": "Check that a revision cloud tag family is loaded before promising tags",
+      "category": "annotation",
+      "decided_on": "2026-11-12",
+      "instruction": "The Revision Cloud Tags category can hold a family that is not a tag at all (a model family placed there by mistake), so a category match does not prove a usable tag. Call revision_cloud_info: when likely_tag_types is 0, no real cloud tag family is loaded. Then ask the user whether to use text notes beside the clouds or to load a tag family; do not silently substitute one for the other, and do not promise tags."
+    },
+    {
+      "id": "RVT-010",
+      "title": "Confirm Revit is idle before a heavy write on a heavily linked model",
+      "category": "performance",
+      "decided_on": "2026-11-12",
+      "instruction": "Before a write that touches many elements in a model with many links, call connection_status and proceed only when Revit reports idle (no Generating graphics, no dialog). Ask the user to close views they do not need, because every open view regenerates after each change. Try a dry run first (execute_csharp with dry_run=true, or create_revision_clouds with dry_run=true) and show the change counts before the real run."
+    },
+    {
+      "id": "RVT-011",
+      "title": "Reload tools and the rules after the tool prefix changes",
+      "category": "session",
+      "decided_on": "2026-11-12",
+      "instruction": "If the connector's tools disappear or reappear under a different prefix in the middle of a session (for example after the device link is re-established), reload the tool list and call get_revit_rules again before any write: the connector may have restarted and the rules gate is per session. Then call connection_status and document_info before continuing, and never assume a pending request was lost or completed; check with get_job or by reading the model."
     }
   ]
 }
