@@ -19,8 +19,8 @@ Use dynamic C# only when a narrower MCP command cannot complete the authorized t
 
 - Use the document variable and transaction context supplied by the runner; do not create a second project-document transaction.
 - A separately opened family document may require its own transaction.
-- The runner's document variable is `document` (not `doc`). A script that uses an undefined name can surface as "MCP session is not available" even though the session is fine; check the script first.
-- The runner compiles at an older C# language level: avoid `?.` and other newer syntax. Prefer broadly compatible language and API constructs for the target Revit year.
+- Your code is the body of `Run(UIApplication application, Document document, string parametersJson)` and must return a string. The variables are `application`, `document` and `parametersJson`; there is no `doc` and no `uidoc` (use `application.ActiveUIDocument`). Pre-imported: System, System.Collections.Generic, System.Globalization, System.IO, System.Linq, System.Text, Autodesk.Revit.DB, Autodesk.Revit.UI. A script that uses an undefined name can surface as "MCP session is not available" even though the session is fine, because the connector wraps every add-in error under that prefix; read the text after the prefix and check the script first.
+- The runner compiles with the .NET Framework 4.0 compiler, which is C# 5 (likely, from the code): avoid `?.`, `$""` interpolation, `nameof`, and expression-bodied members. Prefer broadly compatible language and API constructs for the target Revit year.
 - Read parameters by `LookupParameter("Name")` when a `BuiltInParameter` is uncertain; for example `BuiltInParameter.REVISION_CLOUD_COMMENTS` does not exist in Revit 2024.
 - Test any unfamiliar API call on one element before running a batch.
 - Read all geometry and bounding boxes before writes to avoid regeneration inside loops.

@@ -32,4 +32,4 @@ Lean core: Smart Connector now runs nothing in the background. This removes the 
 - `verify_standards`: an `expected_counts` type of `total`, `all` or `any` (or none) counts every object; an unknown type is refused instead of being counted as zero.
 - Detail Generator, found in the first run on the office template: the viewport step is retried when AutoCAD answers "call rejected" (busy), and leader notes are spaced for the office label block's real text size so wrapped notes no longer overprint.
 
-SHA-256: F160DBA58E612479887459D10523A3CBAF50B905F9E7EC1707BA887A0BBC4F4D
+SHA-256: FB981E4DAD163520169C1ABF26DFA125EBA684FB99515035FFA9C5304F1A702C
