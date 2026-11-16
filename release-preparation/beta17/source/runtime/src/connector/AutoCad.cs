@@ -83,6 +83,10 @@ namespace SmartConnector
                             "required_layers", Json.Object("type", "array", "items", Json.Object("type", "object")), "forbidden_layers", Json.Object("type", "array", "items", Json.Object("type", "string")),
                             "text_height", Json.Object("type", "object"), "expected_counts", Json.Object("type", "array", "items", Json.Object("type", "object"))),
                         new[] { "expected_drawing" }, true),
+                    Schema.Tool("prepare_layout", "Set a layout's paper size and orientation through its page setup (plot device, ISO media without full bleed, millimetres, rotation) so paper-space annotation has a real sheet. Use when drawing_info shows a layout with no usable sheet_size_mm, or generate_detail warns about it: ask the user which paper (A0 to A4) and orientation. dry_run defaults to true and only reports the current size and what would be set; a real run changes the layout and is refused unless the same job passed a dry run on this drawing in the last 30 minutes: show the dry run and wait for the user's yes. Does not save.",
+                        Json.Object("expected_drawing", target(), "layout", str(), "paper", Json.Object("type", "string", "enum", new object[] { "A0", "A1", "A2", "A3", "A4" }), "orientation", Json.Object("type", "string", "enum", new object[] { "landscape", "portrait" }),
+                            "plot_device", str(), "dry_run", Json.Object("type", "boolean")),
+                        new[] { "expected_drawing", "layout", "paper", "orientation" }, false),
                     Schema.Tool("save_drawing", "Explicitly save the expected drawing to its EXISTING path. Invoke only when saving is requested; no Save As.", Json.Object("expected_drawing", target()), new[] { "expected_drawing" }, false)
                 };
                 return _tools;
@@ -723,7 +727,14 @@ namespace SmartConnector
 
         // Validates the whole plan against this drawing, then (unless dry_run) creates it in one Undo group. Anything
         // created is removed again if a step fails, and the object count is read back to confirm the result.
+        // A plan that AutoCAD rejects as busy is tried again as a whole: a failed attempt has already rolled back what it made (see ApplyPlanOnce),
+        // and a dry run only reads. After the retries the failure says where it happened.
         internal static object ApplyPlan(object source, IDictionary<string, object> a)
+        {
+            return RetryWhenBusy<object>(delegate { return ApplyPlanOnce(source, a); });
+        }
+
+        private static object ApplyPlanOnce(object source, IDictionary<string, object> a)
         {
             dynamic doc = source;
             List<PlanItem> plan = AutoCadPlan.Parse(a["items"]);
@@ -787,9 +798,11 @@ namespace SmartConnector
                             if (p.Lineweight >= 0) layer.Lineweight = p.Lineweight;
                             continue;
                         }
-                        dynamic entity = p.Op == "hatch" ? CreateHatch((object)space, p, byId, loopForms) : CreateItem((object)space, p);
+                        try { RetryWhenBusy<bool>(delegate { doc.GetVariable("CMDACTIVE"); return true; }); } catch (Exception) { }   // AutoCAD can reject a call for a moment after the previous step: wait until it answers, so the step starts clean
+                        // A single-call item is made again if AutoCAD rejects the call (a rejected call created nothing); a hatch is several calls and is not repeated.
+                        dynamic entity = p.Op == "hatch" ? CreateHatch((object)space, p, byId, loopForms) : RetryWhenBusy<object>(delegate { return CreateItem((object)space, p); });
                         created.Add((object)entity);
-                        entity.Layer = p.Layer;
+                        RetryWhenBusy<bool>(delegate { entity.Layer = p.Layer; return true; });
                         if (p.TextStyle != null) entity.StyleName = p.TextStyle;
                         if (p.DimStyle != null) entity.StyleName = p.DimStyle;
                         if (p.DimScale > 0)
@@ -815,8 +828,8 @@ namespace SmartConnector
                 }
                 catch (Exception)
                 {
-                    for (int i = created.Count - 1; i >= 0; i--) { try { ((dynamic)created[i]).Delete(); } catch (Exception) { } }
-                    foreach (string layerName in layersCreated) { try { doc.Layers.Item(layerName).Delete(); } catch (Exception) { } }
+                    for (int i = created.Count - 1; i >= 0; i--) { int at = i; try { RetryWhenBusy<bool>(delegate { ((dynamic)created[at]).Delete(); return true; }); } catch (Exception) { } }   // a busy AutoCAD must not leave half of a plan behind
+                    foreach (string layerName in layersCreated) { string ln = layerName; try { RetryWhenBusy<bool>(delegate { doc.Layers.Item(ln).Delete(); return true; }); } catch (Exception) { } }
                     throw;
                 }
             }
@@ -825,7 +838,7 @@ namespace SmartConnector
             if (guarded) DryRunGuard.Used(guardKey);   // a plan is drawn once per dry run
             int after = Convert.ToInt32(space.Count);
             Dictionary<string, object> data = Json.Object("steps", plan.Count, "objects_created", objects, "layers_created", layersCreated, "counts", counts, "handles", handles,
-                "layout", layout.Length == 0 ? "Model" : layout, "object_count_before", before, "object_count_after", after, "count_matches_plan", after - before == objects);
+                "layout", layout.Length == 0 ? "Model" : layout, "space", layout.Length == 0 || layout == "Model" ? "model space" : "paper space of layout " + layout, "object_count_before", before, "object_count_after", after, "count_matches_plan", after - before == objects);
             if (loopForms.Count > 0) data["hatch_loop_array_form"] = loopForms;
             if (warnings.Count > 0) data["warnings"] = warnings;
             return Json.Object("drawing", DrawingId((object)doc), "result", data, "save_performed", false);
@@ -1004,7 +1017,7 @@ namespace SmartConnector
                 // The viewport is ours, so the detail can go in the middle of the sheet: that needs the layout's paper size from AutoCAD.
                 if (!apply0(a)) throw new ToolException("view.paper_centre is needed to preview without AutoCAD. With apply and create_viewport it defaults to the centre of the layout's sheet.");
                 if (Json.GetString(a, "expected_drawing").Length == 0) throw new ToolException("expected_drawing is required when apply is true.");
-                doc = ActiveDrawing();
+                doc = RetryWhenBusy<object>(delegate { return (object)ActiveDrawing(); });
                 if (!String.Equals(DrawingId((object)doc), Json.GetString(a, "expected_drawing"), StringComparison.OrdinalIgnoreCase))
                     throw new ToolException("Active drawing changed or expected_drawing is incorrect. Read drawing_info again.");
                 place.PaperCentre = SheetCentre((object)doc, Json.GetString(a, "layout"));
@@ -1016,8 +1029,8 @@ namespace SmartConnector
             {
                 // The brief is valid. Now the drawing's own layers and blocks decide which layer set is used, so read them and build again.
                 if (Json.GetString(a, "expected_drawing").Length == 0) throw new ToolException("expected_drawing is required when apply is true.");
-                if (doc == null) doc = ActiveDrawing();
-                place.Facts = ReadFacts((object)doc);
+                if (doc == null) doc = RetryWhenBusy<object>(delegate { return (object)ActiveDrawing(); });
+                place.Facts = RetryWhenBusy<DrawingFacts>(delegate { return ReadFacts((object)doc); });
                 built = AutoCadDetail.Build(Json.GetString(a, "template"), parameters, scale, ox, oy, dimStyle, textStyle, dimScale, place);
             }
 
@@ -1062,6 +1075,14 @@ namespace SmartConnector
         {
             dynamic doc = docSource;
             if (layout.Length == 0 || layout == "Model" || !Names((object)doc.Layouts).Contains(layout)) throw new ToolException("Layout not found: " + layout);
+            double[] size = SheetSize(docSource, layout);
+            return new[] { Math.Round(size[0] / 2.0, 1), Math.Round(size[1] / 2.0, 1) };
+        }
+
+        // The effective sheet size of a layout in millimetres (width, height), after units and plot rotation.
+        internal static double[] SheetSize(object docSource, string layout)
+        {
+            dynamic doc = docSource;
             dynamic sheet = doc.Layouts.Item(layout);
             double w = 0, h = 0;
             try { sheet.GetPaperSize(out w, out h); }
@@ -1072,7 +1093,144 @@ namespace SmartConnector
             int rotation = Convert.ToInt32(sheet.PlotRotation);
             if (rotation == 1 || rotation == 3) { double t = w; w = h; h = t; }
             if (w < 50 || h < 50) throw new ToolException("Layout '" + layout + "' has no usable paper size (" + w.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + " x " + h.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + " mm). Choose a paper size in Page Setup, or give view.paper_centre.");
-            return new[] { Math.Round(w / 2.0, 1), Math.Round(h / 2.0, 1) };
+            return new[] { w, h };
+        }
+
+        // The viewports a layout already has (not its own paper viewport): handle, centre, size and scale, in paper millimetres.
+        internal static List<Dictionary<string, object>> ReadViewports(object docSource, string layout)
+        {
+            List<Dictionary<string, object>> found = new List<Dictionary<string, object>>();
+            dynamic block = ((dynamic)docSource).Layouts.Item(layout).Block;
+            int count = Convert.ToInt32(block.Count);
+            if (count > 3000) return found;   // a very full layout: not worth the time
+            for (int i = 0; i < count; i++)
+            {
+                try
+                {
+                    dynamic entity = block.Item(i);
+                    if (Convert.ToString(entity.ObjectName) != "AcDbViewport") continue;
+                    double custom = Convert.ToDouble(entity.CustomScale);
+                    if (custom <= 0) continue;
+                    double[] centre = ((double[])entity.Center);
+                    found.Add(Json.Object("handle", Convert.ToString(entity.Handle), "centre", new object[] { Math.Round(centre[0], 1), Math.Round(centre[1], 1) },
+                        "size", new object[] { Math.Round(Convert.ToDouble(entity.Width), 1), Math.Round(Convert.ToDouble(entity.Height), 1) }, "scale", "1:" + Math.Round(1.0 / custom, 2).ToString(System.Globalization.CultureInfo.InvariantCulture)));
+                }
+                catch (Exception) { }
+            }
+            return found;
+        }
+
+        private static readonly string[] PaperNames = { "A0", "A1", "A2", "A3", "A4" };
+        private static readonly double[][] PaperMm = { new[] { 841.0, 1189.0 }, new[] { 594.0, 841.0 }, new[] { 420.0, 594.0 }, new[] { 297.0, 420.0 }, new[] { 210.0, 297.0 } };
+
+        // The canonical media name for an ISO paper size (short side, long side in mm): one whose name carries that size, never a full-bleed variant.
+        internal static string PickMedia(IEnumerable<string> names, double shortSide, double longSide)
+        {
+            System.Text.RegularExpressions.Regex size = new System.Text.RegularExpressions.Regex(@"(\d+(?:\.\d+)?)_x_(\d+(?:\.\d+)?)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            foreach (string name in names)
+            {
+                if (name == null || name.IndexOf("bleed", StringComparison.OrdinalIgnoreCase) >= 0) continue;
+                System.Text.RegularExpressions.Match m = size.Match(name);
+                if (!m.Success) continue;
+                double x = Double.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture), y = Double.Parse(m.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture);
+                double lo = Math.Min(x, y), hi = Math.Max(x, y);
+                if (Math.Abs(lo - shortSide) < 0.6 && Math.Abs(hi - longSide) < 0.6) return name;
+            }
+            return null;
+        }
+
+        // Sets a layout's paper size and orientation through its page setup: the plot device, its canonical media, millimetres and the rotation.
+        // Dry run (default) reports the current state and what would be set and changes nothing; a real run needs a passed dry run of the same job.
+        internal static object PrepareLayout(object docSource, IDictionary<string, object> a)
+        {
+            dynamic doc = docSource;
+            string layout = Json.GetString(a, "layout");
+            if (layout.Length == 0 || layout == "Model" || !Names((object)doc.Layouts).Contains(layout)) throw new ToolException("Layout not found: " + layout + ". Model space has no sheet.");
+            string paper = Json.GetString(a, "paper").ToUpperInvariant();
+            int index = Array.IndexOf(PaperNames, paper);
+            if (index < 0) throw new ToolException("paper must be one of A0, A1, A2, A3, A4 (ISO).");
+            string orientation = Json.GetString(a, "orientation").ToLowerInvariant();
+            if (orientation != "landscape" && orientation != "portrait") throw new ToolException("orientation must be landscape or portrait.");
+            string device = Json.GetString(a, "plot_device");
+            if (device.Length == 0) device = "DWG To PDF.pc3";
+            bool dry = !a.ContainsKey("dry_run") || (bool)a["dry_run"];
+            bool landscape = orientation == "landscape";
+            double wantW = landscape ? PaperMm[index][1] : PaperMm[index][0], wantH = landscape ? PaperMm[index][0] : PaperMm[index][1];
+            string id = DrawingId((object)doc);
+            double[] current = null; string currentNote = null;
+            try { current = SheetSize((object)doc, layout); } catch (ToolException e) { currentNote = e.Message; }
+            bool already = current != null && Math.Abs(current[0] - wantW) < 1 && Math.Abs(current[1] - wantH) < 1;
+            string key = DryRunGuard.Key(id, "prepare_layout", layout, paper, orientation, device);
+            Dictionary<string, object> state = Json.Object("drawing", id, "layout", layout, "current_sheet_size_mm", current == null ? null : new object[] { Math.Round(current[0], 1), Math.Round(current[1], 1) });
+            if (currentNote != null) state["current_note"] = currentNote;
+            if (dry)
+            {
+                DryRunGuard.Passed_(key);
+                state["applied"] = false; state["already_correct"] = already;
+                state["would_set"] = Json.Object("plot_device", device, "paper", "ISO " + paper, "orientation", orientation, "sheet_size_mm", new object[] { wantW, wantH },
+                    "steps", new object[] { "make the layout current", "plot device " + device + " and refresh its media list", "canonical media for " + wantH.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + " x " + wantW.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + " mm without full bleed", "paper units millimetres", "plot rotation for " + orientation });
+                state["note"] = "This changes the layout's page setup (not the geometry). Show the user this and wait for their yes before the real run.";
+                return state;
+            }
+            DryRunGuard.Require(key);
+            if (already) { DryRunGuard.Used(key); state["applied"] = false; state["already_correct"] = true; return state; }
+
+            string media = null; int rotation = 0; double[] after;
+            doc.StartUndoMark();
+            try
+            {
+                dynamic sheet = doc.Layouts.Item(layout);
+                RetryWhenBusy<bool>(delegate { doc.ActiveLayout = sheet; return true; });
+                WaitUntilReady((object)doc);
+                RetryWhenBusy<bool>(delegate { sheet.ConfigName = device; return true; });
+                RetryWhenBusy<bool>(delegate { sheet.RefreshPlotDeviceInfo(); return true; });
+                List<string> names = new List<string>();
+                foreach (object o in (System.Collections.IEnumerable)RetryWhenBusy<object>(delegate { return sheet.GetCanonicalMediaNames(); })) names.Add(Convert.ToString(o));
+                media = PickMedia(names, PaperMm[index][0], PaperMm[index][1]);
+                if (media == null) throw new ToolException("Plot device '" + device + "' has no " + paper + " media (" + PaperMm[index][0] + " x " + PaperMm[index][1] + " mm, not full bleed), so nothing was changed. Give another plot_device, or set the paper in AutoCAD's Page Setup.");
+                string chosen = media;
+                RetryWhenBusy<bool>(delegate { sheet.CanonicalMediaName = chosen; return true; });
+                RetryWhenBusy<bool>(delegate { sheet.PaperUnits = 1; return true; });
+                double w = 0, h = 0;
+                sheet.GetPaperSize(out w, out h);
+                rotation = ((w < h) == landscape) ? 1 : 0;   // the media is stored portrait or landscape; rotate it into the wanted orientation
+                int rot = rotation;
+                RetryWhenBusy<bool>(delegate { sheet.PlotRotation = rot; return true; });
+                after = SheetSize((object)doc, layout);
+                if (Math.Abs(after[0] - wantW) > 1 || Math.Abs(after[1] - wantH) > 1)
+                    throw new ToolException("The layout reads " + after[0].ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + " x " + after[1].ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + " mm after the page setup instead of " + wantW.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + " x " + wantH.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + ". Check the layout's Page Setup in AutoCAD.");
+            }
+            finally { try { doc.EndUndoMark(); } catch (Exception) { } }
+            DryRunGuard.Used(key);
+            state["applied"] = true; state["media"] = media; state["plot_rotation"] = rotation; state["plot_device"] = device;
+            state["sheet_size_mm"] = new object[] { Math.Round(after[0], 1), Math.Round(after[1], 1) };
+            state["note"] = "The layout's page setup was changed. Page setup changes may not be undone by one U; nothing was saved.";
+            return state;
+        }
+
+        // Each layout's sheet size, plot rotation, paper-space object count and existing viewports, for drawing_info.
+        internal static List<object> LayoutDetails(object docSource)
+        {
+            dynamic doc = docSource;
+            List<object> details = new List<object>();
+            int count = Convert.ToInt32(doc.Layouts.Count);
+            for (int i = 0; i < count; i++)
+            {
+                string name = Convert.ToString(doc.Layouts.Item(i).Name);
+                if (name == "Model") continue;
+                Dictionary<string, object> d = Json.Object("name", name);
+                try { double[] size = SheetSize(docSource, name); d["sheet_size_mm"] = new object[] { Math.Round(size[0], 1), Math.Round(size[1], 1) }; d["ready"] = true; }
+                catch (Exception e)
+                {
+                    d["sheet_size_mm"] = null; d["sheet_size_note"] = e.Message; d["ready"] = false;
+                    d["setup_needed"] = "This layout has no usable paper size. Ask the user which paper size (A0 to A4) and orientation the sheet should be, then run prepare_layout (dry run first, then their yes).";
+                }
+                try { d["plot_rotation"] = Convert.ToInt32(doc.Layouts.Item(name).PlotRotation); } catch (Exception) { }
+                try { d["paper_space_objects"] = Convert.ToInt32(doc.Layouts.Item(name).Block.Count); } catch (Exception) { }
+                try { d["existing_viewports"] = ReadViewports(docSource, name); } catch (Exception) { }
+                details.Add(d);
+            }
+            return details;
         }
 
         // The reference sheets use dimension style na1, text style EN-S for notes and EN-SCB for titles. A step the caller gave an
@@ -1114,7 +1272,8 @@ namespace SmartConnector
         internal static object ApplyGenerated(object docSource, IDictionary<string, object> a, DetailResult built, Dictionary<string, object> generated)
         {
             dynamic doc = docSource;
-            string id = DrawingId(docSource);
+            WaitUntilReady(docSource);
+            string id = RetryWhenBusy<string>(delegate { return DrawingId(docSource); });
             if (!String.Equals(id, Json.GetString(a, "expected_drawing"), StringComparison.OrdinalIgnoreCase))
                 throw new ToolException("Active drawing changed or expected_drawing is incorrect. Read drawing_info again.");
             int units;
@@ -1123,9 +1282,31 @@ namespace SmartConnector
             if (units != 4)
                 throw new ToolException("The drawing is not in millimetres (INSUNITS = " + units.ToString(System.Globalization.CultureInfo.InvariantCulture) + "), so nothing was drawn. The Detail Generator works in millimetres only; start from a millimetre template such as acadiso.dwt.");
 
-            if (!a.ContainsKey("use_reference_styles") || (bool)a["use_reference_styles"]) ResolveReferenceStyles(docSource, built, generated);
+            if (!a.ContainsKey("use_reference_styles") || (bool)a["use_reference_styles"]) RetryWhenBusy<bool>(delegate { ResolveReferenceStyles(docSource, built, generated); return true; });
+            string sheetName = Json.GetString(a, "layout");
+            if (built.PaperItems.Count > 0 && sheetName.Length > 0 && built.Summary.ContainsKey("paper_footprint"))
+            {
+                // The paper size comes from the layout's page setup, not from what the brief assumes: say so before anything is drawn.
+                try
+                {
+                    double[] half = SheetCentre(docSource, sheetName);
+                    double[] foot = ((object[])built.Summary["paper_footprint"]).Select(o => Convert.ToDouble(o, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+                    generated["sheet_size_mm"] = new object[] { half[0] * 2, half[1] * 2 };
+                    if (foot[0] < -5 || foot[1] < -5 || foot[2] > half[0] * 2 + 5 || foot[3] > half[1] * 2 + 5)
+                        built.Warnings.Add("This view needs x " + foot[0].ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + " to " + foot[2].ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)
+                            + ", y " + foot[1].ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + " to " + foot[3].ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)
+                            + " mm on the sheet, but layout '" + sheetName + "' is " + (half[0] * 2).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + " x " + (half[1] * 2).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)
+                            + " mm (Page Setup). Part of the view falls outside the paper: set the layout's paper size or move the view.");
+                }
+                catch (ToolException e)
+                {
+                    generated["layout_needs_setup"] = true;
+                    built.Warnings.Add("Layout '" + sheetName + "' has no usable paper size (" + e.Message + ") so the sheet size and the fit of this view could not be checked. Ask the user which paper size (A0 to A4) and orientation the sheet should be, then run prepare_layout on it (dry run first, then their yes).");
+                }
+                catch (Exception) { }
+            }
             bool update = a.ContainsKey("update_layers") && (bool)a["update_layers"];
-            HashSet<string> existing = Names((object)doc.Layers);
+            HashSet<string> existing = RetryWhenBusy<HashSet<string>>(delegate { return Names((object)doc.Layers); });
             List<object> steps = new List<object>();
             List<string> kept = new List<string>();
             foreach (Dictionary<string, object> item in built.Items)
@@ -1134,11 +1315,18 @@ namespace SmartConnector
                 steps.Add(item);
             }
             bool dry = !a.ContainsKey("dry_run") || (bool)a["dry_run"];
-            Dictionary<string, object> planArguments = Json.Object("expected_drawing", id, "dry_run", dry, "items", steps.ToArray());
+            // The dry-run rule is checked here for the whole job, by a key over the brief (everything the generator was asked to draw), not over the
+            // steps that survive "layer already exists": drawing another view in between creates layers, which changes those steps but not the job.
+            string guardKey = DryRunGuard.Key(id, built.Items, built.PaperItems, Json.GetString(a, "layout"), a.ContainsKey("create_viewport") && (bool)a["create_viewport"], update,
+                built.Summary.ContainsKey("paper_centre") ? built.Summary["paper_centre"] : null, built.Summary.ContainsKey("model_centre") ? built.Summary["model_centre"] : null,
+                a.ContainsKey("__viewport_size") ? a["__viewport_size"] : null);
+            Dictionary<string, object> planArguments = Json.Object("expected_drawing", id, "dry_run", dry, "items", steps.ToArray(), "__guard_skip", true);
             if (kept.Count > 0) generated["existing_layers_left_unchanged"] = kept;
             if (built.PaperItems.Count == 0)
             {
+                if (!dry) DryRunGuard.Require(guardKey);
                 object planResult = ApplyPlan(docSource, planArguments);
+                if (dry) DryRunGuard.Passed_(guardKey); else DryRunGuard.Used(guardKey);
                 return Json.Object("applied", !dry, "generated", generated, "plan_result", planResult);
             }
 
@@ -1155,18 +1343,34 @@ namespace SmartConnector
             ViewportPlan viewport = null;
             if (createViewport)
             {
-                viewport = PlanViewport(docSource, a, built);
+                viewport = RetryWhenBusy<ViewportPlan>(delegate { return PlanViewport(docSource, a, built); });
                 generated["viewport"] = viewport.Describe();
             }
             else
             {
-                string viewportWarning = ViewportWarning(docSource, layout, built.Scale);
+                string viewportWarning = RetryWhenBusy<string>(delegate { return ViewportWarning(docSource, layout, built.Scale); });
                 if (viewportWarning != null) generated["viewport_warning"] = viewportWarning;
             }
-            // The dry-run rule for the whole job (geometry, annotation and viewport): one key over everything that decides what is drawn.
-            string guardKey = DryRunGuard.Key(id, steps, paperSteps, layout, createViewport,
-                built.Summary.ContainsKey("paper_centre") ? built.Summary["paper_centre"] : null, built.Summary.ContainsKey("model_centre") ? built.Summary["model_centre"] : null,
-                a.ContainsKey("__viewport_size") ? a["__viewport_size"] : null);
+            try
+            {
+                // Views already on the sheet (earlier views, the template's own viewport): say so when one overlaps this view's viewport or annotation.
+                List<Dictionary<string, object>> others = RetryWhenBusy<List<Dictionary<string, object>>>(delegate { return ReadViewports(docSource, layout); });
+                if (others.Count > 0) generated["existing_viewports"] = others;
+                double[] foot = built.Summary.ContainsKey("paper_footprint") ? ((object[])built.Summary["paper_footprint"]).Select(o => Convert.ToDouble(o, System.Globalization.CultureInfo.InvariantCulture)).ToArray() : null;
+                foreach (Dictionary<string, object> other in others)
+                {
+                    object[] c = (object[])other["centre"], z = (object[])other["size"];
+                    double ox0 = (double)c[0] - (double)z[0] / 2, oy0 = (double)c[1] - (double)z[1] / 2, ox1 = (double)c[0] + (double)z[0] / 2, oy1 = (double)c[1] + (double)z[1] / 2;
+                    Func<double, double, double, double, bool> hits = (x0, y0, x1, y1) => x0 < ox1 && ox0 < x1 && y0 < oy1 && oy0 < y1;
+                    string what = null;
+                    if (viewport != null && hits(viewport.Centre[0] - viewport.Width / 2, viewport.Centre[1] - viewport.Height / 2, viewport.Centre[0] + viewport.Width / 2, viewport.Centre[1] + viewport.Height / 2)) what = "the new viewport";
+                    else if (foot != null && hits(foot[0], foot[1], foot[2], foot[3])) what = "this view's annotation";
+                    if (what != null)
+                        built.Warnings.Add("Viewport " + other["handle"] + " (centre " + ((double)c[0]).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + ", " + ((double)c[1]).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)
+                            + ", size " + ((double)z[0]).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + " x " + ((double)z[1]).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + ") already overlaps " + what + " on layout '" + layout + "'. Move one of them, or delete the old viewport if it is not wanted.");
+                }
+            }
+            catch (Exception) { }
             if (dry)
             {
                 DryRunGuard.Passed_(guardKey);
@@ -1174,13 +1378,12 @@ namespace SmartConnector
             }
             DryRunGuard.Require(guardKey);
 
-            planArguments["__guard_skip"] = true;
             object modelResult = ApplyPlan(docSource, planArguments);
             paperArguments["dry_run"] = false;
             object paperResult;
             DryRunGuard.Used(guardKey);
             try { paperResult = ApplyPlan(docSource, paperArguments); }
-            catch (ToolException e) { throw new ToolException("The geometry was drawn in model space, but the annotation in layout '" + layout + "' failed and was rolled back: " + e.Message + " Undo once (U) to remove the geometry, fix the cause, then run again."); }
+            catch (Exception e) { throw new ToolException("The geometry was drawn in model space, but the annotation in layout '" + layout + "' failed and was rolled back: " + e.Message + " Undo once (U) to remove the geometry, fix the cause, then run again."); }
             if (viewport == null) return Json.Object("applied", true, "generated", generated, "plan_result", modelResult, "paper_plan_result", paperResult);
             try
             {
@@ -1220,6 +1423,19 @@ namespace SmartConnector
             return false;
         }
 
+        // Waits (up to about 15 seconds) until AutoCAD answers and no command is running. Right after a viewport zoom or a regeneration AutoCAD can
+        // reject the next call for a moment; the run then starts from a quiet state instead of failing on its first read. Reads only.
+        internal static void WaitUntilReady(object docSource)
+        {
+            dynamic doc = docSource;
+            for (int attempt = 1; attempt <= 15; attempt++)
+            {
+                try { if (Convert.ToInt32(doc.GetVariable("CMDACTIVE")) == 0) return; }
+                catch (Exception e) { if (!IsAutoCadBusy(e)) return; }
+                Pause(1000);
+            }
+        }
+
         internal static T RetryWhenBusy<T>(Func<T> operation)
         {
             for (int attempt = 1; ; attempt++)
@@ -1227,7 +1443,12 @@ namespace SmartConnector
                 try { return operation(); }
                 catch (Exception e)
                 {
-                    if (attempt >= BusyRetries || !IsAutoCadBusy(e)) throw;
+                    if (!IsAutoCadBusy(e)) throw;
+                    if (attempt >= BusyRetries)
+                    {
+                        string where = (e.StackTrace ?? "").Split('\n').Select(l => l.Trim()).FirstOrDefault(l => l.Length > 0) ?? "";
+                        throw new ToolException("AutoCAD kept rejecting calls for about 15 seconds (" + e.Message + "). Where: " + where + ". Close any dialog or command in AutoCAD, check the drawing, and run again.");
+                    }
                     Pause(1000 * attempt);
                 }
             }
@@ -1341,32 +1562,46 @@ namespace SmartConnector
                         layer.Plottable = false;
                     }
                     doc.ActiveLayout = sheet;
+                    WaitUntilReady(docSource);
                     try { doc.ActiveSpace = 0; } catch (Exception) { }
                     try { doc.Regen(1); } catch (Exception) { }
-                    viewport = sheet.Block.AddPViewport(new double[] { v.Centre[0], v.Centre[1], 0 }, v.Width, v.Height);
+                    for (int wait = 0; wait < 10; wait++)   // the layout switch can still be settling: the paper-space block is only valid once it is current
+                    {
+                        string current = null;
+                        try { current = Convert.ToString(doc.ActiveLayout.Name); } catch (Exception) { break; }
+                        if (String.Equals(current, layout, StringComparison.OrdinalIgnoreCase)) break;
+                        Pause(300);
+                    }
+                    double[] viewportCentre = new double[] { v.Centre[0], v.Centre[1], 0 };
+                    try { viewport = sheet.Block.AddPViewport(viewportCentre, v.Width, v.Height); }
+                    catch (Microsoft.CSharp.RuntimeBinder.RuntimeBinderException) { viewport = doc.PaperSpace.AddPViewport(viewportCentre, v.Width, v.Height); }   // live: the layout's Block was not the paper space yet
                     viewport.Layer = v.LayerName;
                     viewport.Display(true);
                     string handle = Convert.ToString(viewport.Handle);
-                    string method, zoomError = null;
-                    try
+                    string method = null, zoomError = null;
+                    for (int zoomTry = 1; method == null; zoomTry++)
                     {
-                        doc.Regen(1);
-                        doc.MSpace = true;
-                        doc.ActivePViewport = viewport;
-                        doc.Application.ZoomCenter(new double[] { v.ViewCentre[0], v.ViewCentre[1], 0 }, v.Height * v.Scale);
-                        viewport.CustomScale = 1.0 / v.Scale;
-                        doc.MSpace = false;
-                        method = "zoom";
-                    }
-                    catch (Exception e)
-                    {
-                        zoomError = e.Message;
-                        try { doc.MSpace = false; } catch (Exception) { }
-                        double[] offset = ReadViewportView(docSource, handle, 12000);
-                        if (Math.Abs(offset[4]) > 1e-9) throw new ToolException("the new viewport's view is twisted; only plan views are supported.");
-                        viewport.Target = new double[] { v.ViewCentre[0] - offset[0], v.ViewCentre[1] - offset[1], 0 };
-                        viewport.CustomScale = 1.0 / v.Scale;
-                        method = "target";
+                        try
+                        {
+                            doc.Regen(1);
+                            doc.MSpace = true;
+                            doc.ActivePViewport = viewport;
+                            doc.Application.ZoomCenter(new double[] { v.ViewCentre[0], v.ViewCentre[1], 0 }, v.Height * v.Scale);
+                            viewport.CustomScale = 1.0 / v.Scale;
+                            doc.MSpace = false;
+                            method = "zoom";
+                        }
+                        catch (Exception e)
+                        {
+                            zoomError = e.Message;
+                            try { doc.MSpace = false; } catch (Exception) { }
+                            if (zoomTry < 2) { Pause(1500); continue; }   // the layout switch can still be settling: one more try before the fallback
+                            double[] offset = ReadViewportView(docSource, handle, 12000);
+                            if (Math.Abs(offset[4]) > 1e-9) throw new ToolException("the new viewport's view is twisted; only plan views are supported.");
+                            viewport.Target = new double[] { v.ViewCentre[0] - offset[0], v.ViewCentre[1] - offset[1], 0 };
+                            viewport.CustomScale = 1.0 / v.Scale;
+                            method = "target";
+                        }
                     }
 
                     // read the view back; correct it through Target if it is off; without an answer, say it was not read back
@@ -1449,7 +1684,7 @@ namespace SmartConnector
                 case "drawing_info":
                     return Json.Object("name", Convert.ToString(doc.Name), "path", Convert.ToString(doc.FullName), "drawing_id", DrawingId((object)doc), "version", Convert.ToString(cad.Version),
                         "units_code", Plain(doc.GetVariable("INSUNITS")), "model_space_objects", Convert.ToInt32(doc.ModelSpace.Count), "saved", (bool)doc.Saved, "read_only", (bool)doc.ReadOnly,
-                        "active_layout", Convert.ToString(doc.ActiveLayout.Name), "layouts", Each((object)doc.Layouts, l => Convert.ToString(l.Name)));
+                        "active_layout", Convert.ToString(doc.ActiveLayout.Name), "layouts", Each((object)doc.Layouts, l => Convert.ToString(l.Name)), "layout_details", LayoutDetails((object)doc));
                 case "list_layers":
                     return Json.Object("drawing", DrawingId((object)doc), "layers", Each((object)doc.Layers, l => Json.Object("name", Convert.ToString(l.Name), "color", Plain(l.Color), "on", (bool)l.LayerOn, "frozen", (bool)l.Freeze, "locked", (bool)l.Lock)));
                 case "list_entities":
@@ -1462,6 +1697,7 @@ namespace SmartConnector
 
             if (name == "apply_plan") return ApplyPlan((object)doc, a);
             if ((bool)doc.ReadOnly) throw new ToolException("Drawing is read-only.");
+            if (name == "prepare_layout") return PrepareLayout((object)doc, a);
             if (name == "save_drawing")
             {
                 if (String.IsNullOrEmpty(Convert.ToString(doc.Path))) throw new ToolException("Save this drawing to a file in AutoCAD first.");
