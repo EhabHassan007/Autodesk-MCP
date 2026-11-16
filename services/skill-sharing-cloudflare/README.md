@@ -118,8 +118,8 @@ Migration `0007_failures.sql` adds `failures` (one cleaned message per fingerpri
 
 Owner setup:
 
-1. In Notion, create the "Connector failures" database on the "Smart Connector – Team Insights" page with the columns above, and copy its data source ID.
-2. Add `"NOTION_FAILURES_SOURCE": "<id>"` to `vars` in `wrangler.jsonc`.
+1. The "Connector failures" database already exists on the "Smart Connector – Team Insights" page (data source `NOTION_FAILURES_SOURCE`, `41a5a80a-6f4f-8187-a925-000beeaf74ac`, set in `wrangler.jsonc`). Its Status options are New, Investigating, Fix planned, Fixed, User mistake and Ignore.
+2. Make sure the integration is connected to that page (••• → Connections), as for the other databases.
 3. `npm run migrate:remote`, then `npm run deploy` (registers the third cron).
 4. Run `POST /admin/api/notion-failures` once.
 
