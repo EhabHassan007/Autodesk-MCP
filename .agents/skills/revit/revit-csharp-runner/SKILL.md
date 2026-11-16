@@ -32,7 +32,7 @@ Use dynamic C# only when a narrower MCP command cannot complete the authorized t
 |---|---|---|
 | `read` | false | Inspection only. No transaction is supplied. |
 | `transaction` | true | Project writes inside one automatic transaction (`dry_run=true` to preview). Read back in a separate call. |
-| `manual` | false | Probe: create, edit, save (to a temporary path) and close family documents. The project runs inside a transaction group that is always rolled back; any project change is undone and reported as `[probe_changed_project]`. |
+| `manual` | false | Probe: create, edit, save (to a temporary path) and close family documents. The project runs inside a transaction group that is always rolled back; any project change is undone and reported as `[probe_changed_project]`. Saving or synchronizing any non-family document is cancelled, and a change to another project is reported too (it cannot be rolled back, so close that document without saving). |
 | `manual` | true | Code that manages its own project transactions, or changes the project from a family document (for example `famDoc.LoadFamily(document)`). |
 
 ## Errors, time limits and jobs

@@ -299,10 +299,18 @@ namespace BimCadMcp.Revit
                 "  }\n" +
                 "}\n";
 
+            // Debug information lets a runtime error name the script line (the #line directive maps it to mcp_code.cs). The script
+            // is compiled into a private temporary folder and loaded from bytes together with its PDB: CodeDom's GenerateInMemory
+            // loads the DLL without the PDB, so stack frames would carry no line numbers. Loading bytes locks no file, and the
+            // folder is deleted afterwards.
+            string buildFolder = Path.Combine(Path.GetTempPath(), "BimCadMcp-csharp-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(buildFolder);
+            string assemblyPath = Path.Combine(buildFolder, "mcp_code.dll");
             CompilerParameters compilerParameters = new CompilerParameters();
             compilerParameters.GenerateExecutable = false;
-            compilerParameters.GenerateInMemory = true;
-            // Debug information lets a runtime error name the script line (the #line directive maps it to mcp_code.cs).
+            compilerParameters.GenerateInMemory = false;
+            compilerParameters.OutputAssembly = assemblyPath;
+            compilerParameters.TempFiles = new TempFileCollection(buildFolder, false);
             compilerParameters.IncludeDebugInformation = true;
             compilerParameters.TreatWarningsAsErrors = false;
 
@@ -314,14 +322,25 @@ namespace BimCadMcp.Revit
             AddReference(references, compilerParameters, typeof(Document).Assembly.Location);
             AddReference(references, compilerParameters, typeof(UIApplication).Assembly.Location);
 
-            CompilerResults results;
-            using (CSharpCodeProvider provider = new CSharpCodeProvider(new Dictionary<string, string> { { "CompilerVersion", "v4.0" } }))
+            Assembly compiled;
+            try
             {
-                results = provider.CompileAssemblyFromSource(compilerParameters, source);
+                CompilerResults results;
+                using (CSharpCodeProvider provider = new CSharpCodeProvider(new Dictionary<string, string> { { "CompilerVersion", "v4.0" } }))
+                {
+                    results = provider.CompileAssemblyFromSource(compilerParameters, source);
+                }
+                if (results.Errors.HasErrors) throw new McpException("compile_error", CompileMessage(results, code));
+                string symbolsPath = Path.ChangeExtension(assemblyPath, ".pdb");
+                byte[] symbols = File.Exists(symbolsPath) ? File.ReadAllBytes(symbolsPath) : null;
+                compiled = Assembly.Load(File.ReadAllBytes(assemblyPath), symbols);
             }
-            if (results.Errors.HasErrors) throw new McpException("compile_error", CompileMessage(results, code));
+            finally
+            {
+                try { Directory.Delete(buildFolder, true); } catch (Exception) { }
+            }
 
-            Type entry = results.CompiledAssembly.GetType("BimCadMcpDynamicEntry", true);
+            Type entry = compiled.GetType("BimCadMcpDynamicEntry", true);
             MethodInfo run = entry.GetMethod("Run", BindingFlags.Public | BindingFlags.Static);
             if (run == null) throw new McpException("compile_error", "Compiled C# entry point was not found.");
 
@@ -381,43 +400,109 @@ namespace BimCadMcp.Revit
         }
 
         // manual with allow_model_changes=false. The code runs inside a project transaction group that is always rolled back,
-        // so nothing it commits to the project survives. Family documents it opens are separate documents and are not affected.
-        // A project change is reported as an error, because the caller declared a run without model changes.
+        // so nothing it commits to the project survives. Family documents are separate documents: the code may create, edit,
+        // save and close them. Any other document is guarded: saving or synchronizing a project or other non-family document is
+        // cancelled during the run, and a change to one is reported, because the caller declared a run without model changes and
+        // only the active project's changes can be rolled back here. The script's own error always comes first.
         private static string RunProbe(MethodInfo run, UIApplication application, Document document, string parametersJson, string transactionName)
         {
+            Autodesk.Revit.ApplicationServices.Application app = application.Application;
             List<string> projectTransactions = new List<string>();
+            List<string> otherChanges = new List<string>();
+            List<string> blockedSaves = new List<string>();
             EventHandler<DocumentChangedEventArgs> watch = (sender, args) =>
             {
-                Document changed = args.GetDocument();
-                if (changed != null && changed.Equals(document)) projectTransactions.AddRange(args.GetTransactionNames());
+                try
+                {
+                    Document changed = args.GetDocument();
+                    if (changed == null) return;
+                    if (changed.Equals(document)) projectTransactions.AddRange(args.GetTransactionNames());
+                    else if (!changed.IsFamilyDocument) otherChanges.Add(changed.Title + " (" + String.Join(", ", args.GetTransactionNames().ToArray()) + ")");
+                }
+                catch (Exception) { }
             };
-            string resultText;
-            using (TransactionGroup group = new TransactionGroup(document, "Smart Connector probe: " + transactionName))
+            EventHandler<DocumentSavingEventArgs> guardSave = (sender, args) => GuardSave(args.Document, args, "save", blockedSaves);
+            EventHandler<DocumentSavingAsEventArgs> guardSaveAs = (sender, args) => GuardSave(args.Document, args, "save as", blockedSaves);
+            EventHandler<DocumentSynchronizingWithCentralEventArgs> guardSync = (sender, args) => GuardSave(args.Document, args, "synchronize", blockedSaves);
+
+            string resultText = null;
+            Exception scriptError = null;
+            string rollbackProblem = null;
+            TransactionGroup group = new TransactionGroup(document, "Smart Connector probe: " + transactionName);
+            try
             {
                 group.Start();
-                application.Application.DocumentChanged += watch;
+                app.DocumentChanged += watch;
+                app.DocumentSaving += guardSave;
+                app.DocumentSavingAs += guardSaveAs;
+                app.DocumentSynchronizingWithCentral += guardSync;
                 try
                 {
                     resultText = Invoke(run, application, document, parametersJson);
                 }
+                catch (Exception exception)
+                {
+                    scriptError = exception;
+                }
                 finally
                 {
-                    application.Application.DocumentChanged -= watch;
-                    try
-                    {
-                        if (group.GetStatus() == TransactionStatus.Started) group.RollBack();
-                    }
+                    app.DocumentChanged -= watch;
+                    app.DocumentSaving -= guardSave;
+                    app.DocumentSavingAs -= guardSaveAs;
+                    app.DocumentSynchronizingWithCentral -= guardSync;
+                }
+
+                // A project transaction the code started and never committed or disposed blocks the rollback. The rollback is
+                // attempted on its own, so a failure here is added to the script's error instead of replacing it.
+                if (document.IsModifiable)
+                    rollbackProblem = "The code left a project transaction open, so the probe could not be rolled back. Check the model and undo any change from this run before doing anything else.";
+                else
+                {
+                    try { if (group.GetStatus() == TransactionStatus.Started) group.RollBack(); }
                     catch (Exception exception)
                     {
-                        throw new McpException("rollback_failed", "The probe could not be rolled back: " + exception.Message + " Check the model before doing anything else.", exception);
+                        rollbackProblem = "The probe could not be rolled back: " + exception.Message + " Check the model and undo any change from this run before doing anything else.";
                     }
                 }
             }
-            if (projectTransactions.Count > 0)
-                throw new McpException("probe_changed_project", "The code changed the project document (" +
-                    String.Join(", ", projectTransactions.Distinct().ToArray()) + ") while allow_model_changes=false. All project changes were rolled back. " +
-                    "Family documents the code saved or closed are not affected. Rerun with allow_model_changes=true if the project change is intended (for example loading a family).");
+            finally
+            {
+                try { group.Dispose(); } catch (Exception) { }
+            }
+
+            StringBuilder report = new StringBuilder();
+            if (rollbackProblem != null) report.Append(' ').Append(rollbackProblem);
+            else if (projectTransactions.Count > 0)
+                report.Append(" The code changed the project document (").Append(String.Join(", ", projectTransactions.Distinct().ToArray()))
+                    .Append(") while allow_model_changes=false. All project changes were rolled back. Family documents the code saved or closed are not affected. ")
+                    .Append("Rerun with allow_model_changes=true if the project change is intended (for example loading a family).");
+            if (otherChanges.Count > 0)
+                report.Append(" The code changed other non-family documents, which a probe does not allow and cannot roll back: ")
+                    .Append(String.Join("; ", otherChanges.Distinct().ToArray())).Append(". These changes are unsaved; close those documents without saving.");
+            if (blockedSaves.Count > 0)
+                report.Append(" Cancelled during the probe: ").Append(String.Join("; ", blockedSaves.Distinct().ToArray())).Append('.');
+
+            if (scriptError != null)
+            {
+                if (report.Length == 0) throw scriptError;
+                McpException typed = scriptError as McpException;
+                throw new McpException(typed == null ? "runtime_error" : typed.Kind, scriptError.Message + "\n" + report.ToString().Trim(), scriptError.InnerException ?? scriptError);
+            }
+            if (rollbackProblem != null) throw new McpException("rollback_failed", report.ToString().Trim());
+            if (report.Length > 0) throw new McpException("probe_changed_project", report.ToString().Trim());
             return resultText;
+        }
+
+        // Only family documents may be saved during a probe; saving, save-as or synchronizing anything else is cancelled.
+        private static void GuardSave(Document target, RevitAPIPreDocEventArgs args, string action, List<string> cancelled)
+        {
+            try
+            {
+                if (target == null || target.IsFamilyDocument) return;
+                if (args.Cancellable) args.Cancel();
+                cancelled.Add(action + " of " + target.Title);
+            }
+            catch (Exception) { }
         }
 
         private static string Invoke(MethodInfo run, UIApplication application, Document document, string parametersJson)
