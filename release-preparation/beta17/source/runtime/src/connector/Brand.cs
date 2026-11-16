@@ -370,6 +370,97 @@ namespace SmartConnector
         }
     }
 
+    // Setup window, top: a light header with the logo, the window title and a subtitle, and a hairline under it.
+    internal sealed class LightHeader : Panel
+    {
+        private readonly Image _logo;
+        private readonly string _title, _subtitle;
+
+        internal LightHeader(string title, string subtitle, int height = 64)
+        {
+            _title = title; _subtitle = subtitle;
+            Dock = DockStyle.Top; Height = height; BackColor = Color.White;
+            _logo = Brand.Logo(64);
+            Paint += OnHeaderPaint;
+        }
+
+        private void OnHeaderPaint(object sender, PaintEventArgs e)
+        {
+            float k = Brand.EnterPaint(e);
+            Graphics g = e.Graphics;
+            if (_logo != null) g.DrawImage(_logo, 24, 14, 36, 36);
+            using (Font title = Brand.PixelFont(17, FontStyle.Bold, "Segoe UI Semibold"))
+            using (SolidBrush ink = new SolidBrush(Brand.Text))
+                g.DrawString(_title, title, ink, 70, _subtitle.Length > 0 ? 12 : 20);
+            if (_subtitle.Length > 0)
+                using (Font sub = Brand.PixelFont(12))
+                using (SolidBrush muted = new SolidBrush(Brand.Muted))
+                    g.DrawString(_subtitle, sub, muted, 71, 36);
+            using (Pen line = new Pen(Brand.Line, 1)) g.DrawLine(line, 0, Height / k - 1, Width / k, Height / k - 1);
+        }
+    }
+
+    // Setup window, under the header: the steps in a row, numbered, with done (green tick), current (accent) and next (ring).
+    internal sealed class StepBar : Panel
+    {
+        internal readonly string[] Steps;
+        private int _current;
+
+        internal StepBar(string[] steps, int height = 48)
+        {
+            Steps = steps;
+            Dock = DockStyle.Top; Height = height; BackColor = Brand.Canvas;
+            Paint += OnBarPaint;
+        }
+
+        internal int Current
+        {
+            get { return _current; }
+            set { _current = value; Invalidate(); }
+        }
+
+        private void OnBarPaint(object sender, PaintEventArgs e)
+        {
+            float k = Brand.EnterPaint(e);
+            Graphics g = e.Graphics;
+            float y = (Height / k - 22) / 2f, x = 24;
+            using (Font font = Brand.PixelFont(13))
+            using (Font bold = Brand.PixelFont(13, FontStyle.Bold, "Segoe UI Semibold"))
+            using (Font small = Brand.PixelFont(11, FontStyle.Bold, "Segoe UI Semibold"))
+            {
+                for (int i = 0; i < Steps.Length; i++)
+                {
+                    bool done = i < _current, now = i == _current;
+                    RectangleF circle = new RectangleF(x, y, 22, 22);
+                    if (done)
+                    {
+                        using (SolidBrush good = new SolidBrush(Brand.Good)) g.FillEllipse(good, circle);
+                        using (Pen pen = new Pen(Color.White, 2.2f))
+                        {
+                            pen.StartCap = LineCap.Round; pen.EndCap = LineCap.Round;
+                            g.DrawLines(pen, new[] { new PointF(x + 6, y + 11.5f), new PointF(x + 9.5f, y + 15), new PointF(x + 16, y + 7.5f) });
+                        }
+                    }
+                    else if (now) { using (SolidBrush accent = new SolidBrush(Brand.Accent)) g.FillEllipse(accent, circle); }
+                    else { using (Pen ring = new Pen(Brand.Border, 1.5f)) g.DrawEllipse(ring, x + 1, y + 1, 20, 20); }
+                    if (!done)
+                    {
+                        using (StringFormat format = new StringFormat())
+                        using (SolidBrush number = new SolidBrush(now ? Color.White : Brand.Muted))
+                        {
+                            format.Alignment = StringAlignment.Center; format.LineAlignment = StringAlignment.Center;
+                            g.DrawString((i + 1).ToString(System.Globalization.CultureInfo.InvariantCulture), small, number, circle, format);
+                        }
+                    }
+                    Font label = now ? bold : font;
+                    using (SolidBrush text = new SolidBrush(now ? Brand.Text : Brand.Muted)) g.DrawString(Steps[i], label, text, x + 30, y + 2);
+                    x += 30 + g.MeasureString(Steps[i], label).Width + 36;
+                }
+            }
+            using (Pen line = new Pen(Brand.Line, 1)) g.DrawLine(line, 0, Height / k - 1, Width / k, Height / k - 1);
+        }
+    }
+
     // Navy step rail on the left of the setup wizard: logo, name, the steps with done/current/next markers.
     internal sealed class StepRail : Panel
     {

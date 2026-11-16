@@ -261,7 +261,7 @@ namespace SmartConnector
         private bool _openApp, _smoke, _activated;
 
         private Form _form;
-        private StepRail _rail;
+        private StepBar _rail;
         private Button _back, _next, _cancel;
         private Label _hint, _revitNote, _problem, _nameLabel, _emailLabel, _codeLabel, _joinNote, _currentTask, _doneTitle, _doneSummary;
         private Panel _body, _reviewRows, _installing, _doneRows;
@@ -320,24 +320,29 @@ namespace SmartConnector
         private void Build(string version)
         {
             SystemCheck check = _check;
-            _form = Brand.NewForm(Brand.Name, 760, 520);
+            // Three steps for the person installing: Terms, Choose, Install. The six pages stay: the system check page only
+            // appears when this computer needs attention, and the install and finish pages are both "Install".
+            _form = Brand.NewForm(Brand.Name, 580, 628);
             _form.Text = "Smart Connector Setup";
-            _rail = new StepRail(new[] { "Welcome", "System check", "Choose apps", "AI connections", "Install", "Finish" }, version.Length > 0 ? "Version " + version : "");
+            LightHeader header = new LightHeader("Smart Connector", version.Length > 0 ? "Setup - version " + version : "Setup");
+            _rail = new StepBar(new[] { "Terms", "Choose", "Install" });
             Panel footer = new Panel();
-            footer.Dock = DockStyle.Bottom; footer.Height = 64; footer.BackColor = Color.FromArgb(248, 250, 252);
-            _back = Brand.NewButton("Back", false, 96); _back.Location = new Point(198, 14);
-            _next = Brand.NewButton("Next", true, 112); _next.Location = new Point(302, 14);
-            _cancel = Brand.NewButton("Cancel", false, 96); _cancel.Location = new Point(422, 14);
-            _hint = Brand.NewLabel("", 24, 24, 170, 9, true);
+            footer.Dock = DockStyle.Bottom; footer.Height = 64; footer.BackColor = Color.White;
+            footer.Paint += delegate(object sender, PaintEventArgs e) { float k = Brand.EnterPaint(e); using (Pen line = new Pen(Brand.Line, 1)) e.Graphics.DrawLine(line, 0, 0, footer.Width / k, 0); };
+            _back = Brand.NewButton("Back", false, 90); _back.Location = new Point(252, 14);
+            _next = Brand.NewButton("Next", true, 112); _next.Location = new Point(350, 14);
+            _cancel = Brand.NewButton("Cancel", false, 90); _cancel.Location = new Point(470, 14);
+            _hint = Brand.NewLabel("", 24, 24, 220, 9, true);
             footer.Controls.AddRange(new Control[] { _hint, _back, _next, _cancel });
             _body = new Panel();
             _body.Dock = DockStyle.Fill; _body.BackColor = Color.White;
-            _form.Controls.Add(_body); _form.Controls.Add(footer); _form.Controls.Add(_rail);
+            // Docking works from the last control added: the header goes on top, the step bar under it, the footer at the bottom.
+            _form.Controls.Add(_body); _form.Controls.Add(footer); _form.Controls.Add(_rail); _form.Controls.Add(header);
             _body.BringToFront();
 
             // --- 0 Welcome
             Panel welcome = NewPage();
-            AddText(welcome, "Welcome to Smart Connector", 28, 24, 0, 16, true);
+            AddText(welcome, "Welcome to Smart Connector", 28, 22, 0, 15, true);
             AddText(welcome, "Connect Claude and Codex to Revit and AutoCAD on this computer, and keep your team's workflow skills up to date.", 29, 62, 490, 10, false, true);
             string[][] features =
             {
@@ -397,25 +402,26 @@ namespace SmartConnector
                 new object[] { "Revit", "Revit 2024", check.Revit2024, check.Revit2024 ? "Smart Connector tab" : "Not installed" },
                 new object[] { "AutoCAD", check.AutoCad.Length > 0 ? "AutoCAD " + check.AutoCad[check.AutoCad.Length - 1] : "AutoCAD", check.AutoCad.Length > 0, check.AutoCad.Length > 0 ? "Add-ins panel and AI Markup" : "Not installed" }
             });
+            AddText(choose, "Setup adds Smart Connector to each chosen app's settings for this Windows user. Your other connectors are kept, and a backup is made first.", 29, 212, 500, 8.5f, false, true);
             // Not optional: every PC gets the team workflow skills and the daily update check.
-            AddText(choose, "Always included", 28, 218, 0, 9.5f, true);
-            AddText(choose, "Team workflow skills, kept in sync, and the daily update check (you are asked before an update installs).", 29, 240, 500, 9, false, true);
+            AddText(choose, "Always included", 28, 250, 0, 9.5f, true);
+            AddText(choose, "Team workflow skills, kept in sync, and the daily update check (you are asked before an update installs).", 29, 272, 500, 9, false, true);
             _skillsBox = new CheckBox(); _skillsBox.Checked = true; _skillsBox.Visible = false;
             _updatesBox = new CheckBox(); _updatesBox.Checked = true; _updatesBox.Visible = false;
             choose.Controls.AddRange(new Control[] { _skillsBox, _updatesBox });
-            _joinBox = new CheckBox(); _joinBox.Text = "Join the team (your skills and usage appear on the team dashboard)"; _joinBox.Checked = true; _joinBox.AutoSize = true; _joinBox.Location = new Point(28, 268);
+            _joinBox = new CheckBox(); _joinBox.Text = "Join the team (your skills and usage appear on the team dashboard)"; _joinBox.Checked = true; _joinBox.AutoSize = true; _joinBox.Location = new Point(28, 300);
             _joinBox.Visible = _askDetails; choose.Controls.Add(_joinBox);
             // Name and email always; the team code only when this setup does not carry one (the normal setup file).
             int nameWidth = _codeBundled ? 240 : 160, emailLeft = _codeBundled ? 284 : 200, emailWidth = _codeBundled ? 248 : 170;
-            _nameLabel = AddText(choose, "Your name", 28, 296, 0, 9, true);
-            _nameBox = new TextBox(); _nameBox.Location = new Point(28, 316); _nameBox.Size = new Size(nameWidth, 26); _nameBox.MaxLength = 80;
-            _emailLabel = AddText(choose, "Work email", emailLeft, 296, 0, 9, true);
-            _emailBox = new TextBox(); _emailBox.Location = new Point(emailLeft, 316); _emailBox.Size = new Size(emailWidth, 26); _emailBox.MaxLength = 254;
-            _codeLabel = AddText(choose, "Team code", 382, 296, 0, 9, true);
-            _codeBox = new TextBox(); _codeBox.Location = new Point(382, 316); _codeBox.Size = new Size(150, 26); _codeBox.MaxLength = 256; _codeBox.UseSystemPasswordChar = true;
+            _nameLabel = AddText(choose, "Your name", 28, 328, 0, 9, true);
+            _nameBox = new TextBox(); _nameBox.Location = new Point(28, 348); _nameBox.Size = new Size(nameWidth, 26); _nameBox.MaxLength = 80;
+            _emailLabel = AddText(choose, "Work email", emailLeft, 328, 0, 9, true);
+            _emailBox = new TextBox(); _emailBox.Location = new Point(emailLeft, 348); _emailBox.Size = new Size(emailWidth, 26); _emailBox.MaxLength = 254;
+            _codeLabel = AddText(choose, "Team code", 382, 328, 0, 9, true);
+            _codeBox = new TextBox(); _codeBox.Location = new Point(382, 348); _codeBox.Size = new Size(150, 26); _codeBox.MaxLength = 256; _codeBox.UseSystemPasswordChar = true;
             choose.Controls.AddRange(new Control[] { _nameBox, _emailBox, _codeBox });
-            _joinNote = AddText(choose, TeamJoin.Notice, 28, 346, 500, 8, false, true);
-            _problem = AddText(choose, "", 28, 374, 500, 9); _problem.ForeColor = Brand.Bad;
+            _joinNote = AddText(choose, TeamJoin.Notice, 28, 378, 500, 8, false, true);
+            _problem = AddText(choose, "", 28, 404, 500, 9); _problem.ForeColor = Brand.Bad;
             foreach (Group group in new[] { _aiGroup, _cadGroup })
             {
                 Group g = group;
@@ -474,15 +480,15 @@ namespace SmartConnector
                 _logBox.Visible = !_logBox.Visible; _detailsLink.Text = _logBox.Visible ? "Hide details" : "Show details"; _logBox.BringToFront(); _detailsLink.BringToFront();
             };
             openLog.LinkClicked += delegate { Launch.Open("notepad.exe", _logPath); };
-            _back.Click += delegate { ShowPage(Math.Max(0, _page - 1)); };
+            _back.Click += delegate { ShowPage(_page == 2 ? (NeedsSystemPage() ? 1 : 0) : Math.Max(0, _page - 1)); };
             _cancel.Click += delegate { _form.Close(); };
             _next.Click += delegate
             {
                 switch (_page)
                 {
-                    case 0: ShowPage(1); break;
+                    case 0: ShowPage(NeedsSystemPage() ? 1 : 2); break;
                     case 1: ShowPage(2); break;
-                    case 2: ShowPage(3); break;
+                    case 2: StartInstall(); break;
                     case 3: StartInstall(); break;
                     case 5: _openApp = _openAppBox.Checked && _result == "ok"; _form.Close(); break;
                 }
@@ -593,11 +599,21 @@ namespace SmartConnector
             _progress.Value = Math.Min(100, Brand.Round(100.0 * done / Math.Max(1, _stepLabels.Count)));
         }
 
+        // The system check page is shown only when this computer needs attention: Windows or .NET is not ready, or a Revit
+        // version that is not supported yet was found. Otherwise the Choose page already says what was found.
+        private bool NeedsSystemPage()
+        {
+            return !(_check.Windows64 && _check.NetOk) || _check.RevitOther.Length > 0;
+        }
+
+        // Page to step on the bar: Welcome is Terms; System check, Choose and the AI review are Choose; Installing and Finish are Install.
+        private static readonly int[] StepOfPage = { 0, 1, 1, 1, 2, 2 };
+
         private void ShowPage(int index)
         {
             _page = index;
             for (int i = 0; i < _pages.Length; i++) _pages[i].Visible = i == index;
-            _rail.Current = index;
+            _rail.Current = index == 5 ? 3 : StepOfPage[index];
             _revitNote.Visible = ConnectorStatus.ProcessRunning("Revit");
             _back.Visible = index >= 1 && index <= 3;
             _cancel.Visible = index < 4;
@@ -607,7 +623,7 @@ namespace SmartConnector
             {
                 case 0: _next.Text = "Next"; _next.Enabled = _accept.Checked; break;
                 case 1: _next.Text = "Next"; _next.Enabled = _check.Windows64; break;
-                case 2: _next.Text = "Next"; ValidateChoices(); break;
+                case 2: _next.Text = "Install"; ValidateChoices(); break;
                 case 3: _next.Text = "Install"; _next.Enabled = true; FillReview(); break;
                 case 5: _next.Text = "Finish"; _next.Enabled = true; break;
             }

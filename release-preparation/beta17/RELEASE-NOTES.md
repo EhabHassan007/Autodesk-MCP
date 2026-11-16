@@ -9,6 +9,7 @@ New in 1.2.0 (AutoCAD Detail Generator and connector safety; everything from 1.1
 - Viewports: the first viewport on a fresh layout is made even when the layout's block is not yet paper space, the zoom is tried twice before the Target fallback, and the result says which method was used.
 - Revit ribbon: the Smart Connector tab now has one panel with Connect, Status and Skills Sync, and a More menu (Browse Skills, Check updates, Settings, Diagnostics, Help), instead of eight buttons in three panels. The icons are flat line icons, a blue for the main action and a grey for the rest, with about 3:1 contrast on light and dark themes.
 - AutoCAD panel: on the Add-ins tab, an AI Markup panel (AI Markup, Clear Markup) now comes first, then Smart Connector with Connect, Status and Skills Sync: five buttons instead of seven. Check Updates and Settings are reached through Connect (the app) and stay available as the commands SACCHECKUPDATES and SACSETTINGS. The icons are the same flat line icons as in Revit.
+- Setup window: three steps (Terms, Choose, Install) in a step bar under a light header, instead of six steps in a navy side rail. The system check page only appears when the computer needs attention (Windows or .NET not ready, or an unsupported Revit version); otherwise the Choose page shows what was found, and the AI connections are explained there. Choose ends with Install.
 - Docs: the detail-generator skill and references describe the sheet layout rules (no doubled overall dimensions, one note per part), the viewport layer (`AO-MV` with the office scheme) and the live-check results.
 
 Not verified on a real AutoCAD: `prepare_layout` and the overlap warning with an existing viewport. Everything else above ran live on AutoCAD 2024 (24.3) with the S-shaped reception counter: plan 1:20, sections A-A and B-B 1:10 on one A1 sheet.
@@ -46,4 +47,4 @@ Lean core: Smart Connector now runs nothing in the background. This removes the 
 - `verify_standards`: an `expected_counts` type of `total`, `all` or `any` (or none) counts every object; an unknown type is refused instead of being counted as zero.
 - Detail Generator, found in the first run on the office template: the viewport step is retried when AutoCAD answers "call rejected" (busy), and leader notes are spaced for the office label block's real text size so wrapped notes no longer overprint.
 
-SHA-256: D574C9C6E28B570898ECE1A5B65E89A4D6A2DCCF2D79BBA8FB8C16EF2B9B20BD
+SHA-256: 9158E6818B465542114436500D4F0DF989CA113B3657876AB41F1879C798CDEE
