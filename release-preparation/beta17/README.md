@@ -2,6 +2,8 @@
 
 This directory preserves the complete connector build source and tests. It is not a live rollout.
 
+Trial on your own PC: `powershell -ExecutionPolicy Bypass -File release-preparation\beta17\build-trial.ps1` builds a private installer from the current working tree on a temporary copy, with a `-trial.<timestamp>` version, and leaves the repository unchanged. Output goes to `Documents\Smart Connector trial`. It is never a team build, never published, and is for that PC only.
+
 Build with `python release-preparation/beta17/build.py` from the repository root. Output is written beside build.py. Run PowerShell test files under tests; pass the generated ZIP as -PackagePath to test-beta15-upgrade.ps1. Tests use isolated fixtures and do not certify Windows/Revit.
 
 The selected free hosting service and deployment instructions are in [services/skill-sharing-cloudflare](../../services/skill-sharing-cloudflare/README.md). The original Python/Docker alternative remains in services/skill-sharing. Both implement the same connector API. The existing root runtime is left available while this pilot is reviewed. This branch is not owner approval of submitted skills.

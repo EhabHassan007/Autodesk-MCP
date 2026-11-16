@@ -23,11 +23,21 @@ Use dynamic C# only when a narrower MCP command cannot complete the authorized t
 - Read parameters with `LookupParameter`. A `BuiltInParameter` that exists in another Revit year may not exist in 2024 (`REVISION_CLOUD_COMMENTS` does not). Test an unfamiliar API call on one element before looping.
 - Do not create a second project-document transaction inside `transaction` mode. A separately opened family document may need its own.
 - Read all geometry and bounding boxes before writes to avoid regeneration inside loops. Use category filters and small batches rather than scanning entire views or models.
+- Geometry `Options`: never set `DetailLevel` and `View` together. Revit throws "DetailLevel is already set. When DetailLevel is set view-specific geometry can't be extracted". For face references used by alignments or dimensions, use `new Options { ComputeReferences = true, View = targetView }` with no `DetailLevel`.
 - Return a short result with changed, skipped, failed, and remaining counts. A long script can call `McpProgress.Report(done, total, note)` so `get_job` shows how far it is.
+
+## Modes
+
+| Mode | allow_model_changes | Use |
+|---|---|---|
+| `read` | false | Inspection only. No transaction is supplied. |
+| `transaction` | true | Project writes inside one automatic transaction (`dry_run=true` to preview). Read back in a separate call. |
+| `manual` | false | Probe: create, edit, save (to a temporary path) and close family documents. The project runs inside a transaction group that is always rolled back; any project change is undone and reported as `[probe_changed_project]`. Saving or synchronizing any non-family document is cancelled, and a change to another project is reported too (it cannot be rolled back, so close that document without saving). |
+| `manual` | true | Code that manages its own project transactions, or changes the project from a family document (for example `famDoc.LoadFamily(document)`). |
 
 ## Errors, time limits and jobs
 
-Errors come back typed. `[compile_error]` (with the line numbers of your own code and a hint for the usual mistakes) and `[runtime_error]` are problems in the code: fix the code. `[document_changed]`, `[commit_failed]`, `[busy]` and `[invalid_request]` are about the request or Revit's state. "Revit session is not available" now means a real lost connection only.
+Errors come back typed. `[compile_error]` (with the line numbers of your own code and a hint for the usual mistakes) and `[runtime_error]` are problems in the code: fix the code. A `[runtime_error]` names the line (`at mcp_code.cs line N`, counted from the first line of your code) and the API method that threw, followed by any Revit failure messages with element ids. When it is a bare message such as "Document regeneration failed", isolate that one call in a probe run before changing the approach. `[document_changed]`, `[commit_failed]`, `[busy]` and `[invalid_request]` are about the request or Revit's state. "Revit session is not available" now means a real lost connection only.
 
 `execute_csharp` waits `wait_seconds` (default 60, at most 110). Three outcomes:
 

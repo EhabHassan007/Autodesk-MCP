@@ -50,6 +50,18 @@ Install / Repair must detect Claude package identities that contain `Claude`, re
 
 For an update regression test, install an older package, create harmless marker files under local `skill-review`, `team-candidates`, and `backups`, publish the newer test release, then select **Update**. The managed runtime must change to the manifest version and all three local folders must remain present.
 
+## Revit execute_csharp regression
+
+Use a copy of a workshared Revit 2024 project, or a detached test model. Do not synchronize or save.
+
+1. Call `execute_csharp` in `read` mode with `return doc.Title;`. The error must start with `[compile_error] C# compilation failed` and name line 1; it must not say the session is not available. `connection_status` must still report the session as connected.
+2. Call it in `read` mode with code that throws on line 2 (for example `var e = document.GetElement(ElementId.InvalidElementId);` then `return e.Name;`). The error must start with `[runtime_error]` and say `at mcp_code.cs line 2`, with the exception type.
+3. Call it in `manual` mode with `allow_model_changes=false` and code that creates a family document from the Metric Structural Column template, adds an extrusion, saves it to `%TEMP%` and closes it. It must succeed, and the project must show no new undo entry.
+4. Repeat step 3 with `famDoc.LoadFamily(document)` before closing. It must fail with `[probe_changed_project] The code changed the project document`, and the family must not be in the project afterwards.
+5. With a second, detached test project open, run `manual` with `allow_model_changes=false` and code that changes one element in that second project and calls `Save()` on it. It must fail, the error must name the cancelled save and the change to the other document, and the second project's file on disk must be unchanged. Close it without saving.
+6. Run `manual` with `allow_model_changes=false` and code that starts a project transaction, changes an element and throws without committing or disposing it. The error must start with the script's own `[runtime_error]` text and then say the probe could not be rolled back.
+7. Run the load with `manual` and `allow_model_changes=true`, then place one instance in `transaction` mode and read it back (the custom column workflow in the `revit-family-modelling` skill, steps 7 to 9). Undo or discard the test changes afterwards.
+
 ## Report
 
 Report the version, Revit/AutoCAD year, installation result, connection result, and any exact error message. Do not send drawings, models, credentials, client names, or project paths.
