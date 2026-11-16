@@ -258,6 +258,8 @@ namespace BimCadMcp.Revit
             bool isScript = String.Equals(operation, "execute_csharp", StringComparison.OrdinalIgnoreCase);
             RunOptions options = RunOptions.Parse(isScript && arguments.Length > 6 ? arguments[6] : "", isScript ? 60 : 30);
             Job job = Jobs.Create(operation);
+            // A background request is followed with get_job, so nobody cancels it when a wait ends: it gets a start deadline.
+            if (options.Background) job.StartBy = job.CreatedUtc.AddMinutes(Jobs.BackgroundStartMinutes);
             RequestContext request = new RequestContext(operation, arguments, job);
             _handler.Enqueue(request);
             _externalEvent.Raise();
@@ -289,16 +291,34 @@ namespace BimCadMcp.Revit
                 Jobs.Remove(job);
                 ConnectionState.MarkRequestFailed(operation, "Revit did not start the request within " + options.WaitSeconds.ToString(CultureInfo.InvariantCulture) + " seconds.");
                 throw new McpException("busy", "Revit did not start the request within " + options.WaitSeconds.ToString(CultureInfo.InvariantCulture) +
-                    " seconds: it is busy with its own work (regenerating graphics, another command or a dialog). Nothing was run and nothing was changed. Call connection_status; when it reports idle, send the request again.");
+                    " seconds: " + BusyCause() + " Nothing was run and nothing was changed. Call connection_status; when it reports idle, send the request again.");
             }
             // Still running: the caller stops waiting, Revit goes on.
             return Jobs.ToJson(job, false);
         }
 
+        // Why Revit has not started a request: one of our own jobs is still running, or Revit is busy with its own work.
+        private static string BusyCause()
+        {
+            Job running = Jobs.Running();
+            if (running != null) return ExecutingReason(running) + " The new request was waiting behind it.";
+            return "Revit is busy with its own work (regenerating graphics, another command or a dialog).";
+        }
+
+        private static string ExecutingReason(Job running)
+        {
+            string reason = "Revit is running " + running.Operation + " (job " + running.Id + ") and has been working on it for " + Jobs.ElapsedText(running) + " s";
+            lock (running)
+            {
+                if (running.Total > 0) reason += ", " + running.Done.ToString(CultureInfo.InvariantCulture) + " of " + running.Total.ToString(CultureInfo.InvariantCulture) + " done";
+            }
+            return reason + ".";
+        }
+
         private string StatusReply()
         {
             List<Job> active = Jobs.Active();
-            Job running = active.FirstOrDefault(j => j.State == "running");
+            Job running = Jobs.Running();
             string busyState = "idle";
             string reason = "";
             string documentId = null;
@@ -311,28 +331,29 @@ namespace BimCadMcp.Revit
                 else
                 {
                     probe.Abandoned = true;
-                    if (active.Count > 0)
-                    {
-                        busyState = "queued";
-                        reason = "Revit has not started " + active.Count.ToString(CultureInfo.InvariantCulture) + " waiting request(s); the oldest has waited " + Jobs.ElapsedText(active[0]) +
-                            " s. Revit is busy with its own work: regenerating graphics, another command or a dialog.";
-                    }
-                    else
-                    {
-                        busyState = "revit_busy";
-                        reason = "Revit did not answer within 1.5 s. It is busy with its own work: regenerating graphics, another command or a dialog.";
-                    }
+                    // The probe waits behind any queued request, so Revit may have started one meanwhile: look again.
+                    active = Jobs.Active();
+                    running = Jobs.Running();
                 }
             }
-            else
+            if (documentId == null)
             {
-                busyState = "executing";
-                reason = "Revit is running " + running.Operation + " (job " + running.Id + ") and has been working on it for " + Jobs.ElapsedText(running) + " s";
-                lock (running)
+                if (running != null)
                 {
-                    if (running.Total > 0) reason += ", " + running.Done.ToString(CultureInfo.InvariantCulture) + " of " + running.Total.ToString(CultureInfo.InvariantCulture) + " done";
+                    busyState = "executing";
+                    reason = ExecutingReason(running);
                 }
-                reason += ".";
+                else if (active.Count > 0)
+                {
+                    busyState = "queued";
+                    reason = "Revit has not started " + active.Count.ToString(CultureInfo.InvariantCulture) + " waiting request(s); the oldest has waited " + Jobs.ElapsedText(active[0]) +
+                        " s. Revit is busy with its own work: regenerating graphics, another command or a dialog.";
+                }
+                else
+                {
+                    busyState = "revit_busy";
+                    reason = "Revit did not answer within 1.5 s. It is busy with its own work: regenerating graphics, another command or a dialog.";
+                }
             }
             if (documentId != null) ConnectionState.SetDocumentId(documentId);
             return AdvancedControl.ConnectionStatus(documentId, busyState, reason, active);
@@ -638,6 +659,12 @@ namespace BimCadMcp.Revit
         internal static string NumberProperty(string name, double value)
         {
             return Quote(name) + ":" + value.ToString("R", CultureInfo.InvariantCulture);
+        }
+
+        // A JSON string literal, for values written into hand-built arrays.
+        internal static string Quoted(string value)
+        {
+            return Quote(value);
         }
 
         private static string Quote(string value)

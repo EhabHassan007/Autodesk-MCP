@@ -180,36 +180,47 @@ namespace BimCadMcp.Revit
             {
                 for (int i = 0; i < boxes.Count; i++)
                 {
-                    try
+                    // Each cloud and its note are one sub-transaction: if the note (or anything else) fails, the cloud is rolled
+                    // back too, so a failed item leaves nothing behind and a retry cannot duplicate it.
+                    using (SubTransaction item = new SubTransaction(document))
                     {
-                        double[] b = boxes[i];
-                        List<Curve> loop = new List<Curve>();
-                        XYZ p1 = OnPlane(view, b[0], b[1]), p2 = OnPlane(view, b[2], b[1]), p3 = OnPlane(view, b[2], b[3]), p4 = OnPlane(view, b[0], b[3]);
-                        loop.Add(Line.CreateBound(p1, p2));
-                        loop.Add(Line.CreateBound(p2, p3));
-                        loop.Add(Line.CreateBound(p3, p4));
-                        loop.Add(Line.CreateBound(p4, p1));
-                        RevisionCloud cloud = RevisionCloud.Create(document, view, revision.Id, loop);
-                        bool commentSet = false;
-                        if (comments[i].Length > 0)
+                        try
                         {
-                            Parameter parameter = cloud.LookupParameter("Comments");
-                            if (parameter != null && !parameter.IsReadOnly) commentSet = parameter.Set(comments[i]);
+                            item.Start();
+                            double[] b = boxes[i];
+                            List<Curve> loop = new List<Curve>();
+                            XYZ p1 = OnPlane(view, b[0], b[1]), p2 = OnPlane(view, b[2], b[1]), p3 = OnPlane(view, b[2], b[3]), p4 = OnPlane(view, b[0], b[3]);
+                            loop.Add(Line.CreateBound(p1, p2));
+                            loop.Add(Line.CreateBound(p2, p3));
+                            loop.Add(Line.CreateBound(p3, p4));
+                            loop.Add(Line.CreateBound(p4, p1));
+                            RevisionCloud cloud = RevisionCloud.Create(document, view, revision.Id, loop);
+                            bool commentSet = false;
+                            if (comments[i].Length > 0)
+                            {
+                                // The built-in parameter does not depend on Revit's display language; the name is the fallback.
+                                Parameter parameter = cloud.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS) ?? cloud.LookupParameter("Comments");
+                                if (parameter != null && !parameter.IsReadOnly) commentSet = parameter.Set(comments[i]);
+                            }
+                            string noteId = "";
+                            if (notes[i].Length > 0)
+                            {
+                                bool right = side == "right";
+                                XYZ at = right ? OnPlane(view, b[2] + gap, b[3]) : OnPlane(view, b[0] - gap, b[3]);
+                                TextNoteOptions noteOptions = new TextNoteOptions(noteType);
+                                noteOptions.HorizontalAlignment = right ? HorizontalTextAlignment.Left : HorizontalTextAlignment.Right;
+                                noteId = IdText(TextNote.Create(document, view.Id, at, notes[i], noteOptions).Id);
+                            }
+                            TransactionStatus status = item.Commit();
+                            if (status != TransactionStatus.Committed)
+                                throw new InvalidOperationException("Revit did not keep this cloud (status " + status.ToString() + ").");
+                            created.Add("{" + Json.NumberProperty("index", i) + "," + Json.Property("cloud_id", IdText(cloud.Id)) + "," + Json.Property("note_id", noteId) + "," + Json.Property("comment_set", commentSet) + "}");
                         }
-                        string noteId = "";
-                        if (notes[i].Length > 0)
+                        catch (Exception exception)
                         {
-                            bool right = side == "right";
-                            XYZ at = right ? OnPlane(view, b[2] + gap, b[3]) : OnPlane(view, b[0] - gap, b[3]);
-                            TextNoteOptions noteOptions = new TextNoteOptions(noteType);
-                            noteOptions.HorizontalAlignment = right ? HorizontalTextAlignment.Left : HorizontalTextAlignment.Right;
-                            noteId = IdText(TextNote.Create(document, view.Id, at, notes[i], noteOptions).Id);
+                            if (item.GetStatus() == TransactionStatus.Started) item.RollBack();
+                            failed.Add("{" + Json.NumberProperty("index", i) + "," + Json.Property("error", exception.GetType().Name + ": " + exception.Message) + "," + Json.Property("rolled_back", true) + "}");
                         }
-                        created.Add("{" + Json.NumberProperty("index", i) + "," + Json.Property("cloud_id", IdText(cloud.Id)) + "," + Json.Property("note_id", noteId) + "," + Json.Property("comment_set", commentSet) + "}");
-                    }
-                    catch (Exception exception)
-                    {
-                        failed.Add("{" + Json.NumberProperty("index", i) + "," + Json.Property("error", exception.GetType().Name + ": " + exception.Message) + "}");
                     }
                 }
                 return "";
