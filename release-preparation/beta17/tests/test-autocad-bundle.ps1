@@ -38,11 +38,11 @@ try{
  Assert ($macros.Count -eq 7) "Expected 7 menu macros, found $($macros.Count)"
  $buttons=@($ribbon.SelectNodes('//RibbonCommandButton'))
  Assert ($buttons.Count -eq 5) "Expected 5 ribbon buttons, found $($buttons.Count)"
- # AI Markup first (the tools used while drawing), then Connect, Status and Skills Sync. Check Updates and Settings keep their macros and commands.
- $panelText=@{}; foreach($p in $ribbon.SelectNodes('//RibbonPanelSource')){ $panelText[$p.UID]=($p.SelectNodes('.//RibbonCommandButton')|ForEach-Object{$_.Text}) -join ',' }
- $order=@($ribbon.SelectNodes('//RibbonPanelSourceReference')|ForEach-Object{$_.PanelId})
- Assert (($order -join ',') -eq 'RBN_SAC_MARKUP_PANEL,RBN_SAC_PANEL') "Panels are not AI Markup then Smart Connector: $($order -join ',')"
- Assert ($panelText['RBN_SAC_MARKUP_PANEL'] -eq 'AI Markup,Clear Markup' -and $panelText['RBN_SAC_PANEL'] -eq 'Connect,Status,Skills Sync') "Panel buttons differ: $($panelText['RBN_SAC_MARKUP_PANEL']) | $($panelText['RBN_SAC_PANEL'])"
+ # One panel, AI Markup first (the tools used while drawing), then Connect, Status and Skills Sync. One panel on purpose: a
+ # second panel added by an update stayed hidden for users whose AutoCAD had saved the old ribbon state. Check Updates and
+ # Settings keep their macros and commands.
+ Assert (@($ribbon.SelectNodes('//RibbonPanelSource')).Count -eq 1 -and @($ribbon.SelectNodes('//RibbonPanelSourceReference')).Count -eq 1) 'Expected one panel and one panel reference'
+ Assert ((($buttons|ForEach-Object{$_.Text}) -join ',') -eq 'AI Markup,Clear Markup,Connect,Status,Skills Sync') "Panel buttons differ: $(($buttons|ForEach-Object{$_.Text}) -join ',')"
  foreach($b in $buttons){
   Assert ($macros.ContainsKey($b.MenuMacroID)) "Ribbon button $($b.UID) references missing macro $($b.MenuMacroID)"
   Assert ($b.ButtonStyle -eq 'LargeWithText') "Ribbon button $($b.UID) is not a large button"
