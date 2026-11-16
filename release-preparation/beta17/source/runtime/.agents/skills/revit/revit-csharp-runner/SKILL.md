@@ -61,4 +61,6 @@ Keep each write call to about 40 creations, one or two views at a time, regenera
 
 Keep batches proportional to model complexity and use remaining-count loops. Ask the user to synchronize at major milestones, then reacquire ids or resolve objects by stable names where appropriate.
 
+Never report a count or a loss from a single check. Confirm it with a second method before telling the user.
+
 Verification status: safety rules captured from repeated operational use; each new script still requires task-specific review and live read-back. The typed errors, jobs, busy state and dry run were added on 2026-11-12 after a failed session; they compile against the Revit 2024 API and pass simulated tests, and have not yet been run in a live Revit session.
