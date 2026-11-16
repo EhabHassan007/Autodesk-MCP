@@ -520,6 +520,27 @@ namespace BimCadMcp.Revit
             return image;
         }
 
+        // Three dots for the More menu (not part of the shared icon family: it is a ribbon convention, not a Smart Connector
+        // symbol). Sized to the slot like Line: 32 for the large button, 16 for the small image Revit uses elsewhere.
+        internal static Media.ImageSource More(bool small)
+        {
+            Media.DrawingGroup group = new Media.DrawingGroup();
+            using (Media.DrawingContext context = group.Open())
+            {
+                double scale = small ? 0.5 : 1.0;
+                context.PushTransform(new Media.ScaleTransform(scale, scale));
+                context.DrawRectangle(Media.Brushes.Transparent, null, new System.Windows.Rect(0, 0, 32, 32));
+                Media.SolidColorBrush brush = new Media.SolidColorBrush(Media.Color.FromRgb(125, 141, 160));
+                double radius = small ? 3.0 : 2.2;
+                foreach (double x in new double[] { 8, 16, 24 }) context.DrawEllipse(brush, null, new System.Windows.Point(x, 16), radius, radius);
+                context.Pop();
+            }
+            group.Freeze();
+            Media.DrawingImage image = new Media.DrawingImage(group);
+            image.Freeze();
+            return image;
+        }
+
         // Every ribbon button: the navy tile with the teal-to-blue glyph from the icon family, drawn as vectors.
         // Revit shows an image at its own size and cuts off what does not fit, so the 32-unit tile is scaled to the
         // slot: 32 for large buttons, 16 for small ones (an unscaled tile showed only its top-left quarter).
@@ -620,8 +641,8 @@ namespace BimCadMcp.Revit
 
                 PulldownButtonData moreData = new PulldownButtonData("BimCadMcpMore", "More");
                 moreData.ToolTip = "Browse skills, check for updates, settings, diagnostics and help.";
-                moreData.LargeImage = MoreIcon();
-                moreData.Image = MoreIcon();
+                moreData.LargeImage = Icons.More(false);
+                moreData.Image = Icons.More(true);
                 PulldownButton more = connector.AddItem(moreData) as PulldownButton;
                 if (more != null)
                 {
@@ -641,22 +662,6 @@ namespace BimCadMcp.Revit
             {
                 Debug.WriteLine("Smart Connector ribbon error: " + exception);
             }
-        }
-
-        // Three dots for the More menu (not part of the shared icon family: it is a ribbon convention, not a Smart Connector symbol).
-        private static Media.ImageSource MoreIcon()
-        {
-            Media.DrawingGroup group = new Media.DrawingGroup();
-            using (Media.DrawingContext context = group.Open())
-            {
-                context.DrawRectangle(Media.Brushes.Transparent, null, new System.Windows.Rect(0, 0, 32, 32));
-                Media.SolidColorBrush brush = new Media.SolidColorBrush(Media.Color.FromRgb(125, 141, 160));
-                foreach (double x in new double[] { 8, 16, 24 }) context.DrawEllipse(brush, null, new System.Windows.Point(x, 16), 2.2, 2.2);
-            }
-            group.Freeze();
-            Media.DrawingImage image = new Media.DrawingImage(group);
-            image.Freeze();
-            return image;
         }
 
         private static RibbonPanel Panel(UIControlledApplication application, string name)

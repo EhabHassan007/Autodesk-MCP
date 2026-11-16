@@ -3,10 +3,11 @@ name: Validate team skill intake
 on:
   pull_request:
     branches: [main]
-    # Draft pull requests use no minutes: the jobs run when the PR is opened ready or marked Ready for review.
+    # Runs on draft pull requests too: Smart Connector opens team intake pull requests as drafts, and the owner reviews
+    # them with this check's result.
     types: [opened, synchronize, reopened, ready_for_review]
 
-# A newer push to the same branch or pull request cancels the older run, so superseded commits use no minutes.
+# A newer push to the same pull request cancels the older run, so superseded commits use no minutes.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
@@ -16,10 +17,9 @@ permissions:
 
 jobs:
   validate:
-    # GitHub's Windows machine by default. Set the repository variable WINDOWS_RUNNER (Settings > Secrets and variables >
-    # Actions > Variables) to the label of a self-hosted runner, such as smart-connector, to run on your own PC for free.
-    runs-on: ${{ vars.WINDOWS_RUNNER || 'windows-latest' }}
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    # Always GitHub's own Windows machine: intake pull requests carry untrusted contributor content, so this job never
+    # runs on a self-hosted runner.
+    runs-on: windows-latest
     timeout-minutes: 10   # a hung job stops here instead of using minutes until the 6-hour limit
     steps:
       - uses: actions/checkout@v4
@@ -27,4 +27,8 @@ jobs:
           fetch-depth: 0
       - name: Validate changed skill candidates
         shell: pwsh
-        run: ./scripts/validate-team-skill-intake.ps1 -BaseRef "origin/${{ github.base_ref }}" -HeadRef "${{ github.head_ref }}"
+        # Branch names come from the pull request, so they reach the script as environment values, never as script text.
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}
+        run: ./scripts/validate-team-skill-intake.ps1 -BaseRef "origin/$env:BASE_REF" -HeadRef "$env:HEAD_REF"

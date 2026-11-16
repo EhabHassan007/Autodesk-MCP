@@ -9,19 +9,22 @@ on:
   push:
     branches: [main]
 
-# A newer push to the same branch or pull request cancels the older run, so superseded commits use no minutes.
+# A newer push to the same pull request cancels the older run, so superseded commits use no minutes. Runs on main are
+# never cancelled, so every merge is checked.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
 
 jobs:
   setup-exe:
-    # GitHub's Windows machine by default. Set the repository variable WINDOWS_RUNNER (Settings > Secrets and variables >
-    # Actions > Variables) to the label of a self-hosted runner, such as smart-connector, to run on your own PC for free.
-    runs-on: ${{ vars.WINDOWS_RUNNER || 'windows-latest' }}
+    # GitHub's Windows machine for pull requests and pushes. WINDOWS_RUNNER (Settings > Secrets and variables > Actions >
+    # Variables), the label of a self-hosted runner, is used only for a run the owner starts by hand (workflow_dispatch),
+    # because this repository is public: a pull request from anyone would otherwise run its own code on that PC. Run the
+    # self-hosted runner under its own Windows account, because these jobs install Smart Connector and edit AI client settings.
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && vars.WINDOWS_RUNNER || 'windows-latest' }}
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     timeout-minutes: 20   # a hung job stops here instead of using minutes until the 6-hour limit
     steps:
