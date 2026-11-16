@@ -50,14 +50,18 @@ namespace BimCadMcp.Revit
     {
         internal readonly string Operation;
         internal readonly string[] Arguments;
+        // The job this request belongs to; null for the internal status probe.
+        internal readonly Job Job;
         internal readonly ManualResetEventSlim Completed = new ManualResetEventSlim(false);
         internal string ResultJson;
-        internal string Error;
+        // Set by the pipe thread when it stops waiting for a probe that Revit has not started.
+        internal volatile bool Abandoned;
 
-        internal RequestContext(string operation, string[] arguments)
+        internal RequestContext(string operation, string[] arguments, Job job)
         {
             Operation = operation;
             Arguments = arguments;
+            Job = job;
         }
     }
 
@@ -77,11 +81,31 @@ namespace BimCadMcp.Revit
             {
                 try
                 {
-                    request.ResultJson = RevitOperations.Execute(application, request.Operation, request.Arguments);
+                    if (request.Job == null)
+                    {
+                        // Status probe: only answers that Revit's thread is free, and which document is active.
+                        if (!request.Abandoned) request.ResultJson = RevitOperations.Execute(application, request.Operation, request.Arguments);
+                    }
+                    else if (Jobs.Start(request.Job))
+                    {
+                        string result = "";
+                        string error = "";
+                        try
+                        {
+                            result = RevitOperations.Execute(application, request.Operation, request.Arguments);
+                        }
+                        catch (Exception exception)
+                        {
+                            error = Errors.Format(exception);
+                        }
+                        Jobs.Finish(request.Job, result, error);
+                        if (error.Length == 0) ConnectionState.MarkRequestSucceeded(request.Operation);
+                        else ConnectionState.MarkRequestFailed(request.Operation, error);
+                    }
                 }
                 catch (Exception exception)
                 {
-                    request.Error = exception.Message;
+                    ConnectionState.MarkRequestFailed(request.Operation, Errors.Format(exception));
                 }
                 finally
                 {
@@ -132,10 +156,15 @@ namespace BimCadMcp.Revit
             _thread.Start();
         }
 
+        // Several clients can be connected at once. A status or job question is answered on the pipe thread, so it gets
+        // an answer even while Revit's own thread is busy with a long request; only real work waits for Revit.
+        private const int MaxPipeInstances = 8;
+
         private void ListenLoop()
         {
             while (!_stopping)
             {
+                NamedPipeServerStream pipe = null;
                 try
                 {
                     PipeSecurity security = new PipeSecurity();
@@ -144,53 +173,27 @@ namespace BimCadMcp.Revit
                         user,
                         PipeAccessRights.ReadWrite | PipeAccessRights.CreateNewInstance,
                         AccessControlType.Allow));
-                    using (NamedPipeServerStream pipe = new NamedPipeServerStream(
-                        _pipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.None,
-                        4096, 4096, security))
+                    pipe = new NamedPipeServerStream(
+                        _pipeName, PipeDirection.InOut, MaxPipeInstances, PipeTransmissionMode.Byte, PipeOptions.None,
+                        4096, 4096, security);
+                    pipe.WaitForConnection();
+                    if (_stopping)
                     {
-                        pipe.WaitForConnection();
-                        if (_stopping) return;
-                        ConnectionState.MarkClientConnected();
-
-                        using (StreamReader reader = new StreamReader(pipe, new UTF8Encoding(false), false, 4096, true))
-                        using (StreamWriter writer = new StreamWriter(pipe, new UTF8Encoding(false), 4096, true))
-                        {
-                            writer.AutoFlush = true;
-                            string line = reader.ReadLine();
-                            if (String.IsNullOrWhiteSpace(line))
-                            {
-                                writer.WriteLine("ERR\t" + Protocol.Encode("Empty request."));
-                                continue;
-                            }
-
-                            string[] fields = line.Split('\t');
-                            string operation = fields[0];
-                            string[] arguments = fields.Skip(1).Select(Protocol.Decode).ToArray();
-                            RequestContext request = new RequestContext(operation, arguments);
-                            _handler.Enqueue(request);
-                            _externalEvent.Raise();
-
-                            int timeoutSeconds = String.Equals(request.Operation, "execute_csharp", StringComparison.OrdinalIgnoreCase) ? 120 : 30;
-                            if (!request.Completed.Wait(TimeSpan.FromSeconds(timeoutSeconds)))
-                            {
-                                ConnectionState.MarkRequestFailed(request.Operation, "Timed out after " + timeoutSeconds.ToString(CultureInfo.InvariantCulture) + " seconds.");
-                                writer.WriteLine("ERR\t" + Protocol.Encode("Revit did not process the request within " + timeoutSeconds.ToString(CultureInfo.InvariantCulture) + " seconds. Finish any active command or dialog and retry."));
-                            }
-                            else if (!String.IsNullOrEmpty(request.Error))
-                            {
-                                ConnectionState.MarkRequestFailed(request.Operation, request.Error);
-                                writer.WriteLine("ERR\t" + Protocol.Encode(request.Error));
-                            }
-                            else
-                            {
-                                ConnectionState.MarkRequestSucceeded(request.Operation);
-                                writer.WriteLine("OK\t" + Protocol.Encode(request.ResultJson));
-                            }
-                        }
+                        pipe.Dispose();
+                        return;
                     }
+                    ConnectionState.MarkClientConnected();
+                    NamedPipeServerStream accepted = pipe;
+                    pipe = null;
+                    ThreadPool.QueueUserWorkItem(delegate { Serve(accepted); });
                 }
                 catch (Exception exception)
                 {
+                    if (pipe != null)
+                    {
+                        try { pipe.Dispose(); }
+                        catch (Exception) { }
+                    }
                     if (!_stopping)
                     {
                         System.Diagnostics.Debug.WriteLine("Smart Connector pipe error: " + exception);
@@ -198,6 +201,190 @@ namespace BimCadMcp.Revit
                     }
                 }
             }
+        }
+
+        private void Serve(NamedPipeServerStream pipe)
+        {
+            try
+            {
+                using (pipe)
+                using (StreamReader reader = new StreamReader(pipe, new UTF8Encoding(false), false, 4096, true))
+                using (StreamWriter writer = new StreamWriter(pipe, new UTF8Encoding(false), 4096, true))
+                {
+                    writer.AutoFlush = true;
+                    string line = reader.ReadLine();
+                    if (String.IsNullOrWhiteSpace(line))
+                    {
+                        writer.WriteLine("ERR\t" + Protocol.Encode("[invalid_request] Empty request."));
+                        return;
+                    }
+                    string[] fields = line.Split('\t');
+                    string[] arguments;
+                    try { arguments = fields.Skip(1).Select(Protocol.Decode).ToArray(); }
+                    catch (FormatException)
+                    {
+                        writer.WriteLine("ERR\t" + Protocol.Encode("[invalid_request] The request arguments are not valid."));
+                        return;
+                    }
+                    writer.WriteLine(Answer(fields[0], arguments));
+                }
+            }
+            catch (Exception exception)
+            {
+                System.Diagnostics.Debug.WriteLine("Smart Connector pipe error: " + exception);
+            }
+        }
+
+        private string Answer(string operation, string[] arguments)
+        {
+            try
+            {
+                string json;
+                if (String.Equals(operation, "connection_status", StringComparison.OrdinalIgnoreCase)) json = StatusReply();
+                else if (String.Equals(operation, "get_job", StringComparison.OrdinalIgnoreCase)) json = JobReply(arguments);
+                else json = Dispatch(operation, arguments);
+                return "OK\t" + Protocol.Encode(json);
+            }
+            catch (Exception exception)
+            {
+                return "ERR\t" + Protocol.Encode(Errors.Format(exception));
+            }
+        }
+
+        // Sends a request to Revit's thread and waits for it. A request that outlives the wait is not lost: it stays a job
+        // that get_job can follow, unless Revit never started it, in which case it is dropped so it cannot run late.
+        private string Dispatch(string operation, string[] arguments)
+        {
+            bool isScript = String.Equals(operation, "execute_csharp", StringComparison.OrdinalIgnoreCase);
+            RunOptions options = RunOptions.Parse(isScript && arguments.Length > 6 ? arguments[6] : "", isScript ? 60 : 30);
+            Job job = Jobs.Create(operation);
+            // A background request is followed with get_job, so nobody cancels it when a wait ends: it gets a start deadline.
+            if (options.Background) job.StartBy = job.CreatedUtc.AddMinutes(Jobs.BackgroundStartMinutes);
+            RequestContext request = new RequestContext(operation, arguments, job);
+            _handler.Enqueue(request);
+            _externalEvent.Raise();
+            if (options.Background) return Jobs.ToJson(job, false);
+
+            request.Completed.Wait(TimeSpan.FromSeconds(options.WaitSeconds));
+            string state;
+            lock (job)
+            {
+                state = job.State;
+                if (state == "queued")
+                {
+                    job.State = "cancelled";
+                    job.FinishedUtc = DateTime.UtcNow;
+                }
+            }
+            if (state == "completed")
+            {
+                Jobs.Remove(job);
+                return job.ResultJson;
+            }
+            if (state == "failed")
+            {
+                Jobs.Remove(job);
+                throw new McpFailure(job.Error);
+            }
+            if (state == "queued")
+            {
+                Jobs.Remove(job);
+                ConnectionState.MarkRequestFailed(operation, "Revit did not start the request within " + options.WaitSeconds.ToString(CultureInfo.InvariantCulture) + " seconds.");
+                throw new McpException("busy", "Revit did not start the request within " + options.WaitSeconds.ToString(CultureInfo.InvariantCulture) +
+                    " seconds: " + BusyCause() + " Nothing was run and nothing was changed. Call connection_status; when it reports idle, send the request again.");
+            }
+            // Still running: the caller stops waiting, Revit goes on.
+            return Jobs.ToJson(job, false);
+        }
+
+        // Why Revit has not started a request: one of our own jobs is still running, or Revit is busy with its own work.
+        private static string BusyCause()
+        {
+            Job running = Jobs.Running();
+            if (running != null) return ExecutingReason(running) + " The new request was waiting behind it.";
+            return "Revit is busy with its own work (regenerating graphics, another command or a dialog).";
+        }
+
+        private static string ExecutingReason(Job running)
+        {
+            string reason = "Revit is running " + running.Operation + " (job " + running.Id + ") and has been working on it for " + Jobs.ElapsedText(running) + " s";
+            lock (running)
+            {
+                if (running.Total > 0) reason += ", " + running.Done.ToString(CultureInfo.InvariantCulture) + " of " + running.Total.ToString(CultureInfo.InvariantCulture) + " done";
+            }
+            return reason + ".";
+        }
+
+        private string StatusReply()
+        {
+            List<Job> active = Jobs.Active();
+            Job running = Jobs.Running();
+            string busyState = "idle";
+            string reason = "";
+            string documentId = null;
+            if (running == null)
+            {
+                RequestContext probe = new RequestContext("probe", new string[0], null);
+                _handler.Enqueue(probe);
+                _externalEvent.Raise();
+                if (probe.Completed.Wait(TimeSpan.FromMilliseconds(1500))) documentId = probe.ResultJson ?? "";
+                else
+                {
+                    probe.Abandoned = true;
+                    // The probe waits behind any queued request, so Revit may have started one meanwhile: look again.
+                    active = Jobs.Active();
+                    running = Jobs.Running();
+                }
+            }
+            if (documentId == null)
+            {
+                if (running != null)
+                {
+                    busyState = "executing";
+                    reason = ExecutingReason(running);
+                }
+                else if (active.Count > 0)
+                {
+                    busyState = "queued";
+                    reason = "Revit has not started " + active.Count.ToString(CultureInfo.InvariantCulture) + " waiting request(s); the oldest has waited " + Jobs.ElapsedText(active[0]) +
+                        " s. Revit is busy with its own work: regenerating graphics, another command or a dialog.";
+                }
+                else
+                {
+                    busyState = "revit_busy";
+                    reason = "Revit did not answer within 1.5 s. It is busy with its own work: regenerating graphics, another command or a dialog.";
+                }
+            }
+            if (documentId != null) ConnectionState.SetDocumentId(documentId);
+            return AdvancedControl.ConnectionStatus(documentId, busyState, reason, active);
+        }
+
+        private static string JobReply(string[] arguments)
+        {
+            string id = arguments.Length > 0 ? arguments[0].Trim() : "";
+            bool cancel = arguments.Length > 1 && String.Equals(arguments[1].Trim(), "true", StringComparison.OrdinalIgnoreCase);
+            if (id.Length == 0)
+            {
+                List<string> items = Jobs.Recent().Select(j => Jobs.ToJson(j, false)).ToList();
+                return "{\"jobs\":[" + String.Join(",", items.ToArray()) + "]}";
+            }
+            Job job = Jobs.Find(id);
+            if (job == null)
+                throw new McpException("job_not_found", "Job " + id + " was not found. Jobs are kept for 60 minutes and are lost when Revit closes. Read the model to see what happened.");
+            if (cancel)
+            {
+                lock (job)
+                {
+                    if (job.State == "running")
+                        throw new McpException("cannot_cancel", "Job " + id + " is already running in Revit; a running command cannot be interrupted safely. Wait for it and read the result with get_job.");
+                    if (job.State == "queued")
+                    {
+                        job.State = "cancelled";
+                        job.FinishedUtc = DateTime.UtcNow;
+                    }
+                }
+            }
+            return Jobs.ToJson(job, true);
         }
 
         public void Dispose()
@@ -232,11 +419,15 @@ namespace BimCadMcp.Revit
     {
         internal static string Execute(UIApplication application, string operation, string[] arguments)
         {
-            if (String.Equals(operation, "connection_status", StringComparison.OrdinalIgnoreCase))
-                return AdvancedControl.ConnectionStatus(application);
+            // Internal probe from the pipe thread: is Revit's thread free, and which document is active.
+            if (String.Equals(operation, "probe", StringComparison.OrdinalIgnoreCase))
+            {
+                UIDocument active = application.ActiveUIDocument;
+                return active == null ? "" : DocumentId(active.Document);
+            }
 
             UIDocument uiDocument = application.ActiveUIDocument;
-            if (uiDocument == null) throw new InvalidOperationException("Open a Revit project first.");
+            if (uiDocument == null) throw new McpException("no_document", "Open a Revit project first.");
             Document document = uiDocument.Document;
 
             switch (operation)
@@ -254,7 +445,8 @@ namespace BimCadMcp.Revit
                     RequireArguments(arguments, 4);
                     return SetParameter(document, arguments[0], arguments[1], arguments[2], arguments[3]);
                 case "execute_csharp":
-                    RequireArguments(arguments, 6);
+                    // Six fields, and a seventh with the options (dry_run, background, wait_seconds) only when one is set.
+                    if (arguments == null || arguments.Length < 6 || arguments.Length > 7) throw new McpException("invalid_request", "Invalid request arguments.");
                     return AdvancedControl.ExecuteCSharp(
                         application,
                         document,
@@ -263,9 +455,14 @@ namespace BimCadMcp.Revit
                         arguments[2],
                         arguments[3],
                         arguments[4],
-                        arguments[5]);
+                        arguments[5],
+                        arguments.Length > 6 ? arguments[6] : "");
+                case "revision_cloud_info":
+                    return RevisionClouds.Info(document, arguments);
+                case "create_revision_clouds":
+                    return RevisionClouds.Create(document, arguments);
                 default:
-                    throw new InvalidOperationException("Unknown operation: " + operation);
+                    throw new McpException("invalid_request", "Unknown operation: " + operation);
             }
         }
 
@@ -346,8 +543,8 @@ namespace BimCadMcp.Revit
         private static string SetParameter(Document document, string expectedDocument, string elementId, string parameterName, string value)
         {
             if (!String.Equals(DocumentId(document), expectedDocument, StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException("Active Revit document changed. Read document_info again.");
-            if (document.IsReadOnly) throw new InvalidOperationException("The active Revit document is read-only.");
+                throw new McpException("document_changed", "Active Revit document changed. Read document_info again.");
+            if (document.IsReadOnly) throw new McpException("document_read_only", "The active Revit document is read-only.");
 
             Element element = FindElement(document, elementId);
             Parameter parameter = element.LookupParameter(parameterName);
@@ -443,7 +640,7 @@ namespace BimCadMcp.Revit
         private static void RequireArguments(string[] arguments, int count)
         {
             if (arguments == null || arguments.Length != count)
-                throw new InvalidOperationException("Invalid request arguments.");
+                throw new McpException("invalid_request", "Invalid request arguments.");
         }
     }
 
@@ -462,6 +659,12 @@ namespace BimCadMcp.Revit
         internal static string NumberProperty(string name, double value)
         {
             return Quote(name) + ":" + value.ToString("R", CultureInfo.InvariantCulture);
+        }
+
+        // A JSON string literal, for values written into hand-built arrays.
+        internal static string Quoted(string value)
+        {
+            return Quote(value);
         }
 
         private static string Quote(string value)

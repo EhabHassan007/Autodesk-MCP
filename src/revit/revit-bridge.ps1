@@ -69,7 +69,12 @@ function Invoke-RevitPipeName([string]$pipeName, [string]$operation, [string[]]$
         $parts = $line -split "`t", 2
         if ($parts.Count -ne 2) { throw 'Revit add-in returned an invalid response.' }
         $payload = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($parts[1]))
-        if ($parts[0] -eq 'ERR') { throw $payload }
+        if ($parts[0] -eq 'ERR') {
+            # The add-in answered with its own error: marked so Invoke-RevitPipe passes it on as the real cause.
+            $addinError = New-Object InvalidOperationException $payload
+            $addinError.Data['RevitAddinError'] = $true
+            throw $addinError
+        }
         if ($parts[0] -ne 'OK') { throw 'Revit add-in returned an unknown response.' }
         $payload | ConvertFrom-Json
     }
@@ -157,7 +162,11 @@ function Resolve-RevitPipe([string]$sessionId) {
 function Invoke-RevitPipe([string]$operation, [string[]]$arguments, [string]$sessionId) {
     $pipeName = Resolve-RevitPipe $sessionId
     try { Invoke-RevitPipeName $pipeName $operation $arguments }
-    catch { throw "Revit $RevitVersion MCP session is not available. Start Revit or call list_sessions. $($_.Exception.Message)" }
+    catch {
+        # An add-in error (compile or runtime error, refused argument) is the real cause; only an unreachable pipe is a disconnect.
+        if ($_.Exception.Data['RevitAddinError']) { throw $_.Exception.Message }
+        throw "Revit $RevitVersion MCP session is not available. Start Revit or call list_sessions. $($_.Exception.Message)"
+    }
 }
 
 function Invoke-RevitTool($name,$arguments) {

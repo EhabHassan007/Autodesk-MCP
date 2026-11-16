@@ -26,6 +26,8 @@ $revitUiApi = Join-Path $RevitInstallPath 'RevitAPIUI.dll'
 $sources = @(
     (Join-Path $PSScriptRoot 'addin\RevitMcpApplication.cs'),
     (Join-Path $PSScriptRoot 'addin\AdvancedControl.cs'),
+    (Join-Path $PSScriptRoot 'addin\RequestJobs.cs'),
+    (Join-Path $PSScriptRoot 'addin\RevisionClouds.cs'),
     (Join-Path $PSScriptRoot 'addin\ConnectorUi.cs')
 )
 $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
