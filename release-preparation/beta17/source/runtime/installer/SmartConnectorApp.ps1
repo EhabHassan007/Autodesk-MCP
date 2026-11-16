@@ -430,7 +430,7 @@ function Show-Settings {
     $null = Add-Text $script:Content 'Skills on this list stay on your computer: Skills Sync never sends them for review.' 32 266 -Width 760 -Size 9 -Muted
     $null = Add-ActionButton $script:Content 'Edit private skills' 'PrivateSkills' 32 294 -Width 150
     $null = Add-Text $script:Content 'Team skill service' 32 350 -Bold
-    $null = Add-Text $script:Content $(if ($s.TeamJoined) { 'This computer has joined. Your administrator sees its name, your name and email, and which skills and tools are used (names and counts only). Usage counts are sent only when you run Skills Sync.' } else { 'Not joined. Ask your administrator for the team setup file to join.' }) 32 374 -Width 760 -Size 9 -Muted
+    $null = Add-Text $script:Content $(if ($s.TeamJoined) { 'This computer has joined. Your administrator sees its name, your name and email, and which skills and tools are used (names and counts only). Usage counts are sent only when you run Skills Sync. If a tool fails, a short cleaned error report is sent soon after.' } else { 'Not joined. Ask your administrator for the team setup file to join.' }) 32 374 -Width 760 -Size 9 -Muted
 }
 
 function Show-Diagnostics {

@@ -90,7 +90,12 @@ try {
   const usage=await call('/v1/usage','POST',member.device_token,{events:[{kind:'skill',name:'revit-check',day:today,count:2},{kind:'tool',name:'list_levels',day:today,count:1}]});
   assert.equal(usage.status,200,await usage.clone().text());
   await call('/v1/usage','POST',member.device_token,{events:[{kind:'skill',name:'revit-check',day:today,count:3}]});
+  // Connector error report: cleaned again on the service (this PC's names included) and keyed in real D1.
+  const failure={tool:'drawing_info',product:'autocad',code:'error',message:'Could not open C:\\Users\\tester\\Tower.dwg on TEST-PC',outcome:'failed',day:today,count:2};
+  const reported=await call('/v1/failures','POST',member.device_token,{events:[failure,{...failure,outcome:'recovered',count:1}]},{'X-Connector-Version':'1.2.0'});
+  assert.equal(reported.status,200,await reported.clone().text());
   const overview=await (await call('/admin/api/overview','GET',admin)).json();
+  assert.deepEqual(overview.failures.map(f=>[f.message,f.failed,f.recovered,f.versions.join()]),[['Could not open <path> on <pc>',2,1,'1.2.0']]);
   const person=overview.devices.find(d=>d.id===member.device_id);
   assert.equal(person.person_name,'Test Person');assert.equal(person.enroll_ip,'203.0.113.5');
   assert.equal(overview.usage.find(u=>u.device===member.device_id&&u.name==='revit-check').last7,5);
@@ -101,7 +106,7 @@ try {
   assert.equal((await reviews.json()).pending,0);
   assert.equal((await call('/admin/devices/'+member.device_id+'/block','POST',admin)).status,200);
   assert.equal((await call('/v1/library','GET',member.device_token)).status,401);
-  console.log('PASS: workerd + D1 enrollment, PKCS#1 signing, approved library, draft-only submission, restart persistence, deduplication, revocation, team join, usage, admin overview and skill review queue. GitHub mocked.');
+  console.log('PASS: workerd + D1 enrollment, PKCS#1 signing, approved library, draft-only submission, restart persistence, deduplication, revocation, team join, usage, error reports, admin overview and skill review queue. GitHub mocked.');
 } finally {
   await mf?.dispose();
   await rm(directory,{recursive:true,force:true});

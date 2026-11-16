@@ -366,11 +366,14 @@ namespace SmartConnector
                     if (String.IsNullOrWhiteSpace(file) || file == "SKILL.md") Usage.Record("skill", Json.GetString(arguments, "name"));
                 }
                 else if (name != "list_skill_workflows") Usage.Record("tool", name);
+                Failures.Worked(name);
                 return result;
             }
             catch (Exception exception)
             {
                 Exception shown = exception is System.Reflection.TargetInvocationException && exception.InnerException != null ? exception.InnerException : exception;
+                // Reported to the administrator, cleaned of drawing and model content (ConnectorFailures.cs).
+                Failures.Failed(name, name == "connection_status" ? "connector" : AutoCadNames.Contains(name ?? "") ? "autocad" : RevitNames.Contains(name ?? "") ? "revit" : "connector", shown.Message);
                 return Json.Object("content", new object[] { Json.Object("type", "text", "text", shown.Message) }, "isError", true);
             }
         }

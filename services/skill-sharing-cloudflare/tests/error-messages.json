@@ -1,0 +1,92 @@
+[
+ {
+  "message": "C# compilation failed (your code did not run and nothing was changed):\nLine 12: The name 'doc' does not exist in the current context (CS0103)\nHint: the Revit document variable",
+  "windows_user": "ahmed",
+  "pc_name": "DESK-07",
+  "cleaned": "C# compilation failed (your code did not run and nothing was changed): | Line <n>: The name <text> does not exist in the current context (CS0103)"
+ },
+ {
+  "message": "Layer not found: A-WALL-EXT.",
+  "windows_user": "ahmed",
+  "pc_name": "DESK-07",
+  "cleaned": "Layer not found: <value>."
+ },
+ {
+  "message": "Missing argument: points",
+  "windows_user": "ahmed",
+  "pc_name": "DESK-07",
+  "cleaned": "Missing argument: points"
+ },
+ {
+  "message": "Could not open C:\\Users\\ahmed\\Desktop\\Client Tower\\Tower-A.dwg because it is read-only",
+  "windows_user": "ahmed",
+  "pc_name": "DESK-07",
+  "cleaned": "Could not open <path> because it is read-only"
+ },
+ {
+  "message": "Revit session was not found: 3f2b9c1e-1111-4222-8333-123456789abc. Call list_sessions again.",
+  "windows_user": "ahmed",
+  "pc_name": "DESK-07",
+  "cleaned": "Revit session was not found: <id>. Call list_sessions again."
+ },
+ {
+  "message": "C# execution failed (the code compiled and ran, then threw) at line 7: ArgumentException: The element \"Level 1 - Marina Mall\" is not valid",
+  "windows_user": "ahmed",
+  "pc_name": "DESK-07",
+  "cleaned": "C# execution failed (the code compiled and ran, then threw) at line <n>: ArgumentException: The element <text> is not valid"
+ },
+ {
+  "message": "Mail ahmed.ali@example.com or see https://intranet.example.com/x?y=1 on \\\\server\\share\\proj",
+  "windows_user": "ahmed",
+  "pc_name": "DESK-07",
+  "cleaned": "Mail <email> or see <url> on <path>"
+ },
+ {
+  "message": "Another Codex or Claude session is modifying an Autodesk model. Wait for it to finish and retry.",
+  "windows_user": "ahmed",
+  "pc_name": "DESK-07",
+  "cleaned": "Another Codex or Claude session is modifying an Autodesk model. Wait for it to finish and retry."
+ },
+ {
+  "message": "Smart Connector didn't reach AutoCAD on desk-07 for user Ahmed after 120.5 seconds",
+  "windows_user": "ahmed",
+  "pc_name": "DESK-07",
+  "cleaned": "Smart Connector didn't reach AutoCAD on <pc> for user <user> after <n> seconds"
+ },
+ {
+  "message": "view_id 123456 is not a view.",
+  "windows_user": "ahmed",
+  "pc_name": "DESK-07",
+  "cleaned": "view_id <n> is not a view."
+ },
+ {
+  "message": "The family 'باب خشبي' could not be loaded",
+  "windows_user": "ahmed",
+  "pc_name": "DESK-07",
+  "cleaned": "The family <text> could not be loaded"
+ },
+ {
+  "message": "Revit's active view isn't a plan; open one and retry.",
+  "windows_user": "ahmed",
+  "pc_name": "DESK-07",
+  "cleaned": "Revit's active view isn't a plan; open one and retry."
+ },
+ {
+  "message": "[busy] Revit is busy: Smart Connector's own job create_revision_clouds is still running.",
+  "windows_user": "ahmed",
+  "pc_name": "DESK-07",
+  "cleaned": "[busy] Revit is busy: Smart Connector's own job create_revision_clouds is still running."
+ },
+ {
+  "message": "Sheet not found: A-101",
+  "windows_user": "ahmed",
+  "pc_name": "DESK-07",
+  "cleaned": "Sheet not found: <value>"
+ },
+ {
+  "message": "Timed out after 30 s waiting for AutoCAD (call rejected by callee).",
+  "windows_user": "ahmed",
+  "pc_name": "DESK-07",
+  "cleaned": "Timed out after <n> s waiting for AutoCAD (call rejected by callee)."
+ }
+]
