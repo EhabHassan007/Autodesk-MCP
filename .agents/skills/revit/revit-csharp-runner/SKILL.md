@@ -43,13 +43,13 @@ Errors come back typed. `[compile_error]` (with the line numbers of your own cod
 
 - It finished: the normal result.
 - `[busy]`: Revit never started the request (it is busy with its own work), so nothing ran and nothing changed. Check `connection_status`, wait until it reports idle, then send it again.
-- `completed=false` with a `job_id`: Revit is still working. Do not run it again. Call `get_job` until `completed` is true; the result or error is kept for 60 minutes. `background=true` returns the `job_id` at once for work you expect to be long. `get_job` with `cancel=true` drops a job Revit has not started; a running one cannot be stopped.
+- `completed=false` with a `job_id`: Revit is still working. Do not run it again. Call `get_job` until `completed` is true; the result or error is kept for 60 minutes. `background=true` returns the `job_id` at once for work you expect to be long; a background request that Revit has not started within 5 minutes is cancelled and never runs, so check `get_job` and send it again when Revit is idle. `get_job` with `cancel=true` drops a job Revit has not started; a running one cannot be stopped.
 
 `connection_status` and `get_job` answer even while Revit is busy. `connection_status` reports `busy_state`: `idle`, `executing` (with the job and its progress), `queued`, or `revit_busy` (Revit's own work: regenerating graphics, another command, a dialog).
 
 ## Dry run
 
-`execute_csharp` with `execution_mode=transaction` and `dry_run=true` runs the code, rolls everything back and returns the change counts (added, modified, deleted, by category). Use it before any heavy or unfamiliar write and show the counts to the user. If the counts come back as unavailable, Revit raised no change events and the dry run proves only that the code runs. In a workshared model Revit may keep touched elements checked out after the rollback until the next synchronise, so do not dry-run on elements another person needs.
+`execute_csharp` with `execution_mode=transaction` and `dry_run=true` runs the code, rolls back every change to the active document and returns the change counts (added, modified, deleted, by category). It does not undo files the code writes or changes to other open documents; those documents come back as `other_documents_changed` with a warning, so keep dry-run code to the active document. Use it before any heavy or unfamiliar write and show the counts to the user. If the counts come back as unavailable, Revit raised no change events and the dry run proves only that the code runs. In a workshared model Revit may keep touched elements checked out after the rollback until the next synchronise, so do not dry-run on elements another person needs.
 
 ## Verification and recovery
 

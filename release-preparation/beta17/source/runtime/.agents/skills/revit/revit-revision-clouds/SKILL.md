@@ -22,7 +22,7 @@ Follow the Revit rules first (`get_revit_rules`), then `revit-csharp-runner` for
 - Use `create_revision_clouds`: one call per primary view, at most 40 boxes per call, boxes in model-space millimetres (`x_min_mm`, `y_min_mm`, `x_max_mm`, `y_max_mm`), an optional `comment` (the cloud's Comments value) and an optional `note` placed beside the cloud (`note_side` right or left, `gap_mm`, `note_type_id` for the text note type the office uses, for example a 2 mm red type).
 - Run `dry_run=true` first on the first view and show the counts. A dry run in a workshared model can leave elements checked out until the next synchronise.
 - Expand each box by a margin so the cloud reads around the element, and keep boxes inside the view's crop where possible.
-- After each batch, read back: count clouds and notes per view and revision with a read-only `execute_csharp`, compare with the requested counts, and report created, failed (with the reason per item) and remaining.
+- After each batch, read back: count clouds and notes per view and revision with a read-only `execute_csharp`, compare with the requested counts, and report created, failed (with the reason per item) and remaining. A failed item is rolled back whole (no cloud and no note is left for it), so send only the failed items again once the reason is fixed.
 - The tool does not resolve overlaps between notes or against other annotation. Check overlaps in a separate light read, one view at a time, and move a note only when the user wants it.
 
 ## Hiding old clouds
