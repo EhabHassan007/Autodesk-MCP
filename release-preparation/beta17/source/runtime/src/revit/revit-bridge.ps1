@@ -23,7 +23,7 @@ $toolList = @(
     (New-Tool 'list_selected' 'Read the elements currently selected in Revit.' @{session_id=$session} @() $true),
     (New-Tool 'get_element' 'Read an element and up to 200 parameters by integer element id.' @{session_id=$session;element_id=$str} @('element_id') $true),
     (New-Tool 'set_parameter' 'Set one writable element parameter in a Revit transaction. Numeric values use Revit internal units. Does not save or synchronize.' @{session_id=$session;expected_document=$str;element_id=$str;parameter=$str;value=@{type='string'}} @('expected_document','element_id','parameter','value') $false),
-    (New-Tool 'execute_csharp' 'Execute controlled Revit 2024 C# against the active document. The code is the body of a method with three predefined variables: document (the active project Document; there is no doc), application (UIApplication; use application.Application for NewFamilyDocument) and parametersJson (string). It must return a string. Modes: read (inspection; allow_model_changes=false), transaction (writes inside one automatic project transaction; allow_model_changes=true), manual (code manages its own transactions or family documents). manual with allow_model_changes=false is a probe: family documents may be created, saved to a temporary path and closed, but any project change is rolled back and reported as an error; loading a family into the project needs allow_model_changes=true. Read document_info first. Read back every write with a separate call. Runtime errors name the script line (mcp_code.cs), the exception type and any Revit failure messages. Does not save or synchronize unless the supplied manual code explicitly does so.' @{session_id=$session;expected_document=$str;execution_mode=@{type='string';enum=@('read','transaction','manual')};allow_model_changes=$bool;code=@{type='string';minLength=1;maxLength=100000};parameters_json=$plainString;transaction_name=$str} @('expected_document','execution_mode','allow_model_changes','code','parameters_json','transaction_name') $false)
+    (New-Tool 'execute_csharp' 'Execute controlled Revit 2024 C# against the active document. Use read for inspection, transaction for writes inside one automatic transaction, and manual only for workflows that must manage their own transactions or family documents. Read document_info first. Code must return a string. transaction mode requires allow_model_changes=true. manual with allow_model_changes=false is a probe: family documents may be created, saved to a temporary path and closed, but every project change is rolled back and reported as [probe_changed_project]; loading a family into the project needs manual with allow_model_changes=true. Does not save or synchronize unless the supplied manual code explicitly does so. RUNNER: your code is the body of Run(UIApplication application, Document document, string parametersJson); those three are the only variables (no doc, no uidoc: use application.ActiveUIDocument). Language level is C# 5: no ?. , no string interpolation, no nameof, no expression-bodied members, no out var. Namespaces already imported: System, System.Collections.Generic, System.Globalization, System.IO, System.Linq, System.Text, Autodesk.Revit.DB, Autodesk.Revit.UI; use full names for any other. ERRORS come typed as [compile_error], [runtime_error], [commit_failed], [probe_changed_project], [document_changed] or [busy]: a typed error is a problem in the code or in Revit, not a lost connection. A runtime error names the script line (mcp_code.cs line N, counted from the first line of your code) and the API method that threw, followed by any Revit failure messages with element ids. TIME: the call waits wait_seconds (default 60). If Revit is still working it returns completed=false and a job_id: do NOT run the code again, call get_job. background=true returns the job_id at once. If Revit never started the request it returns [busy] and nothing ran. dry_run=true (transaction mode only) runs the code, rolls everything back and returns change counts; in a workshared model Revit may keep elements checked out until the next synchronise. Keep writes small: about 40 creations per call, regenerate once per call, never delete and recreate everything in one transaction. A long script can report progress with McpProgress.Report(done, total, note).' @{session_id=$session;expected_document=$str;execution_mode=@{type='string';enum=@('read','transaction','manual')};allow_model_changes=$bool;code=@{type='string';minLength=1;maxLength=100000};parameters_json=$plainString;transaction_name=$str;dry_run=$bool;background=$bool;wait_seconds=@{type='integer';minimum=1;maximum=110}} @('expected_document','execution_mode','allow_model_changes','code','parameters_json','transaction_name') $false)
 )
 
 function Assert-Args($name,$arguments) {
@@ -38,6 +38,11 @@ function Assert-Args($name,$arguments) {
         if ($null -eq $property.Value) { throw "Null argument: $($property.Name)" }
         if ($tool.inputSchema.properties[$property.Name].type -eq 'string' -and $property.Value -isnot [string]) { throw "Invalid string: $($property.Name)" }
         if ($tool.inputSchema.properties[$property.Name].type -eq 'boolean' -and $property.Value -isnot [bool]) { throw "Invalid boolean: $($property.Name)" }
+        if ($tool.inputSchema.properties[$property.Name].type -eq 'integer') {
+            if ($property.Value -isnot [int] -and $property.Value -isnot [long] -and -not ($property.Value -is [double] -and $property.Value -eq [math]::Truncate($property.Value))) { throw "Invalid integer: $($property.Name)" }
+            if ($tool.inputSchema.properties[$property.Name].minimum -and $property.Value -lt $tool.inputSchema.properties[$property.Name].minimum) { throw "Number out of range: $($property.Name)" }
+            if ($tool.inputSchema.properties[$property.Name].maximum -and $property.Value -gt $tool.inputSchema.properties[$property.Name].maximum) { throw "Number out of range: $($property.Name)" }
+        }
         if ($tool.inputSchema.properties[$property.Name].minLength -and [string]::IsNullOrWhiteSpace($property.Value)) { throw "Empty argument: $($property.Name)" }
         if ($tool.inputSchema.properties[$property.Name].maxLength -and ([string]$property.Value).Length -gt $tool.inputSchema.properties[$property.Name].maxLength) { throw "Argument is too long: $($property.Name)" }
         if ($tool.inputSchema.properties[$property.Name].enum -and $property.Value -notin $tool.inputSchema.properties[$property.Name].enum) { throw "Invalid value: $($property.Name)" }
@@ -69,12 +74,8 @@ function Invoke-RevitPipeName([string]$pipeName, [string]$operation, [string[]]$
         $parts = $line -split "`t", 2
         if ($parts.Count -ne 2) { throw 'Revit add-in returned an invalid response.' }
         $payload = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($parts[1]))
-        if ($parts[0] -eq 'ERR') {
-            # The add-in answered with its own error: marked so Invoke-RevitPipe passes it on as the real cause.
-            $addinError = New-Object InvalidOperationException $payload
-            $addinError.Data['RevitAddinError'] = $true
-            throw $addinError
-        }
+        # The add-in answered with an error: its own message (typed, such as "[compile_error] ...") must reach the client, not "session is not available".
+        if ($parts[0] -eq 'ERR') { throw ('ADDIN_ERR::' + $payload) }
         if ($parts[0] -ne 'OK') { throw 'Revit add-in returned an unknown response.' }
         $payload | ConvertFrom-Json
     }
@@ -163,9 +164,13 @@ function Invoke-RevitPipe([string]$operation, [string[]]$arguments, [string]$ses
     $pipeName = Resolve-RevitPipe $sessionId
     try { Invoke-RevitPipeName $pipeName $operation $arguments }
     catch {
-        # An add-in error (compile or runtime error, refused argument) is the real cause; only an unreachable pipe is a disconnect.
-        if ($_.Exception.Data['RevitAddinError']) { throw $_.Exception.Message }
-        throw "Revit $RevitVersion MCP session is not available. Start Revit or call list_sessions. $($_.Exception.Message)"
+        $message = $_.Exception.Message
+        if ($message.StartsWith('ADDIN_ERR::')) {
+            $message = $message.Substring(11)
+            if ($message -notmatch '^\[[a-z_]+\] ') { $message = "[revit_error] $message" }
+            throw $message
+        }
+        throw "Revit $RevitVersion MCP session is not available. Start Revit or call list_sessions. $message"
     }
 }
 
@@ -177,7 +182,8 @@ function Get-RevitConnectionStatus($arguments) {
     if (-not [string]::IsNullOrWhiteSpace($sessionId)) {
         try {
             $status = Invoke-RevitPipeName (Resolve-RevitPipe $sessionId) 'connection_status' @() 1000
-            return @{available=$true; running=$true; revit_version=$RevitVersion; status=$status; summary="Revit $RevitVersion session $sessionId is connected."}
+            $busy = [bool]$status.busy
+            return @{available=$true; running=$true; revit_version=$RevitVersion; busy=$busy; status=$status; summary=$(if ($busy) { "Revit $RevitVersion session $sessionId is connected but busy: $($status.busy_reason) Wait, then call connection_status again; do not send the last request again." } else { "Revit $RevitVersion session $sessionId is connected." })}
         }
         catch { return @{available=$false; running=$running; revit_version=$RevitVersion; summary="Revit $RevitVersion session $sessionId is not available: $($_.Exception.Message)"} }
     }
@@ -187,7 +193,8 @@ function Get-RevitConnectionStatus($arguments) {
     if ($online.Count -eq 1) {
         try { $result.status = Invoke-RevitPipeName (Resolve-RevitPipe $online[0].session_id) 'connection_status' @() 500 } catch { }
     }
-    $result.summary = if ($online.Count -eq 1) { "Revit $RevitVersion is connected (session $($online[0].session_id))." }
+    $onlyBusy = $online.Count -eq 1 -and $null -ne $result.status -and [bool]$result.status.busy
+    $result.summary = if ($online.Count -eq 1) { if ($onlyBusy) { "Revit $RevitVersion is connected (session $($online[0].session_id)) but busy: $($result.status.busy_reason) Wait, then call connection_status again; do not send the last request again." } else { "Revit $RevitVersion is connected (session $($online[0].session_id))." } }
         elseif ($online.Count -gt 1) { "Revit $RevitVersion is connected with $($online.Count) sessions; pass session_id to choose one." }
         elseif ($sessions.Count -gt 0 -or $running) { "Revit is running, but the Revit $RevitVersion add-in is not answering; it may still be loading or busy." }
         else { 'Revit is not running.' }
@@ -205,7 +212,18 @@ function Invoke-RevitTool($name,$arguments) {
         'list_selected' { Invoke-RevitPipe 'list_selected' @() $sessionId }
         'get_element' { Invoke-RevitPipe 'get_element' @([string]$arguments.element_id) $sessionId }
         'set_parameter' { Invoke-RevitPipe 'set_parameter' @([string]$arguments.expected_document,[string]$arguments.element_id,[string]$arguments.parameter,[string]$arguments.value) $sessionId }
-        'execute_csharp' { Invoke-RevitPipe 'execute_csharp' @([string]$arguments.expected_document,[string]$arguments.execution_mode,[string]$arguments.allow_model_changes,[string]$arguments.code,[string]$arguments.parameters_json,[string]$arguments.transaction_name) $sessionId }
+        'execute_csharp' {
+            $dryRun = $null -ne $arguments.PSObject.Properties['dry_run'] -and [bool]$arguments.dry_run
+            if ($dryRun -and [string]$arguments.execution_mode -ne 'transaction') { throw 'dry_run needs execution_mode transaction: only the automatic transaction can be rolled back.' }
+            $fields = @([string]$arguments.expected_document,[string]$arguments.execution_mode,[string]$arguments.allow_model_changes,[string]$arguments.code,[string]$arguments.parameters_json,[string]$arguments.transaction_name)
+            # The seventh field (options) only when one is set: "dry_run=true;background=true;wait_seconds=N".
+            $options = @()
+            if ($dryRun) { $options += 'dry_run=true' }
+            if ($null -ne $arguments.PSObject.Properties['background'] -and [bool]$arguments.background) { $options += 'background=true' }
+            if ($null -ne $arguments.PSObject.Properties['wait_seconds']) { $options += ('wait_seconds=' + [int]$arguments.wait_seconds) }
+            if ($options.Count -gt 0) { $fields += ($options -join ';') }
+            Invoke-RevitPipe 'execute_csharp' $fields $sessionId
+        }
     }
 }
 

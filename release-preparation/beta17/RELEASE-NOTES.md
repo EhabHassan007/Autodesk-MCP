@@ -8,15 +8,19 @@ New in 1.2.0 (AutoCAD Detail Generator and connector safety; everything from 1.1
 - A busy AutoCAD no longer breaks a run: a call that AutoCAD rejects ("call rejected by callee") is waited out and retried step by step, a plan that fails is rolled back completely (including when AutoCAD stays busy during the rollback), and if AutoCAD stays busy the message says where.
 - Viewports: the first viewport on a fresh layout is made even when the layout's block is not yet paper space, the zoom is tried twice before the Target fallback, and the result says which method was used.
 - Docs: the detail-generator skill and references describe the sheet layout rules (no doubled overall dimensions, one note per part), the viewport layer (`AO-MV` with the office scheme) and the live-check results.
-
-Revit execute_csharp (from a field report on building custom column families):
-- Errors come first: a compile or runtime error from the Revit add-in is returned as it is. "Revit 2024 MCP session is not available" now appears only when the connector cannot reach Revit.
-- Runtime errors name the script line (`mcp_code.cs line N`), the Revit API method that failed, the exception type, and any Revit failure messages posted during the run with their element ids.
-- `manual` mode with `allow_model_changes=false` is now a probe: family documents can be created, edited, saved and closed without granting model changes. Every project change in a probe is rolled back and reported as an error.
-- The tool description lists the predefined variables (`document`, `application`, `parametersJson`) and the modes.
-- Skills: the C# runner skill records the variables, modes and the geometry Options rule (DetailLevel and View cannot be set together); the family modelling skill adds the custom column from a plan polygon workflow and the reliable way to load an API-created family (`famDoc.LoadFamily(document)`).
-
-Not verified in a live Revit: the probe mode, the line numbers in runtime errors and the failure-message capture. They compile against the Revit 2024 API in CI; run the "Revit execute_csharp regression" in TESTING.md before release.
+- Revit, found in a failed session on a heavily linked model (not yet run in live Revit; the connector and the add-in compile and pass simulated tests):
+  - Errors are typed. A compile or runtime error in your own code now comes back as `[compile_error]` (with the line numbers of your code and a hint for the usual mistakes: `doc` instead of `document`, `?.`, string interpolation) or `[runtime_error]`; other add-in answers come back as `[document_changed]`, `[commit_failed]`, `[busy]`, `[invalid_request]` or `[revit_error]`. "Revit session is not available" now means a lost connection only. Before, every add-in error was reported as that.
+  - `execute_csharp` documents the runner contract in its own description: the variables (`application`, `document`, `parametersJson`), the C# 5 language level and the namespaces already imported.
+  - A request that outlives its wait is no longer lost. `execute_csharp` waits `wait_seconds` (default 60, at most 110, was a fixed 120). If Revit is still working it answers `completed: false` with a `job_id`; the new read-only tool `get_job` returns the progress (a script can report it with `McpProgress.Report`) and later the result, or cancels a job Revit has not started. `background: true` returns the `job_id` at once. A request Revit never started is dropped and answered `[busy]`, so it cannot run late.
+  - `connection_status` answers while Revit is busy and says why: `busy_state` is `idle`, `executing` (with the job and its progress), `queued` or `revit_busy`. The add-in pipe now accepts several clients at once and answers status and job questions without Revit's thread. `list_sessions` shows the same.
+  - `execute_csharp` takes `dry_run: true` in transaction mode: it runs the code, rolls it back and returns the change counts (added, modified, deleted, by category).
+  - New tools `revision_cloud_info` (revisions, the types in the Revision Cloud Tags category with `likely_tag`, and the primary view of each dependent view) and `create_revision_clouds` (revision clouds with a Comments value and a text note beside each, in plan views, at most 40 per call, primary views only, `dry_run`). Not yet run in Revit.
+  - Revit rules RVT-005 to RVT-011 (runner contract, batch size, timeouts, primary views, cloud tag families, idle check, tool prefix change), the skill `revit-csharp-runner` updated, and the new skill `revit-revision-clouds`.
+  - The PowerShell fallback bridge passes the add-in's typed errors through and accepts the new `execute_csharp` options; it has no `get_job`, `revision_cloud_info` or `create_revision_clouds`.
+- Revit, from a field report on building custom column families (not yet run in live Revit; compiled and tested in CI):
+  - `execute_csharp` in `manual` mode with `allow_model_changes=false` is a probe: family documents can be created, edited, saved and closed without granting model changes. The project runs inside a transaction group that is always rolled back; a project change is undone and reported as `[probe_changed_project]`.
+  - A `[runtime_error]` names the script line (`at mcp_code.cs line N`) and the Revit API method that threw. Revit failure messages posted during the run, with their element ids, are added to any `execute_csharp` error (for example after "Document regeneration failed").
+  - Skills: the C# runner skill adds the modes table and the geometry Options rule (DetailLevel and View cannot be set together); the family modelling skill adds the custom column from a plan polygon workflow and the reliable way to load an API-created family (`famDoc.LoadFamily(document)`). TESTING.md has a live "Revit execute_csharp regression".
 
 Not verified on a real AutoCAD: `prepare_layout` and the overlap warning with an existing viewport. Everything else above ran live on AutoCAD 2024 (24.3) with the S-shaped reception counter: plan 1:20, sections A-A and B-B 1:10 on one A1 sheet.
 
@@ -53,4 +57,4 @@ Lean core: Smart Connector now runs nothing in the background. This removes the 
 - `verify_standards`: an `expected_counts` type of `total`, `all` or `any` (or none) counts every object; an unknown type is refused instead of being counted as zero.
 - Detail Generator, found in the first run on the office template: the viewport step is retried when AutoCAD answers "call rejected" (busy), and leader notes are spaced for the office label block's real text size so wrapped notes no longer overprint.
 
-SHA-256: E637BB6E5F405F5680501A89960A7A97C5E59F03465AA152C1E4F7EEE3F8C9E7
+SHA-256: 21538DC1A9B0FFD11BD75E97E79C2C68C7A9147A20F00B939D4E7F2F9AFC53AC

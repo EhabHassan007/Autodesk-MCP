@@ -54,10 +54,10 @@ For an update regression test, install an older package, create harmless marker 
 
 Use a copy of a workshared Revit 2024 project, or a detached test model. Do not synchronize or save.
 
-1. Call `execute_csharp` in `read` mode with `return doc.Title;`. The error must start with `C# compilation failed:` and name line 1; it must not say the session is not available. `connection_status` must still report the session as connected.
-2. Call it in `read` mode with code that throws on line 2 (for example `var e = document.GetElement(ElementId.InvalidElementId);` then `return e.Name;`). The error must read `C# execution failed at mcp_code.cs line 2` with the exception type.
+1. Call `execute_csharp` in `read` mode with `return doc.Title;`. The error must start with `[compile_error] C# compilation failed` and name line 1; it must not say the session is not available. `connection_status` must still report the session as connected.
+2. Call it in `read` mode with code that throws on line 2 (for example `var e = document.GetElement(ElementId.InvalidElementId);` then `return e.Name;`). The error must start with `[runtime_error]` and say `at mcp_code.cs line 2`, with the exception type.
 3. Call it in `manual` mode with `allow_model_changes=false` and code that creates a family document from the Metric Structural Column template, adds an extrusion, saves it to `%TEMP%` and closes it. It must succeed, and the project must show no new undo entry.
-4. Repeat step 3 with `famDoc.LoadFamily(document)` before closing. It must fail with "The code changed the project document", and the family must not be in the project afterwards.
+4. Repeat step 3 with `famDoc.LoadFamily(document)` before closing. It must fail with `[probe_changed_project] The code changed the project document`, and the family must not be in the project afterwards.
 5. Run the load with `manual` and `allow_model_changes=true`, then place one instance in `transaction` mode and read it back (the custom column workflow in the `revit-family-modelling` skill, steps 7 to 9). Undo or discard the test changes afterwards.
 
 ## Report
