@@ -73,6 +73,11 @@ namespace BimCadMcp.Revit
         internal int Done;
         internal int Total;
         internal string Note = "";
+        // A queued job that Revit has not started by this time is cancelled instead of running late. MaxValue: no limit
+        // (a foreground request is cancelled by its own caller when the wait ends).
+        internal DateTime StartBy = DateTime.MaxValue;
+        // Why a cancelled job was cancelled; empty for an ordinary cancel.
+        internal string CancelReason = "";
 
         internal Job(string id, string operation)
         {
@@ -95,6 +100,9 @@ namespace BimCadMcp.Revit
         private static Job _current;
         private const int KeepMinutes = 60;
         private const int MaxJobs = 40;
+        // How long a background request may wait for Revit to start it. After that it is cancelled, so it can never run
+        // long after the caller and the user have moved on.
+        internal const int BackgroundStartMinutes = 5;
 
         internal static Job Create(string operation)
         {
@@ -107,11 +115,13 @@ namespace BimCadMcp.Revit
             return job;
         }
 
-        // Called on the Revit thread. False when the caller gave up or cancelled before Revit got to it.
+        // Called on the Revit thread. False when the caller gave up or cancelled before Revit got to it, or when the job
+        // waited past its start deadline.
         internal static bool Start(Job job)
         {
             lock (job)
             {
+                ExpireIfLate(job);
                 if (job.State != "queued") return false;
                 job.State = "running";
                 job.StartedUtc = DateTime.UtcNow;
@@ -157,7 +167,27 @@ namespace BimCadMcp.Revit
         {
             Job job;
             lock (Gate) All.TryGetValue(id ?? "", out job);
+            if (job != null)
+            {
+                lock (job) ExpireIfLate(job);
+            }
             return job;
+        }
+
+        // Called with lock (job) held. A queued job past its start deadline becomes cancelled.
+        private static void ExpireIfLate(Job job)
+        {
+            if (job.State != "queued" || DateTime.UtcNow <= job.StartBy) return;
+            job.State = "cancelled";
+            job.FinishedUtc = DateTime.UtcNow;
+            job.CancelReason = "Revit did not start this request within " + BackgroundStartMinutes.ToString(CultureInfo.InvariantCulture) +
+                " minutes, so it was cancelled and will not run. Nothing was changed. Check connection_status and send it again when Revit is idle.";
+        }
+
+        // The job that Revit is running now, if any.
+        internal static Job Running()
+        {
+            lock (Gate) return _current;
         }
 
         internal static List<Job> Active()
@@ -169,6 +199,7 @@ namespace BimCadMcp.Revit
                 {
                     lock (job)
                     {
+                        ExpireIfLate(job);
                         if (!job.Finished) active.Add(job);
                     }
                 }
@@ -237,7 +268,7 @@ namespace BimCadMcp.Revit
                     text.Append(',').Append(Json.Property("message", "Revit is still working on this request. Do not run it again. Call get_job with this job_id until completed is true."));
                 if (includeResult && job.State == "completed") text.Append(",\"result\":").Append(String.IsNullOrEmpty(job.ResultJson) ? "null" : job.ResultJson);
                 if (job.State == "failed") text.Append(',').Append(Json.Property("error", job.Error));
-                if (job.State == "cancelled") text.Append(',').Append(Json.Property("message", "The request was cancelled before Revit started it. Nothing was changed."));
+                if (job.State == "cancelled") text.Append(',').Append(Json.Property("message", job.CancelReason.Length > 0 ? job.CancelReason : "The request was cancelled before Revit started it. Nothing was changed."));
                 text.Append('}');
                 return text.ToString();
             }
@@ -294,6 +325,8 @@ namespace BimCadMcp.Revit
         internal int Deleted;
         internal readonly Dictionary<string, int> AddedByCategory = new Dictionary<string, int>();
         internal readonly Dictionary<string, int> ModifiedByCategory = new Dictionary<string, int>();
+        // Other documents (another open project or family) that changed during the run. A dry run cannot roll them back.
+        internal readonly List<string> OtherDocuments = new List<string>();
 
         internal ChangeCounter(Document document)
         {
@@ -312,7 +345,13 @@ namespace BimCadMcp.Revit
         private void OnChanged(object sender, Autodesk.Revit.DB.Events.DocumentChangedEventArgs e)
         {
             Document changed = e.GetDocument();
-            if (changed == null || !Object.ReferenceEquals(changed, _document)) return;
+            if (changed == null) return;
+            if (!changed.Equals(_document))
+            {
+                string title = changed.Title ?? "";
+                if (!OtherDocuments.Contains(title)) OtherDocuments.Add(title);
+                return;
+            }
             Events++;
             foreach (ElementId id in e.GetAddedElementIds())
             {
@@ -346,16 +385,23 @@ namespace BimCadMcp.Revit
             return "{" + String.Join(",", counts.OrderByDescending(p => p.Value).Select(p => Json.NumberProperty(p.Key, p.Value)).ToArray()) + "}";
         }
 
+        private string OtherDocumentsJson()
+        {
+            if (OtherDocuments.Count == 0) return "";
+            return ",\"other_documents_changed\":[" + String.Join(",", OtherDocuments.Select(d => Json.Quoted(d)).ToArray()) + "]," +
+                Json.Property("warning", "The code changed other documents as well. A dry run rolls back the active document only; changes to other documents, and any files the code wrote, were not undone. Check them.");
+        }
+
         internal string ToJson()
         {
             if (Events == 0)
-                return "{" + Json.NumberProperty("events_observed", 0) + "," + Json.Property("note", "Revit raised no change events, so the changes could not be counted. The transaction was still rolled back.") + "}";
+                return "{" + Json.NumberProperty("events_observed", 0) + "," + Json.Property("note", "Revit raised no change events in the active document, so the changes could not be counted. The transaction was still rolled back.") + OtherDocumentsJson() + "}";
             return "{" + Json.NumberProperty("events_observed", Events) + "," +
                 Json.NumberProperty("added", Added) + "," +
                 Json.NumberProperty("modified", Modified) + "," +
                 Json.NumberProperty("deleted", Deleted) + "," +
                 "\"added_by_category\":" + CountsJson(AddedByCategory) + "," +
-                "\"modified_by_category\":" + CountsJson(ModifiedByCategory) + "}";
+                "\"modified_by_category\":" + CountsJson(ModifiedByCategory) + OtherDocumentsJson() + "}";
         }
     }
 

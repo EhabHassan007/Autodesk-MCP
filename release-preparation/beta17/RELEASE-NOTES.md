@@ -16,6 +16,7 @@ New in 1.2.0 (AutoCAD Detail Generator and connector safety; everything from 1.1
   - `execute_csharp` takes `dry_run: true` in transaction mode: it runs the code, rolls it back and returns the change counts (added, modified, deleted, by category).
   - New tools `revision_cloud_info` (revisions, the types in the Revision Cloud Tags category with `likely_tag`, and the primary view of each dependent view) and `create_revision_clouds` (revision clouds with a Comments value and a text note beside each, in plan views, at most 40 per call, primary views only, `dry_run`). Not yet run in Revit.
   - Revit rules RVT-005 to RVT-011 (runner contract, batch size, timeouts, primary views, cloud tag families, idle check, tool prefix change), the skill `revit-csharp-runner` updated, and the new skill `revit-revision-clouds`.
+  - Follow-up fixes after review: a `background` request that Revit has not started within 5 minutes is cancelled instead of running late; `create_revision_clouds` rolls a failed item back whole (a cloud whose note failed is no longer left in the model) and sets Comments through the built-in parameter, so it works in any Revit display language; a dry run lists other documents the code changed (`other_documents_changed`), because it rolls back the active document only; `connection_status` looks again when its check waits behind a queued request, and `[busy]` names our own running job when that is the cause.
   - The PowerShell fallback bridge passes the add-in's typed errors through and accepts the new `execute_csharp` options; it has no `get_job`, `revision_cloud_info` or `create_revision_clouds`.
 
 Not verified on a real AutoCAD: `prepare_layout` and the overlap warning with an existing viewport. Everything else above ran live on AutoCAD 2024 (24.3) with the S-shaped reception counter: plan 1:20, sections A-A and B-B 1:10 on one A1 sheet.
@@ -53,4 +54,4 @@ Lean core: Smart Connector now runs nothing in the background. This removes the 
 - `verify_standards`: an `expected_counts` type of `total`, `all` or `any` (or none) counts every object; an unknown type is refused instead of being counted as zero.
 - Detail Generator, found in the first run on the office template: the viewport step is retried when AutoCAD answers "call rejected" (busy), and leader notes are spaced for the office label block's real text size so wrapped notes no longer overprint.
 
-SHA-256: 21538DC1A9B0FFD11BD75E97E79C2C68C7A9147A20F00B939D4E7F2F9AFC53AC
+SHA-256: 75739D78CCBB196004C76A51AAFCA467B3A8856C2CF7C87806B0D69203551BBC
