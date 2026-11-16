@@ -485,7 +485,8 @@ namespace BimCadMcp.Revit
             { "updates", "M12 4v11M7.5 10.5L12 15l4.5-4.5M5 20h14" },
             { "settings", "M4 7h9M17 7h3M4 12h3M11 12h9M4 17h11M19 17h1M15 5v4M9 10v4M17 15v4" },
             { "diagnostics", "M3 12h4l2-5 4 10 2-5h6" },
-            { "help", "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM9.6 9.4a2.5 2.5 0 1 1 3.4 2.4c-.6.3-1 .8-1 1.5v.6M12 17v.01" }
+            { "help", "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM9.6 9.4a2.5 2.5 0 1 1 3.4 2.4c-.6.3-1 .8-1 1.5v.6M12 17v.01" },
+            { "info", "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 11v6M12 7.5v.5" }
         };
 
         private static Media.Brush Gradient()
@@ -494,6 +495,50 @@ namespace BimCadMcp.Revit
                 Media.Color.FromRgb(32, 201, 171), Media.Color.FromRgb(47, 128, 237), 45);
             brush.Freeze();
             return brush;
+        }
+
+        // A flat line icon from the icon family: no tile, one stroke colour (the accent blue for the main action, a slate
+        // for the rest). Both are mid-tones with about 3:1 contrast on Revit's light and dark themes. An invisible square fixes the
+        // image size (32 for large buttons, 16 for menu items), because Revit shows an image at its own size.
+        internal static Media.ImageSource Line(string name, bool small, bool accent)
+        {
+            Media.DrawingGroup group = new Media.DrawingGroup();
+            using (Media.DrawingContext context = group.Open())
+            {
+                double scale = small ? 16.0 / 24.0 : 32.0 / 24.0;
+                context.PushTransform(new Media.ScaleTransform(scale, scale));
+                context.DrawRectangle(Media.Brushes.Transparent, null, new System.Windows.Rect(0, 0, 24, 24));
+                Media.Color color = accent ? Media.Color.FromRgb(74, 144, 240) : Media.Color.FromRgb(125, 141, 160);
+                Media.Pen pen = new Media.Pen(new Media.SolidColorBrush(color), small ? 2.0 : 1.6);
+                pen.StartLineCap = Media.PenLineCap.Round; pen.EndLineCap = Media.PenLineCap.Round; pen.LineJoin = Media.PenLineJoin.Round;
+                context.DrawGeometry(null, pen, Media.Geometry.Parse(Paths[name]));
+                context.Pop();
+            }
+            group.Freeze();
+            Media.DrawingImage image = new Media.DrawingImage(group);
+            image.Freeze();
+            return image;
+        }
+
+        // Three dots for the More menu (not part of the shared icon family: it is a ribbon convention, not a Smart Connector
+        // symbol). Sized to the slot like Line: 32 for the large button, 16 for the small image Revit uses elsewhere.
+        internal static Media.ImageSource More(bool small)
+        {
+            Media.DrawingGroup group = new Media.DrawingGroup();
+            using (Media.DrawingContext context = group.Open())
+            {
+                double scale = small ? 0.5 : 1.0;
+                context.PushTransform(new Media.ScaleTransform(scale, scale));
+                context.DrawRectangle(Media.Brushes.Transparent, null, new System.Windows.Rect(0, 0, 32, 32));
+                Media.SolidColorBrush brush = new Media.SolidColorBrush(Media.Color.FromRgb(125, 141, 160));
+                double radius = small ? 3.0 : 2.2;
+                foreach (double x in new double[] { 8, 16, 24 }) context.DrawEllipse(brush, null, new System.Windows.Point(x, 16), radius, radius);
+                context.Pop();
+            }
+            group.Freeze();
+            Media.DrawingImage image = new Media.DrawingImage(group);
+            image.Freeze();
+            return image;
         }
 
         // Every ribbon button: the navy tile with the teal-to-blue glyph from the icon family, drawn as vectors.
@@ -585,32 +630,33 @@ namespace BimCadMcp.Revit
 
                 string assemblyPath = Assembly.GetExecutingAssembly().Location;
 
-                // Connector: open the app, check the connection. Large buttons for the two daily actions.
+                // One panel: the three actions people use, then a More menu for the rest.
                 RibbonPanel connector = Panel(application, "Connector");
-                connector.AddItem(Button(assemblyPath, "BimCadMcpOpenConnector", "Open\nConnector", typeof(OpenConnectorCommand),
-                    "Open the Smart Connector app: status of Revit, AutoCAD, Claude and Codex, skills, updates and settings.", Icons.Logo(false), Icons.Logo(true)));
-                connector.AddItem(Button(assemblyPath, "BimCadMcpConnectionStatus", "Connection\nStatus", typeof(ConnectionStatusCommand),
-                    "See whether Codex or Claude is connected to this Revit session.", Icons.Tile("status", false), Icons.Tile("status", true)));
+                connector.AddItem(Button(assemblyPath, "BimCadMcpOpenConnector", "Connect", typeof(OpenConnectorCommand),
+                    "Open Smart Connector: connect Revit, AutoCAD, Claude and Codex, and see what is ready.", Icons.Line("status", false, true), Icons.Line("status", true, true)));
+                connector.AddItem(Button(assemblyPath, "BimCadMcpConnectionStatus", "Status", typeof(ConnectionStatusCommand),
+                    "See whether Codex or Claude is connected to this Revit session.", Icons.Line("diagnostics", false, false), Icons.Line("diagnostics", true, false)));
+                connector.AddItem(Button(assemblyPath, "BimCadMcpSkillsSync", "Skills\nSync", typeof(SkillsSyncCommand),
+                    "Send your saved skills for review and download the latest approved Revit and General skills.", Icons.Line("sync", false, false), Icons.Line("sync", true, false)));
 
-                // Skills: send and receive team skills, browse what is installed.
-                RibbonPanel skills = Panel(application, "Skills");
-                skills.AddItem(Button(assemblyPath, "BimCadMcpSkillsSync", "Skills\nSync", typeof(SkillsSyncCommand),
-                    "Send your saved skills for review and download the latest approved Revit and General skills.", Icons.Tile("sync", false), Icons.Tile("sync", true)));
-                skills.AddItem(Button(assemblyPath, "BimCadMcpBrowseSkills", "Browse\nSkills", typeof(BrowseSkillsCommand),
-                    "See the workflow skills installed for Claude and Codex, by category.", Icons.Tile("skills", false), Icons.Tile("skills", true)));
-
-                // Support: small stacked buttons.
-                RibbonPanel support = Panel(application, "Support");
-                support.AddStackedItems(
-                    Button(assemblyPath, "BimCadMcpCheckUpdates", "Check updates", typeof(CheckUpdatesCommand),
-                        "Check for a new version of Smart Connector. Updates install when Revit and AutoCAD are closed.", Icons.Tile("updates", false), Icons.Tile("updates", true)),
-                    Button(assemblyPath, "BimCadMcpSettings", "Settings", typeof(SettingsCommand),
-                        "Update checks, the weekly Skills Sync reminder and other Smart Connector settings.", Icons.Tile("settings", false), Icons.Tile("settings", true)));
-                support.AddStackedItems(
-                    Button(assemblyPath, "BimCadMcpDiagnostics", "Diagnostics", typeof(DiagnosticsCommand),
-                        "Logs and checks to send to your administrator when something does not work.", Icons.Tile("diagnostics", false), Icons.Tile("diagnostics", true)),
-                    Button(assemblyPath, "BimCadMcpHelp", "Help", typeof(HelpCommand),
-                        "How to use Smart Connector with Revit, AutoCAD, Claude and Codex.", Icons.Tile("help", false), Icons.Tile("help", true)));
+                PulldownButtonData moreData = new PulldownButtonData("BimCadMcpMore", "More");
+                moreData.ToolTip = "Browse skills, check for updates, settings, diagnostics and help.";
+                moreData.LargeImage = Icons.More(false);
+                moreData.Image = Icons.More(true);
+                PulldownButton more = connector.AddItem(moreData) as PulldownButton;
+                if (more != null)
+                {
+                    more.AddPushButton(Button(assemblyPath, "BimCadMcpBrowseSkills", "Browse Skills", typeof(BrowseSkillsCommand),
+                        "See the workflow skills installed for Claude and Codex, by category.", Icons.Line("skills", false, false), Icons.Line("skills", true, false)));
+                    more.AddPushButton(Button(assemblyPath, "BimCadMcpCheckUpdates", "Check updates", typeof(CheckUpdatesCommand),
+                        "Check for a new version of Smart Connector. Updates install when Revit and AutoCAD are closed.", Icons.Line("updates", false, false), Icons.Line("updates", true, false)));
+                    more.AddPushButton(Button(assemblyPath, "BimCadMcpSettings", "Settings", typeof(SettingsCommand),
+                        "Update checks, the weekly Skills Sync reminder and other Smart Connector settings.", Icons.Line("settings", false, false), Icons.Line("settings", true, false)));
+                    more.AddPushButton(Button(assemblyPath, "BimCadMcpDiagnostics", "Diagnostics", typeof(DiagnosticsCommand),
+                        "Logs and checks to send to your administrator when something does not work.", Icons.Line("info", false, false), Icons.Line("info", true, false)));
+                    more.AddPushButton(Button(assemblyPath, "BimCadMcpHelp", "Help", typeof(HelpCommand),
+                        "How to use Smart Connector with Revit, AutoCAD, Claude and Codex.", Icons.Line("help", false, false), Icons.Line("help", true, false)));
+                }
             }
             catch (Exception exception)
             {

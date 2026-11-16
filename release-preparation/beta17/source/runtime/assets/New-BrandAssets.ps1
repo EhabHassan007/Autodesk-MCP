@@ -77,22 +77,22 @@ $w.Flush()
 $w.Dispose()
 "Wrote logo-16/32/64/256.png and logo.ico to $OutputDirectory"
 
-# AutoCAD Add-ins buttons: the icon family from installer\Brand.ps1 on the navy tile, the same artwork the
-# Revit ribbon draws. Install-AutoCadBundle packs these PNGs into the .cuix. Run on Windows (WPF renders them).
+# AutoCAD Add-ins buttons: flat line icons from the icon family in installer\Brand.ps1, the same artwork and colours as
+# the Revit ribbon (Icons.Line in ConnectorUi.cs): the accent blue for AI Markup, a grey for the rest, both with about 3:1
+# contrast on AutoCAD's light and dark themes. Install-AutoCadBundle packs these PNGs into the .cuix. Run on Windows
+# (WPF renders them). The file names stay as before so the panel definition keeps its references.
 . (Join-Path (Split-Path -Parent $OutputDirectory) 'installer\Brand.ps1')
+$accent = [Drawing.Color]::FromArgb(74, 144, 240); $grey = [Drawing.Color]::FromArgb(125, 141, 160)
 $buttonIcons = [ordered]@{
-    'sac-ai-markup' = 'markup'; 'sac-ai-clear' = 'clear'; 'sac-skills-sync' = 'sync'
-    'sac-connection-status' = 'status'; 'sac-check-updates' = 'updates'; 'sac-settings' = 'settings'
+    'sac-ai-markup' = @('markup', $accent); 'sac-ai-clear' = @('clear', $grey); 'sac-skills-sync' = @('sync', $grey)
+    'sac-connection-status' = @('diagnostics', $grey); 'sac-check-updates' = @('updates', $grey); 'sac-settings' = @('settings', $grey)
+    'sac-open-connector' = @('status', $grey)
 }
 foreach ($file in $buttonIcons.Keys) {
     foreach ($size in 16, 32) {
-        $image = Get-BrandIconImage $buttonIcons[$file] $size -Tile -Scale 1
+        $stroke = $(if ($size -le 16) { 2.0 } else { 1.6 })
+        $image = Get-BrandIconImage $buttonIcons[$file][0] $size -Color $buttonIcons[$file][1] -Stroke $stroke -Scale 1
         $image.Save((Join-Path $OutputDirectory "$file-$size.png"), [Drawing.Imaging.ImageFormat]::Png)
     }
 }
-# Open Connector: the logo itself.
-foreach ($size in 16, 32) {
-    $bmp = New-Logo $size
-    $bmp.Save((Join-Path $OutputDirectory "sac-open-connector-$size.png"), [Drawing.Imaging.ImageFormat]::Png); $bmp.Dispose()
-}
-"Wrote the AutoCAD button icons ($($buttonIcons.Keys -join ', '), sac-open-connector; 16 and 32 px) to $OutputDirectory"
+"Wrote the AutoCAD button icons ($($buttonIcons.Keys -join ', '); 16 and 32 px) to $OutputDirectory"

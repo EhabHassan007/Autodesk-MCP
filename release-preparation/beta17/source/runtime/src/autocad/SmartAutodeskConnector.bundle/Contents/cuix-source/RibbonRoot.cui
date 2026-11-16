@@ -6,32 +6,31 @@
       <Name xlate="true" UID="XLS_SAC_PANEL_NAME">Smart Connector</Name>
       <RibbonRow UID="RBN_SAC_ROW">
         <ModifiedRev MajorVersion="19" MinorVersion="1" UserVersion="0" />
-        <RibbonCommandButton UID="RBN_SAC_BTN_OPEN" Id="AcRibbonCommandButton" Text="Open Connector" ButtonStyle="LargeWithText" MenuMacroID="MM_SAC_OPEN" KeyTip="">
-          <TooltipTitle xlate="true" UID="XLS_SAC_BTN_OPEN_TIP">Open Connector</TooltipTitle>
+        <RibbonCommandButton UID="RBN_SAC_BTN_OPEN" Id="AcRibbonCommandButton" Text="Connect" ButtonStyle="LargeWithText" MenuMacroID="MM_SAC_OPEN" KeyTip="">
+          <TooltipTitle xlate="true" UID="XLS_SAC_BTN_OPEN_TIP">Connect</TooltipTitle>
           <ModifiedRev MajorVersion="19" MinorVersion="1" UserVersion="0" />
         </RibbonCommandButton>
-        <RibbonCommandButton UID="RBN_SAC_BTN_AIMARKUP" Id="AcRibbonCommandButton" Text="AI Markup" ButtonStyle="LargeWithText" MenuMacroID="MM_SAC_AIMARKUP" KeyTip="">
-          <TooltipTitle xlate="true" UID="XLS_SAC_BTN_AIMARKUP_TIP">AI Markup</TooltipTitle>
-          <ModifiedRev MajorVersion="19" MinorVersion="1" UserVersion="0" />
-        </RibbonCommandButton>
-        <RibbonCommandButton UID="RBN_SAC_BTN_AICLEAR" Id="AcRibbonCommandButton" Text="Clear Markup" ButtonStyle="LargeWithText" MenuMacroID="MM_SAC_AICLEAR" KeyTip="">
-          <TooltipTitle xlate="true" UID="XLS_SAC_BTN_AICLEAR_TIP">Clear Markup</TooltipTitle>
+        <RibbonCommandButton UID="RBN_SAC_BTN_STATUS" Id="AcRibbonCommandButton" Text="Status" ButtonStyle="LargeWithText" MenuMacroID="MM_SAC_STATUS" KeyTip="">
+          <TooltipTitle xlate="true" UID="XLS_SAC_BTN_STATUS_TIP">Status</TooltipTitle>
           <ModifiedRev MajorVersion="19" MinorVersion="1" UserVersion="0" />
         </RibbonCommandButton>
         <RibbonCommandButton UID="RBN_SAC_BTN_SKILLSSYNC" Id="AcRibbonCommandButton" Text="Skills Sync" ButtonStyle="LargeWithText" MenuMacroID="MM_SAC_SKILLSSYNC" KeyTip="">
           <TooltipTitle xlate="true" UID="XLS_SAC_BTN_SKILLSSYNC_TIP">Skills Sync</TooltipTitle>
           <ModifiedRev MajorVersion="19" MinorVersion="1" UserVersion="0" />
         </RibbonCommandButton>
-        <RibbonCommandButton UID="RBN_SAC_BTN_STATUS" Id="AcRibbonCommandButton" Text="Connection Status" ButtonStyle="LargeWithText" MenuMacroID="MM_SAC_STATUS" KeyTip="">
-          <TooltipTitle xlate="true" UID="XLS_SAC_BTN_STATUS_TIP">Connection Status</TooltipTitle>
+      </RibbonRow>
+    </RibbonPanelSource>
+    <RibbonPanelSource UID="RBN_SAC_MARKUP_PANEL" Text="AI Markup" HiddenInEditor="false">
+      <ModifiedRev MajorVersion="19" MinorVersion="1" UserVersion="0" />
+      <Name xlate="true" UID="XLS_SAC_MARKUP_PANEL_NAME">AI Markup</Name>
+      <RibbonRow UID="RBN_SAC_MARKUP_ROW">
+        <ModifiedRev MajorVersion="19" MinorVersion="1" UserVersion="0" />
+        <RibbonCommandButton UID="RBN_SAC_BTN_AIMARKUP" Id="AcRibbonCommandButton" Text="AI Markup" ButtonStyle="LargeWithText" MenuMacroID="MM_SAC_AIMARKUP" KeyTip="">
+          <TooltipTitle xlate="true" UID="XLS_SAC_BTN_AIMARKUP_TIP">AI Markup</TooltipTitle>
           <ModifiedRev MajorVersion="19" MinorVersion="1" UserVersion="0" />
         </RibbonCommandButton>
-        <RibbonCommandButton UID="RBN_SAC_BTN_CHECKUPDATES" Id="AcRibbonCommandButton" Text="Check Updates" ButtonStyle="LargeWithText" MenuMacroID="MM_SAC_CHECKUPDATES" KeyTip="">
-          <TooltipTitle xlate="true" UID="XLS_SAC_BTN_CHECKUPDATES_TIP">Check Updates</TooltipTitle>
-          <ModifiedRev MajorVersion="19" MinorVersion="1" UserVersion="0" />
-        </RibbonCommandButton>
-        <RibbonCommandButton UID="RBN_SAC_BTN_SETTINGS" Id="AcRibbonCommandButton" Text="Settings" ButtonStyle="LargeWithText" MenuMacroID="MM_SAC_SETTINGS" KeyTip="">
-          <TooltipTitle xlate="true" UID="XLS_SAC_BTN_SETTINGS_TIP">Settings</TooltipTitle>
+        <RibbonCommandButton UID="RBN_SAC_BTN_AICLEAR" Id="AcRibbonCommandButton" Text="Clear Markup" ButtonStyle="LargeWithText" MenuMacroID="MM_SAC_AICLEAR" KeyTip="">
+          <TooltipTitle xlate="true" UID="XLS_SAC_BTN_AICLEAR_TIP">Clear Markup</TooltipTitle>
           <ModifiedRev MajorVersion="19" MinorVersion="1" UserVersion="0" />
         </RibbonCommandButton>
       </RibbonRow>
@@ -41,6 +40,9 @@
     <RibbonTabSource Text="Add-ins" UID="RBN_SAC_ADDINSTAB" KeyTip="X">
       <ModifiedRev MajorVersion="19" MinorVersion="1" UserVersion="0" />
       <Alias>ID_ADDINSTAB</Alias>
+      <RibbonPanelSourceReference UID="RBN_SAC_MARKUP_PANELREF" PanelId="RBN_SAC_MARKUP_PANEL" ResizeStyle="Default">
+        <ModifiedRev MajorVersion="19" MinorVersion="1" UserVersion="0" />
+      </RibbonPanelSourceReference>
       <RibbonPanelSourceReference UID="RBN_SAC_PANELREF" PanelId="RBN_SAC_PANEL" ResizeStyle="Default">
         <ModifiedRev MajorVersion="19" MinorVersion="1" UserVersion="0" />
       </RibbonPanelSourceReference>

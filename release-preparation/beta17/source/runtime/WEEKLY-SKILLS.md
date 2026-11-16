@@ -3,10 +3,13 @@
 ## Smart Connector at a glance
 
 - **Revit ribbon tab "Smart Connector":**
-  - **Connection Status:** is Codex or Claude connected to this Revit session?
-  - **Check Updates:** look for a newer approved version. **Update now** opens the update window, which installs it as soon as Revit and AutoCAD are closed.
+  - **Connect:** open Smart Connector: connect Revit, AutoCAD, Claude and Codex, and see what is ready.
+  - **Status:** is Codex or Claude connected to this Revit session?
   - **Skills Sync:** send your saved skills for review and download the latest approved team skills now.
-  - **Settings:** update checks and the weekly Skills Sync reminder.
+  - **More** menu:
+    - **Check updates:** look for a newer approved version. **Update now** opens the update window, which installs it as soon as Revit and AutoCAD are closed.
+    - **Settings:** update checks and the weekly Skills Sync reminder.
+    - **Browse Skills**, **Diagnostics** and **Help**.
 - **Nothing runs in the background.** There is no scheduled task, no notification-area icon and no process left running. Setup and each update remove what earlier versions scheduled.
 - **When Revit, AutoCAD or Smart Connector opens,** at most once a day:
   - it looks for a new version (one small download of the public `latest.json`, in the background) and asks **Update now** or **Later**;

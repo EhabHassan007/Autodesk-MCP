@@ -423,7 +423,7 @@ namespace SmartConnector
 
             string manifest = Path.Combine(Env.AppData, "Autodesk", "Revit", "Addins", "2024", "AutodeskMcpConnector.addin");
             Step(File.Exists(manifest) ? "Smart Connector add-in is installed for Revit 2024." : "Smart Connector add-in is not installed for Revit 2024 yet.");
-            if (installed) Step("In Revit, open the Smart Connector ribbon tab and click Connection Status.");
+            if (installed) Step("In Revit, open the Smart Connector ribbon tab and click Status.");
 
             string pipeName = "BimCadMcp.Revit.2024";
             string sessionDirectory = Paths.RevitSessions;

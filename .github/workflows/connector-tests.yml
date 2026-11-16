@@ -4,15 +4,30 @@ on:
   workflow_dispatch:
   pull_request:
     branches: [main]
+    # Draft pull requests use no minutes: the jobs run when the PR is opened ready or marked Ready for review.
+    types: [opened, synchronize, reopened, ready_for_review]
+  # Main is checked after every merge: a pull request is tested against the main it started from, and two pull requests
+  # that pass on their own can still break main together.
   push:
     branches: [main]
+
+# A newer push to the same pull request cancels the older run, so superseded commits use no minutes. Runs on main are
+# never cancelled, so every merge is checked.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
 
 jobs:
   tests:
-    runs-on: windows-latest
+    # GitHub's Windows machine for pull requests and pushes. WINDOWS_RUNNER (Settings > Secrets and variables > Actions >
+    # Variables), the label of a self-hosted runner, is used only for a run the owner starts by hand (workflow_dispatch),
+    # because this repository is public: a pull request from anyone would otherwise run its own code on that PC. Run the
+    # self-hosted runner under its own Windows account, because these jobs install Smart Connector and edit AI client settings.
+    runs-on: ${{ github.event_name == 'workflow_dispatch' && vars.WINDOWS_RUNNER || 'windows-latest' }}
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
@@ -63,10 +78,11 @@ jobs:
           $icons = $addin.GetType('BimCadMcp.Revit.Icons', $true)
           $flags = [Reflection.BindingFlags]'Static, NonPublic'
           $images = @()
-          foreach ($name in 'status', 'sync', 'skills', 'updates', 'settings', 'diagnostics', 'help') {
-            foreach ($small in $true, $false) { $images += ,@("$name", $small, $icons.GetMethod('Tile', $flags).Invoke($null, @($name, $small))) }
+          # The images the ribbon shows: Icons.Line for each button (Connect, Status, Skills Sync and the More menu) and Icons.More.
+          foreach ($name in 'status', 'diagnostics', 'sync', 'skills', 'updates', 'settings', 'info', 'help') {
+            foreach ($small in $true, $false) { $images += ,@("$name", $small, $icons.GetMethod('Line', $flags).Invoke($null, @($name, $small, ($name -eq 'status')))) }
           }
-          foreach ($small in $true, $false) { $images += ,@('logo', $small, $icons.GetMethod('Logo', $flags).Invoke($null, @($small))) }
+          foreach ($small in $true, $false) { $images += ,@('more', $small, $icons.GetMethod('More', $flags).Invoke($null, @($small))) }
           foreach ($entry in $images) {
             $want = if ($entry[1]) { 16 } else { 32 }
             if ([Math]::Abs($entry[2].Width - $want) -gt 0.01 -or [Math]::Abs($entry[2].Height - $want) -gt 0.01) { throw "Ribbon icon $($entry[0]) ($(if ($entry[1]) { 'small' } else { 'large' })) is $($entry[2].Width) x $($entry[2].Height); expected $want x $want." }

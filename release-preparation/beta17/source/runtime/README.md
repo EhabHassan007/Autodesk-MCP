@@ -22,9 +22,9 @@ The live application still runs on the computer where AutoCAD is installed. GitH
 
 The repository includes a Revit 2024 add-in, a named-pipe MCP bridge, an installer path, and Revit-specific skills. Its narrow tools read document information, levels, selected elements, and element parameters and can set one writable parameter in a Revit transaction. The guarded `execute_csharp` tool adds full Revit API access for workflows that are not covered by a narrow tool. It supports read-only execution, one automatic project transaction, or an explicit manual mode for family-document and advanced transaction workflows. Every call is tied to the expected active document, and model changes require an explicit write flag. Errors from your own code come back typed (`[compile_error]`, `[runtime_error]`), a call that outlives its wait becomes a job that `get_job` follows (so a timeout no longer loses the result), `connection_status` reports whether Revit is busy, and `dry_run` runs a transaction and rolls it back with change counts. `revision_cloud_info` and `create_revision_clouds` create revision clouds with notes in batches.
 
-Revit gets a dedicated **Autodesk MCP Connector** ribbon tab. Open its **Connection** panel and click **Connection Status** to see whether the server is running, whether a client connected recently, the active document, request count, last operation, and last error. The connector does not save or synchronize unless a manual API call explicitly requests that operation.
+Revit gets a dedicated **Smart Connector** ribbon tab. Click **Status** on its **Connector** panel to see whether the server is running, whether a client connected recently, the active document, request count, last operation, and last error. The connector does not save or synchronize unless a manual API call explicitly requests that operation.
 
-The same panel includes **Check Updates**. It opens the setup app directly on the approved update check. The check never changes the model or installs files automatically; select **Update** in the setup app when an approved version is available, then restart Revit so the new add-in DLL loads.
+Its **More** menu includes **Check updates**. It opens the setup app directly on the approved update check. The check never changes the model or installs files automatically; select **Update** in the setup app when an approved version is available, then restart Revit so the new add-in DLL loads.
 
 Every Revit process registers a unique session such as `2024-12345`. `list_sessions` reports the active document in each process. Pass its `session_id` to subsequent tools when multiple Revit sessions are open; the bridge refuses to guess between them. When only one session is running, `session_id` may be omitted.
 
@@ -109,7 +109,7 @@ For the Revit bridge protocol, multi-session routing, and tool schema:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\src\revit\work\test-bridge.ps1"
 ```
 
-After restarting Revit, open the **Autodesk MCP Connector** ribbon tab and click **Connection Status**. In Codex or Claude, call `list_sessions`, then use `document_info` for the intended session. Verify a write with a separate read.
+After restarting Revit, open the **Smart Connector** ribbon tab and click **Status**. In Codex or Claude, call `list_sessions`, then use `document_info` for the intended session. Verify a write with a separate read.
 
 ## Current limitations
 

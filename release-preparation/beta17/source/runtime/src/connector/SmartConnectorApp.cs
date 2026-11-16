@@ -525,7 +525,7 @@ namespace SmartConnector
             AddHeading("Help", "Smart Connector " + s.Version + " connects Claude and Codex to Revit and AutoCAD on this computer.");
             string[][] topics =
             {
-                new[] { "In Revit", "Open a model, then ask Claude or Codex to work with it. The Smart Connector tab has Skills Sync, Connection Status, updates and settings." },
+                new[] { "In Revit", "Open a model, then ask Claude or Codex to work with it. The Smart Connector tab has Connect, Status, Skills Sync and a More menu for updates, settings and help." },
                 new[] { "In AutoCAD", "Open a drawing and use the Add-ins tab. AI Markup lets you sketch on the drawing and type a task; paste the copied request into Claude. Clear Markup removes it." },
                 new[] { "Workflow skills", "Approved team workflows are installed for Claude and Codex. Save your own skills as usual; Skills Sync sends them to your administrator for review." },
                 new[] { "Updates", "Once a day, opening Revit, AutoCAD or this app looks for a new version and asks you. Choose Update now, save your work and close Revit and AutoCAD; the update window installs it." },
