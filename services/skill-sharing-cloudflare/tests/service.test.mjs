@@ -269,19 +269,31 @@ test('skill category must be a known folder',()=>{
 });
 
 const office = {'CF-Connecting-IP':'203.0.113.7'};
-async function joinAs(s,profile=person,headers=office) {
+// Joins, then (unless approve is false) approves the PC as the owner would, so it can be used at once.
+async function joinAs(s,profile=person,headers=office,approve=true) {
   const response=await s.request('/v1/enroll','POST',undefined,profile,headers);
   assert.equal(response.status,200,await response.clone().text());
-  return response.json();
+  const d=await response.json();
+  if (approve) assert.equal((await s.request(`/admin/devices/${d.device_id}/unblock`,'POST',admin)).status,200);
+  return d;
 }
 
-test('open team join: no code needed, creates a working active device with profile and IP',async t=>{
+test('open team join: no code needed; the PC waits for approval, then works',async t=>{
   const s=setup(t);
-  const d=await joinAs(s);
+  const d=await joinAs(s,person,office,false);
   assert.match(d.device_id,/^[a-f0-9]{32}$/);
   assert.match(d.device_token,/^[A-Za-z0-9_-]{40,100}$/);
-  const row=s.sqlite.prepare('SELECT * FROM devices WHERE id=?').get(d.device_id);
-  assert.equal(row.active,1);assert.equal(row.source,'join');assert.equal(row.person_name,'Ahmed Ali');assert.equal(row.email,'ahmed.ali@example.com');
+  assert.equal(d.status,'pending');
+  let row=s.sqlite.prepare('SELECT * FROM devices WHERE id=?').get(d.device_id);
+  assert.equal(row.active,0);assert.equal(row.pending,1);
+  for (const [path,method,body] of [['/v1/library','GET'],['/v1/usage','POST',{events:[]}],['/v1/submissions','POST',{skills:[]}]]) {
+    const r=await s.request(path,method,d.device_token,body);
+    assert.equal(r.status,403,path);
+    assert.match((await r.json()).detail,/waiting for the administrator to approve/);
+  }
+  assert.equal((await s.request(`/admin/devices/${d.device_id}/unblock`,'POST',admin)).status,200,'dashboard Unblock approves');
+  row=s.sqlite.prepare('SELECT * FROM devices WHERE id=?').get(d.device_id);
+  assert.equal(row.active,1);assert.equal(row.pending,0);assert.equal(row.source,'join');assert.equal(row.person_name,'Ahmed Ali');assert.equal(row.email,'ahmed.ali@example.com');
   assert.equal(row.pc_name,'DESK-07');assert.equal(row.windows_user,'ahmed');assert.equal(row.enroll_ip,'203.0.113.7');
   assert.equal(row.label,'Ahmed Ali (DESK-07)');assert.ok(row.created_at>0);assert.equal(row.terms_version,'2026-10-30');
   assert.ok(!Object.values(row).includes(d.device_token));
@@ -289,6 +301,11 @@ test('open team join: no code needed, creates a working active device with profi
   // Installers from before open joining still send a team code; any value, or none, is accepted.
   assert.equal((await s.request('/v1/enroll','POST','old-team-code-old-team-code-old-team-code',person,office)).status,200);
   assert.equal((await s.request('/v1/enroll','POST','short',person,office)).status,200);
+  // Denying a waiting PC (dashboard Block) leaves it blocked, not waiting.
+  const denied=await joinAs(s,{...person,pc_name:'DENY-1'},office,false);
+  assert.equal((await s.request(`/admin/devices/${denied.device_id}/block`,'POST',admin)).status,200);
+  assert.deepEqual({...s.sqlite.prepare('SELECT active,pending FROM devices WHERE id=?').get(denied.device_id)},{active:0,pending:0});
+  assert.equal((await s.request('/v1/library','GET',denied.device_token)).status,401);
 });
 
 test('team join validates the profile and works without any JOIN_CODE secret',async t=>{

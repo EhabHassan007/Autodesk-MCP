@@ -3,7 +3,7 @@ import { GitHub, safeGitHubDetail } from './github.mjs';
 import { bytes, canonical, CATEGORIES, hash, MAX_BODY, SKILL_NAME, validateProfile, validateSkills, validateUsage, VERSION } from './validation.mjs';
 import { groupReviews, reviewSummary, undecided } from './review.mjs';
 import { DASHBOARD_CSS, DASHBOARD_HTML, DASHBOARD_JS } from './dashboard.mjs';
-import { lastSync, saveSync, syncToNotion } from './notion.mjs';
+import { announceJoin, applyApprovals, lastSync, saveSync, syncToNotion } from './notion.mjs';
 import { lastReviewSync, saveReviewSync, syncReviews } from './notion-review.mjs';
 import { lastFailureSync, recentFailures, recordFailures, saveFailureSync, syncFailures, validateFailures } from './failures.mjs';
 
@@ -35,8 +35,9 @@ async function limit(db, key, max) {
   if (row.count > max) throw new HTTPError(429,'Request limit reached; retry later.');
 }
 async function device(request, db, rated=true) {
-  const row = await db.prepare('SELECT id FROM devices WHERE hash=? AND active=1').bind(await hash(bearer(request))).first();
-  if (!row) throw new HTTPError(401,'Device credential invalid or revoked.');
+  const row = await db.prepare('SELECT id,active,pending FROM devices WHERE hash=?').bind(await hash(bearer(request))).first();
+  if (row?.pending === 1) throw new HTTPError(403,'This computer is waiting for the administrator to approve it. Try Skills Sync again later.');
+  if (!row || row.active !== 1) throw new HTTPError(401,'Device credential invalid or revoked.');
   if (rated) {
     // One atomic SQLite statement prevents simultaneous requests bypassing the limit.
     const rate = await db.prepare(`INSERT INTO rate(device,hour,count) VALUES(?,?,1)
@@ -77,6 +78,7 @@ async function readJSON(request) {
 }
 
 const REVIEW_CRON = '47 * * * *';   // Must match wrangler.jsonc.
+const APPROVAL_CRON = '*/10 * * * *';  // Reads Team members → Status only, so approvals apply within 10 minutes. Must match wrangler.jsonc.
 const FAILURE_CRON = '7 * * * *';   // Connector errors to Notion, with its own subrequest budget. Must match wrangler.jsonc.
 // Decided uploads ("pr/skill") and rejected content ("skill/key"), so neither comes back for review.
 async function reviewState(db) {
@@ -179,13 +181,14 @@ export async function handle(request, env, backend) {
     }
     if (/^\/admin\/devices\/[a-f0-9]{32}$/.test(path) && request.method === 'DELETE') {
       await admin(request,env);
-      await env.DB.prepare('UPDATE devices SET active=0 WHERE id=?').bind(path.split('/').pop()).run();
+      await env.DB.prepare('UPDATE devices SET active=0,pending=0 WHERE id=?').bind(path.split('/').pop()).run();
       return json({revoked:true});
     }
     const toggle = path.match(/^\/admin\/devices\/([a-f0-9]{32})\/(block|unblock)$/);
     if (toggle && request.method === 'POST') {
       await admin(request,env);
-      const result = await env.DB.prepare('UPDATE devices SET active=? WHERE id=?').bind(toggle[2]==='unblock'?1:0,toggle[1]).run();
+      // Unblock also approves a PC that waits; block also denies it.
+      const result = await env.DB.prepare('UPDATE devices SET active=?,pending=0 WHERE id=?').bind(toggle[2]==='unblock'?1:0,toggle[1]).run();
       if (!(result.meta?.changes ?? result.changes)) throw new HTTPError(404,'Device not found.');
       return json({device_id:toggle[1],active:toggle[2]==='unblock'});
     }
@@ -197,7 +200,7 @@ export async function handle(request, env, backend) {
       await admin(request,env);
       const today = now();
       await env.DB.prepare('DELETE FROM usage WHERE day<?').bind(isoDay(today-180*DAY)).run();
-      const devices = (await env.DB.prepare(`SELECT id,label,active,source,person_name,email,pc_name,windows_user,connector_version,
+      const devices = (await env.DB.prepare(`SELECT id,label,active,pending,source,person_name,email,pc_name,windows_user,connector_version,
         terms_version,created_at,enroll_ip,last_seen,last_ip FROM devices ORDER BY last_seen DESC`).all()).results;
       const usage = (await env.DB.prepare(`SELECT device,kind,name,
         SUM(CASE WHEN day>=? THEN count ELSE 0 END) AS last7,SUM(count) AS last30,MAX(day) AS last_day
@@ -231,20 +234,23 @@ export async function handle(request, env, backend) {
       return json(summary,summary.error ? 502 : 200);
     }
     if (path === '/v1/enroll' && request.method === 'POST') {
-      // Open joining: no team code. A new PC is active at once; the owner blocks it in Notion (Team members → Status)
-      // or on the dashboard. An office shares one public address, so the per-address limit is loose; the overall
-      // hourly limit stops a flood of fake PCs. Older installers still send a team code; it is ignored.
+      // Open joining: no team code. A new PC waits (pending) until the owner approves it in Notion (Team members →
+      // Status: Active approves, Blocked denies) or on the dashboard. The owner is @mentioned in Notion at once.
+      // An office shares one public address, so the per-address limit is loose; the overall hourly limit stops a
+      // flood of fake PCs. Older installers still send a team code; it is ignored.
       await limit(env.DB,'join:'+(clientIP(request) || 'unknown'),60);
       await limit(env.DB,'join:all',200);
       let profile;
       try { profile = validateProfile(await readJSON(request)); }
       catch (error) { throw error instanceof HTTPError ? error : new HTTPError(422,error.message); }
       const token = random(), id = crypto.randomUUID().replaceAll('-','');
-      await env.DB.prepare(`INSERT INTO devices(id,hash,label,active,source,person_name,email,pc_name,windows_user,connector_version,terms_version,created_at,enroll_ip,last_seen,last_ip)
-        VALUES(?,?,?,1,'join',?,?,?,?,?,?,?,?,?,?)`)
+      await env.DB.prepare(`INSERT INTO devices(id,hash,label,active,pending,source,person_name,email,pc_name,windows_user,connector_version,terms_version,created_at,enroll_ip,last_seen,last_ip)
+        VALUES(?,?,?,0,1,'join',?,?,?,?,?,?,?,?,?,?)`)
         .bind(id,await hash(token),`${profile.name} (${profile.pc_name})`.slice(0,80),profile.name,profile.email,profile.pc_name,profile.windows_user,
           profile.connector_version,profile.terms_version,now(),clientIP(request),now(),clientIP(request)).run();
-      return json({device_id:id,device_token:token});
+      // A Notion failure never stops the join; the next sync creates the row and posts the mention.
+      try { await announceJoin(env,id); } catch { /* retried by the sync */ }
+      return json({device_id:id,device_token:token,status:'pending'});
     }
     if (path === '/v1/usage' && request.method === 'POST') {
       // Usage has its own budget so it never delays library downloads or submissions.
@@ -354,7 +360,8 @@ export default {
   // A second cron (minute 47) handles skill review and a third (minute 7) connector errors, so each run has its own
   // subrequest budget.
   scheduled(event,env,ctx) {
-    if (event.cron === REVIEW_CRON) ctx.waitUntil(runReviewSync(env));
+    if (event.cron === APPROVAL_CRON) ctx.waitUntil(applyApprovals(env));
+    else if (event.cron === REVIEW_CRON) ctx.waitUntil(runReviewSync(env));
     else if (event.cron === FAILURE_CRON) ctx.waitUntil(syncFailures(env).then(summary=>saveFailureSync(env.DB,summary)));
     else ctx.waitUntil(syncToNotion(env).then(summary=>saveSync(env.DB,summary)));
   }
