@@ -29,7 +29,7 @@ Discovery covers Codex skills, .agents/skills, Claude Code skills and explicit t
 
 ## Team installer and usage reporting
 
-The private team installer (`build.ps1 -Team`) asks each person for their name, email and consent, then joins the PC to the service by itself. An administrator's `enrollment.json` beside the installer still takes priority. The join code is removed from the permanent install after setup.
+The normal setup asks each person for their name, email and consent, then joins the PC to the service by itself; no team code is needed. The administrator blocks or unblocks a PC by setting its Status in Notion's Team members (applied within the hour) or on the dashboard. An administrator's `enrollment.json` beside the installer still takes priority. Older private team installers (`build.ps1 -Team`) still work; their code is ignored and removed from the permanent install after setup.
 
 Once enrolled, the connector records which workflow skills (each `SKILL.md` read) and which AutoCAD/Revit tools are used, as names and daily counts in `%LOCALAPPDATA%\AutodeskMcpSkillCollection\usage.jsonl`. It never records arguments, drawings, models or file paths. Skills Sync sends them each time it runs; nothing sends usage counts on a schedule. Unsent counts wait in `usage-pending.jsonl`. Results are in `usage-upload.log`. The administrator sees them, with name, email, PC, IP and last seen, on the service's `/admin` dashboard.
 

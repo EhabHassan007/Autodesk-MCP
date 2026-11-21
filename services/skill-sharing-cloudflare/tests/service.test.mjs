@@ -37,7 +37,7 @@ function setup(t) {
       async run() { return stmt.run(...params); },async all() { return {results:stmt.all(...params)}; }});
     return wrapper([]);
   },async batch(statements) { sqlite.exec('BEGIN'); try { const out=[]; for (const s of statements) out.push(await s.run()); sqlite.exec('COMMIT'); return out; } catch (e) { sqlite.exec('ROLLBACK'); throw e; } }};
-  const env = {DB,ADMIN_TOKEN:admin,JOIN_CODE:join,GITHUB_PRIVATE_KEY:'fake-test-key',GITHUB_APP_ID:'1',GITHUB_INSTALLATION_ID:'2',GITHUB_REPOSITORY:'owner/repo'};
+  const env = {DB,ADMIN_TOKEN:admin,GITHUB_PRIVATE_KEY:'fake-test-key',GITHUB_APP_ID:'1',GITHUB_INSTALLATION_ID:'2',GITHUB_REPOSITORY:'owner/repo'};
   const backend = {calls:0, async submit() { this.calls++; return url; }, async library() { return {skills:{[skill.name]:skill.files},commit:'approved-main-commit'}; }};
   const request = (path,method='GET',token,content,extra={}) => handle(new Request('https://test.local'+path,{method,headers:{...(token?{Authorization:'Bearer '+token}:{}),...extra},body:content===undefined?undefined:JSON.stringify(content)}),env,backend);
   const enroll = async () => {
@@ -270,52 +270,50 @@ test('skill category must be a known folder',()=>{
 
 const office = {'CF-Connecting-IP':'203.0.113.7'};
 async function joinAs(s,profile=person,headers=office) {
-  const response=await s.request('/v1/enroll','POST',join,profile,headers);
+  const response=await s.request('/v1/enroll','POST',undefined,profile,headers);
   assert.equal(response.status,200,await response.clone().text());
   return response.json();
 }
 
-test('team join creates a working device with profile and IP; the code is checked',async t=>{
+test('open team join: no code needed, creates a working active device with profile and IP',async t=>{
   const s=setup(t);
-  assert.equal((await s.request('/v1/enroll','POST','wrong-code-wrong-code-wrong-code-x',person,office)).status,403);
-  assert.equal((await s.request('/v1/enroll','POST',admin,person,office)).status,403);
   const d=await joinAs(s);
   assert.match(d.device_id,/^[a-f0-9]{32}$/);
   assert.match(d.device_token,/^[A-Za-z0-9_-]{40,100}$/);
   const row=s.sqlite.prepare('SELECT * FROM devices WHERE id=?').get(d.device_id);
-  assert.equal(row.source,'join');assert.equal(row.person_name,'Ahmed Ali');assert.equal(row.email,'ahmed.ali@example.com');
+  assert.equal(row.active,1);assert.equal(row.source,'join');assert.equal(row.person_name,'Ahmed Ali');assert.equal(row.email,'ahmed.ali@example.com');
   assert.equal(row.pc_name,'DESK-07');assert.equal(row.windows_user,'ahmed');assert.equal(row.enroll_ip,'203.0.113.7');
   assert.equal(row.label,'Ahmed Ali (DESK-07)');assert.ok(row.created_at>0);assert.equal(row.terms_version,'2026-10-30');
   assert.ok(!Object.values(row).includes(d.device_token));
   assert.equal((await s.request('/v1/library','GET',d.device_token)).status,200);
+  // Installers from before open joining still send a team code; any value, or none, is accepted.
+  assert.equal((await s.request('/v1/enroll','POST','old-team-code-old-team-code-old-team-code',person,office)).status,200);
+  assert.equal((await s.request('/v1/enroll','POST','short',person,office)).status,200);
 });
 
-test('team join validates the profile and is disabled without a strong JOIN_CODE',async t=>{
+test('team join validates the profile and works without any JOIN_CODE secret',async t=>{
   const s=setup(t);
+  delete s.env.JOIN_CODE;
   for (const bad of [{...person,name:''},{...person,name:'x'.repeat(81)},{...person,name:'<script>'},{...person,email:'not-an-email'},
-    {...person,pc_name:'bad pc'},{...person,windows_user:'a\\b'},{...person,extra:'field'},{...person,connector_version:'1.0 beta'},
+    {...person,pc_name:'bad pc'},{...person,windows_user:'a\b'},{...person,extra:'field'},{...person,connector_version:'1.0 beta'},
     {...person,terms_version:'<script>'},{...person,terms_version:'x'.repeat(21)}]) {
-    const r=await s.request('/v1/enroll','POST',join,bad,office);
+    const r=await s.request('/v1/enroll','POST',undefined,bad,office);
     assert.equal(r.status,422,JSON.stringify(bad));
     assert.ok((await r.json()).detail);
   }
   assert.equal(s.sqlite.prepare('SELECT COUNT(*) AS n FROM devices').get().n,0);
-  s.env.JOIN_CODE='short';
-  const r=await s.request('/v1/enroll','POST',join,person,office);
-  assert.equal(r.status,503);
-  assert.ok(!(await r.text()).includes('short'));
-  delete s.env.JOIN_CODE;
-  assert.equal((await s.request('/v1/enroll','POST',join,person,office)).status,503);
-  assert.equal((await s.request('/health')).status,200,'other routes keep working without JOIN_CODE');
+  await joinAs(s);
 });
 
-test('wrong join codes are cut off per IP while a shared office can still join',async t=>{
+test('joins are limited per address (60 an hour) and overall (200 an hour)',async t=>{
   const s=setup(t);
-  for (let i=0;i<10;i++) assert.equal((await s.request('/v1/enroll','POST','guess-'+i+'-'.repeat(40),person,office)).status,403);
-  assert.equal((await s.request('/v1/enroll','POST',join,person,office)).status,429,'even the right code waits after 10 failures');
-  assert.equal((await s.request('/v1/enroll','POST',join,person,{'CF-Connecting-IP':'198.51.100.9'})).status,200,'other addresses unaffected');
-  s.sqlite.prepare("UPDATE limits SET hour=0 WHERE key LIKE 'joinfail:%'").run();
-  for (let i=0;i<25;i++) await joinAs(s,{...person,pc_name:'PC-'+i});
+  for (let i=0;i<60;i++) await joinAs(s,{...person,pc_name:'PC-'+i});
+  assert.equal((await s.request('/v1/enroll','POST',undefined,person,office)).status,429,'61st join from one address waits');
+  await joinAs(s,person,{'CF-Connecting-IP':'198.51.100.9'});
+  s.sqlite.prepare("UPDATE limits SET count=200 WHERE key='join:all'").run();
+  assert.equal((await s.request('/v1/enroll','POST',undefined,person,{'CF-Connecting-IP':'198.51.100.10'})).status,429,'overall limit');
+  s.sqlite.prepare("UPDATE limits SET hour=0").run();
+  await joinAs(s,person,{'CF-Connecting-IP':'198.51.100.10'});
 });
 
 test('device calls record last seen, IP and connector version',async t=>{

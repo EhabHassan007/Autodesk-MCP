@@ -22,7 +22,7 @@ param(
 
     [string]$EnrollmentPath = '',
 
-    # Typed by the person in the team join dialog; used only with a TEAM build's installer\team-join.json.
+    # Typed by the person in the team join dialog; joining needs no team code.
     [string]$JoinName = '',
 
     [string]$JoinEmail = '',
@@ -47,6 +47,8 @@ $updateStatePath = Join-Path $updateStateDirectory 'update-state.json'
 $installChoicesPath = Join-Path $updateStateDirectory 'install-choices.json'
 $script:ProductGiven = $PSBoundParameters.ContainsKey('Product')
 $script:AllAiClients = @('ClaudeDesktop', 'ClaudeCode', 'Codex')
+# The team skill service PCs join (same as TeamJoin.ServiceUrl in SetupWizard.cs).
+$script:TeamServiceUrl = 'https://autodesk-skill-service.autodesk-skills-ehabhassan007.workers.dev'
 $updateTaskName = 'Autodesk MCP Connector Update Alerts'
 
 function Write-Step {
@@ -1899,9 +1901,13 @@ function Register-SkillServiceDevice {
     }
     $headers = @{}
     try {
-        if (-not (Test-Path -LiteralPath $JoinConfigPath -PathType Leaf)) { throw 'This installer has no team join code. Ask your administrator for the team installer.' }
-        try { $join = Get-Content -LiteralPath $JoinConfigPath -Raw | ConvertFrom-Json }
-        catch { throw 'The team join file in this installer is damaged.' }
+        # Joining needs no team code. Without a join file the built-in service address is used; a code in an older
+        # TEAM build's join file is still sent and ignored by the service.
+        if (-not (Test-Path -LiteralPath $JoinConfigPath -PathType Leaf)) { $join = [pscustomobject]@{ service_url = $script:TeamServiceUrl } }
+        else {
+            try { $join = Get-Content -LiteralPath $JoinConfigPath -Raw | ConvertFrom-Json }
+            catch { throw 'The team join file in this installer is damaged.' }
+        }
         $uri = [Uri]([string]$join.service_url)
         if ($uri.Scheme -ne 'https' -or $uri.UserInfo -or $uri.Query -or $uri.Fragment) { throw 'The team join file has an invalid service address.' }
         $versionPath = Join-Path $Root 'VERSION'
@@ -1909,7 +1915,8 @@ function Register-SkillServiceDevice {
         $profile = @{ name = $Name.Trim(); email = $Email.Trim(); pc_name = $env:COMPUTERNAME; windows_user = $env:USERNAME; connector_version = $version }
         if ($TermsVersion -match '^[0-9A-Za-z.-]{1,20}$') { $profile.terms_version = $TermsVersion }
         $body = $profile | ConvertTo-Json -Compress
-        $headers = @{ Authorization = 'Bearer ' + [string]$join.join_code; 'X-Connector-Version' = $version }
+        $headers = @{ 'X-Connector-Version' = $version }
+        if (-not [string]::IsNullOrWhiteSpace([string]$join.join_code)) { $headers.Authorization = 'Bearer ' + [string]$join.join_code }
         Write-Step ("Joining the team skill service as {0}..." -f $Name.Trim())
         try {
             $device = Invoke-RestMethod -Uri ($uri.AbsoluteUri.TrimEnd('/') + '/v1/enroll') -Method Post -Headers $headers -UserAgent "Autodesk-MCP-Connector/$version" `

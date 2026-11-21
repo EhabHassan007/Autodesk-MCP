@@ -65,8 +65,13 @@ try{
   Assert (@($script:log|Where-Object {$_.Contains('[ENROLLMENT_FAILED]') -and $_.Contains($case[1])}).Count -eq 1) ('Failure not explained for '+$case[0])
   Assert (-not (Test-Path (& $service)) -and -not ($script:log -join "`n").Contains($code)) ('State or secret leaked for '+$case[0])
  }
+ # Open joining: no join file means the built-in service address and no Authorization header at all.
  Reset-State 'no-file'
- Assert ((Register-SkillServiceDevice -Root $root -Name 'Ahmed' -Email 'a@example.com' -JoinConfigPath (Join-Path $testRoot 'absent.json')) -eq 'Failed' -and (Logged 'no team join code') -eq 1 -and $global:TeamJoinCalls.Count -eq 0) 'Missing join file not reported'
+ Assert ((Register-SkillServiceDevice -Root $root -Name 'Ahmed' -Email 'a@example.com' -JoinConfigPath (Join-Path $testRoot 'absent.json')) -eq 'Enrolled') 'Join without a join file failed'
+ Assert ($global:TeamJoinCalls.Count -eq 1 -and $global:TeamJoinCalls[0].Uri -eq ($script:TeamServiceUrl+'/v1/enroll') -and $null -eq $global:TeamJoinCalls[0].Auth) 'No-code join not sent to the built-in service without a code'
+ Reset-State 'no-code'
+ $noCodeFile=Join-Path $testRoot 'no-code.json'; @{service_url='https://skills.example.test'}|ConvertTo-Json|Set-Content $noCodeFile
+ Assert ((Register-SkillServiceDevice -Root $root -Name 'Ahmed' -Email 'a@example.com' -JoinConfigPath $noCodeFile) -eq 'Enrolled' -and $null -eq $global:TeamJoinCalls[0].Auth) 'A join file without a code did not join, or sent an empty code'
  Reset-State 'bad-url'
  $badFile=Join-Path $testRoot 'bad.json'; @{service_url='http://skills.example.test';join_code=$code}|ConvertTo-Json|Set-Content $badFile
  Assert ((Register-SkillServiceDevice -Root $root -Name 'Ahmed' -Email 'a@example.com' -JoinConfigPath $badFile) -eq 'Failed' -and $global:TeamJoinCalls.Count -eq 0) 'Non-HTTPS join file used'
@@ -78,9 +83,9 @@ try{
  foreach($bad in @('ahmed','ahmed@','@x.com','a b@x.com','a@x','a"b@x.com')){Assert (-not (Test-TeamJoinEmail $bad)) "Invalid email accepted: $bad"}
  $env:LOCALAPPDATA=Join-Path $testRoot 'dialog'; New-Item -ItemType Directory $env:LOCALAPPDATA -Force|Out-Null
  $payloadInstaller=Join-Path $testRoot 'payload-installer'; New-Item -ItemType Directory $payloadInstaller|Out-Null
- Assert (-not (Test-TeamJoinRequired -PayloadInstaller $payloadInstaller)) 'Dialog shown without a join code'
+ Assert (Test-TeamJoinRequired -PayloadInstaller $payloadInstaller) 'Dialog not offered on a PC that has not joined (no team code needed)'
  Copy-Item $joinFile (Join-Path $payloadInstaller 'team-join.json')
- Assert (Test-TeamJoinRequired -PayloadInstaller $payloadInstaller) 'Dialog not shown for a team installer'
+ Assert (Test-TeamJoinRequired -PayloadInstaller $payloadInstaller) 'Dialog not shown for an older team installer'
  New-Item -ItemType Directory (Join-Path $env:LOCALAPPDATA 'AutodeskMcpSkillCollection')|Out-Null;'{}'|Set-Content (Join-Path $env:LOCALAPPDATA 'AutodeskMcpSkillCollection/service.json')
  Assert (-not (Test-TeamJoinRequired -PayloadInstaller $payloadInstaller)) 'Dialog shown on an enrolled PC'
 
@@ -94,6 +99,6 @@ try{
  Assert ($wizard.Contains("'-JoinName', `$script:wizard.Join.Name, '-JoinEmail', `$script:wizard.Join.Email")) 'Setup wizard does not pass the join answers'
  $gui=Get-Content (Join-Path $runtime 'installer/BIM-CAD-Setup.ps1') -Raw
  Assert ($gui.Contains("Show-TeamJoinDialog -Owner `$form") -and $gui.Contains("'-JoinName', `$join.Name")) 'Setup window does not offer the join dialog'
- 'PASS: team join enrolls with DPAPI and secure cleanup, never logs the code or token, removes the installed code, explains failures, and the dialog validates input'
+ 'PASS: team join needs no code, enrolls with DPAPI and secure cleanup, never logs an old code or the token, removes the installed join file, explains failures, and the dialog validates input'
 }
 finally{$env:LOCALAPPDATA=$savedLocal;Remove-Variable TeamJoinCalls,TeamJoinReply,TeamJoinToken -Scope Global -ErrorAction SilentlyContinue;Remove-Item $testRoot -Recurse -Force}
