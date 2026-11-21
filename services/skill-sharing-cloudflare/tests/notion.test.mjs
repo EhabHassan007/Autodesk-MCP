@@ -35,6 +35,7 @@ function setup(t, extra = {}) {
 // Emulates the Notion endpoints the sync uses; stores pages in read format, keeps date-times to the minute as Notion does.
 function fakeNotion({pageSize = 100} = {}) {
   const pages = {[MEMBERS]:[],[USAGE]:[]};
+  const comments = [];
   const log = [];
   const hooks = [];
   let n = 0;
@@ -69,6 +70,11 @@ function fakeNotion({pageSize = 100} = {}) {
       pages[body.parent.data_source_id].push(page);
       return Response.json(page);
     }
+    if (init.method === 'POST' && u.pathname === '/v1/comments') {
+      assert.ok(Object.values(pages).flat().some(p=>p.id === body.parent.page_id),'comment on an existing row');
+      comments.push(body);
+      return Response.json({object:'comment',id:'comment-'+comments.length});
+    }
     if (init.method === 'PATCH' && (m = u.pathname.match(/^\/v1\/pages\/([^/]+)$/))) {
       const page = Object.values(pages).flat().find(p=>p.id === m[1]);
       Object.assign(page.properties,read(body.properties));
@@ -82,7 +88,7 @@ function fakeNotion({pageSize = 100} = {}) {
     const p = page?.properties[prop];
     return p && (p.type === 'title' || p.type === 'rich_text' ? p[p.type].map(x=>x.plain_text).join('') : p.type === 'email' ? p.email : p.type === 'select' ? p.select?.name : p.type === 'date' ? p.date?.start : p.number);
   };
-  return {pages,log,hooks,fetcher,writes,value,reset() { log.length = 0; }};
+  return {pages,comments,log,hooks,fetcher,writes,value,reset() { log.length = 0; }};
 }
 
 function team(s) {
@@ -313,16 +319,16 @@ test('a reviewer sets Blocked in Notion: the PC is blocked and nothing is writte
   editStatus(notion,'d1','Blocked',OWNER);
   notion.reset();
   const r = await syncToNotion(s.env,{fetcher:notion.fetcher});
-  assert.deepEqual(r.control,{blocked:1,unblocked:0,refused:0,editors:[]});
+  assert.deepEqual(r.control,{blocked:1,unblocked:0,refused:0,editors:[],notified:0});
   assert.equal(active(s,'d1'),0);
   assert.equal(notion.writes().length,0,'Notion already shows Blocked');
   editStatus(notion,'d2','Active',OWNER);
   const again = await syncToNotion(s.env,{fetcher:notion.fetcher});
-  assert.deepEqual(again.control,{blocked:0,unblocked:1,refused:0,editors:[]});
+  assert.deepEqual(again.control,{blocked:0,unblocked:1,refused:0,editors:[],notified:0});
   assert.equal(active(s,'d2'),1);
   notion.reset();
   const quiet = await syncToNotion(s.env,{fetcher:notion.fetcher});
-  assert.deepEqual(quiet.control,{blocked:0,unblocked:0,refused:0,editors:[]},'a change is applied once');
+  assert.deepEqual(quiet.control,{blocked:0,unblocked:0,refused:0,editors:[],notified:0},'a change is applied once');
   assert.equal(notion.writes().length,0);
 });
 
@@ -334,7 +340,7 @@ test('a Status change by someone not in NOTION_REVIEWERS is refused and put back
     editStatus(notion,'d2','Active',OTHER);
     notion.reset();
     const r = await syncToNotion(s.env,{fetcher:notion.fetcher});
-    assert.deepEqual(r.control,{blocked:0,unblocked:0,refused:1,editors:[OTHER]});
+    assert.deepEqual(r.control,{blocked:0,unblocked:0,refused:1,editors:[OTHER],notified:0});
     assert.equal(active(s,'d2'),0,'still blocked');
     assert.deepEqual(notion.writes().map(w=>w.body),[{properties:{Status:{select:{name:'Blocked'}}}}]);
     assert.equal(notion.value(MEMBERS,'d2','Status'),'Blocked');
@@ -351,7 +357,7 @@ test('blocking on the dashboard reaches Notion and is not mistaken for a Notion 
   assert.equal(s.sqlite.prepare("SELECT notion_status FROM devices WHERE id='d1'").get().notion_status,'Blocked');
   editStatus(notion,'d1','Paused',OWNER);
   const r = await syncToNotion(s.env,{fetcher:notion.fetcher});
-  assert.deepEqual(r.control,{blocked:0,unblocked:0,refused:0,editors:[]});
+  assert.deepEqual(r.control,{blocked:0,unblocked:0,refused:0,editors:[],notified:0});
   assert.equal(active(s,'d1'),0);
   assert.equal(notion.value(MEMBERS,'d1','Status'),'Blocked','put back to the real state');
 });
@@ -381,4 +387,115 @@ test('a failed write keeps that member unrecorded',async t=>{
   const early = await syncToNotion(s.env,{fetcher:notion.fetcher});
   assert.equal(early.error,'Notion HTTP 500');
   assert.deepEqual(s.sqlite.prepare('SELECT notion_status FROM devices ORDER BY id').all().map(r=>r.notion_status),[null,null],'a read failure records nothing');
+});
+
+// Join approval: a new PC is Pending, the reviewers are @mentioned at once, and Active/Blocked in Notion approves/denies.
+import { announceJoin, applyApprovals } from '../src/notion.mjs';
+const joinWaiting = (s, id = 'p1') => s.addDevice(id,{person_name:'Sara Omar',email:'sara@example.com',pc_name:'DESK-12',created_at:T0,active:0}) &&
+  s.sqlite.prepare('UPDATE devices SET pending=1 WHERE id=?').run(id);
+
+test('a PC that joins gets a Pending row and a comment that @mentions every reviewer',async t=>{
+  const s = setup(t,{NOTION_REVIEWERS:`${OWNER}, second-reviewer`}), notion = fakeNotion();
+  joinWaiting(s);
+  const r = await announceJoin(s.env,'p1',{fetcher:notion.fetcher});
+  assert.deepEqual(r,{created:true,notified:true});
+  assert.equal(notion.value(MEMBERS,'p1','Status'),'Pending');
+  assert.equal(notion.comments.length,1);
+  const c = notion.comments[0];
+  assert.equal(c.parent.page_id,notion.pages[MEMBERS][0].id);
+  assert.deepEqual(c.rich_text.filter(x=>x.type === 'mention').map(x=>x.mention.user.id),[OWNER,'second-reviewer']);
+  assert.equal(c.rich_text.at(-1).text.content,'New PC waiting for your approval: Sara Omar (DESK-12) sara@example.com. Set Status to Active to approve, or Blocked to deny.');
+  const row = s.sqlite.prepare("SELECT notion_status,notified_at FROM devices WHERE id='p1'").get();
+  assert.equal(row.notion_status,'Pending');assert.ok(row.notified_at > 0);
+  notion.reset();
+  const sync = await syncToNotion(s.env,{fetcher:notion.fetcher});
+  assert.equal(sync.control.notified,0,'not mentioned twice');
+  assert.equal(notion.pages[MEMBERS].length,1,'the sync reuses the row');
+  assert.equal(notion.writes().length,0);
+});
+
+test('not configured: joining announces nothing; the approval check is skipped',async t=>{
+  const s = setup(t,{NOTION_TOKEN:undefined});
+  joinWaiting(s);
+  assert.deepEqual(await announceJoin(s.env,'p1',{fetcher:()=>assert.fail('no request')}),{skipped:'not configured'});
+  assert.equal((await applyApprovals(s.env,{fetcher:()=>assert.fail('no request')})).skipped,'not configured');
+});
+
+test('a reviewer approves (Active) or denies (Blocked) a waiting PC; the 10-minute check applies it without writing',async t=>{
+  const s = setup(t,{NOTION_REVIEWERS:OWNER}), notion = fakeNotion();
+  joinWaiting(s,'p1');joinWaiting(s,'p2');
+  await announceJoin(s.env,'p1',{fetcher:notion.fetcher});
+  await announceJoin(s.env,'p2',{fetcher:notion.fetcher});
+  editStatus(notion,'p1','Active',OWNER);
+  editStatus(notion,'p2','Blocked',OWNER);
+  notion.reset();
+  const r = await applyApprovals(s.env,{fetcher:notion.fetcher});
+  assert.deepEqual(r.control,{blocked:1,unblocked:1,refused:0,editors:[]});
+  assert.deepEqual(s.sqlite.prepare('SELECT id,active,pending,notion_status FROM devices ORDER BY id').all().map(x=>({...x})),
+    [{id:'p1',active:1,pending:0,notion_status:'Active'},{id:'p2',active:0,pending:0,notion_status:'Blocked'}]);
+  assert.equal(notion.writes().length,0,'the approval check only reads');
+  const sync = await syncToNotion(s.env,{fetcher:notion.fetcher});
+  assert.deepEqual(sync.members,{created:0,updated:0,unchanged:2});
+});
+
+test('someone who is not a reviewer cannot approve; a reviewer cannot set Pending by hand',async t=>{
+  const s = setup(t,{NOTION_REVIEWERS:OWNER}), notion = fakeNotion();
+  joinWaiting(s,'p1');
+  await announceJoin(s.env,'p1',{fetcher:notion.fetcher});
+  editStatus(notion,'p1','Active',OTHER);
+  assert.deepEqual((await applyApprovals(s.env,{fetcher:notion.fetcher})).control,{blocked:0,unblocked:0,refused:1,editors:[OTHER]});
+  assert.equal(s.sqlite.prepare("SELECT pending FROM devices WHERE id='p1'").get().pending,1);
+  await syncToNotion(s.env,{fetcher:notion.fetcher});
+  assert.equal(notion.value(MEMBERS,'p1','Status'),'Pending','put back by the hourly sync');
+  s.sqlite.prepare("UPDATE devices SET pending=0,active=1,notion_status='Active' WHERE id='p1'").run();
+  await syncToNotion(s.env,{fetcher:notion.fetcher});
+  editStatus(notion,'p1','Pending',OWNER);
+  await applyApprovals(s.env,{fetcher:notion.fetcher});
+  assert.equal(s.sqlite.prepare("SELECT active FROM devices WHERE id='p1'").get().active,1);
+});
+
+test('a join notice that failed at join time is posted by the next sync, once',async t=>{
+  const s = setup(t,{NOTION_REVIEWERS:OWNER}), notion = fakeNotion();
+  joinWaiting(s,'p1');
+  notion.hooks.push(()=>Response.json({},{status:503}));
+  await assert.rejects(announceJoin(s.env,'p1',{fetcher:notion.fetcher}));
+  assert.equal(notion.pages[MEMBERS].length,0);
+  const r = await syncToNotion(s.env,{fetcher:notion.fetcher});
+  assert.equal(r.control.notified,1);
+  assert.equal(notion.value(MEMBERS,'p1','Status'),'Pending');
+  assert.equal(notion.comments.length,1);
+  assert.equal((await syncToNotion(s.env,{fetcher:notion.fetcher})).control.notified,0);
+  assert.equal(notion.comments.length,1);
+});
+
+test('the 10-minute cron runs the approval check',async t=>{
+  const s = setup(t,{NOTION_REVIEWERS:OWNER}), notion = fakeNotion();
+  joinWaiting(s,'p1');
+  await announceJoin(s.env,'p1',{fetcher:notion.fetcher});
+  editStatus(notion,'p1','Active',OWNER);
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = notion.fetcher;
+  t.after(()=>{ globalThis.fetch = realFetch; });
+  const waiting = [];
+  worker.scheduled({cron:'*/10 * * * *',scheduledTime:Date.now()},s.env,{waitUntil:p=>waiting.push(p)});
+  await Promise.all(waiting);
+  assert.equal(s.sqlite.prepare("SELECT active FROM devices WHERE id='p1'").get().active,1);
+  const wrangler = readFileSync(new URL('../wrangler.jsonc',import.meta.url),'utf8');
+  assert.ok(wrangler.includes('"*/10 * * * *"'),'cron registered in wrangler.jsonc');
+});
+
+test('the join endpoint announces the PC in Notion and still answers when Notion fails',async t=>{
+  const s = setup(t,{NOTION_REVIEWERS:OWNER}), notion = fakeNotion();
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = notion.fetcher;
+  t.after(()=>{ globalThis.fetch = realFetch; });
+  const join = (pc) => handle(new Request('https://test.local/v1/enroll',{method:'POST',headers:{'CF-Connecting-IP':'203.0.113.7'},
+    body:JSON.stringify({name:'Sara Omar',email:'sara@example.com',pc_name:pc,windows_user:'sara',connector_version:'1.0.0-beta.19'})}),s.env);
+  const ok = await join('DESK-1');
+  assert.equal(ok.status,200);
+  assert.equal(notion.comments.length,1);
+  notion.hooks.push(()=>Response.json({},{status:500}));
+  const stillOk = await join('DESK-2');
+  assert.equal(stillOk.status,200,'a Notion error never stops a join');
+  assert.equal((await stillOk.json()).status,'pending');
 });

@@ -1,6 +1,7 @@
 // Hourly copy of team members and skill/tool usage into two Notion databases.
 // The Worker stays the source of truth; Notion is a view, except Team members → Status, which a reviewer
-// (NOTION_REVIEWERS) may set to Active or Blocked to unblock or block that PC. Rows are matched by
+// (NOTION_REVIEWERS) may set to Active or Blocked to approve/unblock or deny/block that PC. New PCs show as Pending,
+// and the reviewers are @mentioned on the row when a PC joins. Rows are matched by
 // "Device ID" / "Key", only rows that differ are written, and nothing is deleted.
 const API = 'https://api.notion.com/v1';
 const DAY = 86400;
@@ -53,10 +54,18 @@ const MEMBER = {Name:'title',Email:'email',PC:'rich_text','Windows user':'rich_t
   'Last seen':'date','Skill uses (30 days)':'number','Tool uses (30 days)':'number','Top skills':'rich_text','Terms version':'rich_text','Device ID':'rich_text'};
 const USAGE = {Name:'title',Kind:'select','Uses (30 days)':'number','People (30 days)':'number','Last used':'date',Key:'rich_text'};
 
+const DEVICE_COLUMNS = 'id,label,active,pending,person_name,email,pc_name,windows_user,connector_version,terms_version,created_at,last_seen';
+// A PC that joined and waits for approval shows as Pending; approving sets Active, denying Blocked.
+const statusOf = d => d.pending === 1 ? 'Pending' : d.active === 1 ? 'Active' : 'Blocked';
+function memberRow(d, s = {skill:0,tool:0,top:[]}) {
+  return {key:d.id,values:{Name:d.person_name || d.label,Email:d.email,PC:d.pc_name,'Windows user':d.windows_user,Version:d.connector_version,
+    Status:statusOf(d),Joined:isoTime(d.created_at),'Last seen':isoTime(d.last_seen),
+    'Skill uses (30 days)':s.skill,'Tool uses (30 days)':s.tool,'Top skills':s.top.join(', '),'Terms version':d.terms_version,'Device ID':d.id}};
+}
+
 async function desiredRows(db, today) {
   const since = isoDay(today-29*DAY);
-  const devices = (await db.prepare(`SELECT id,label,active,person_name,email,pc_name,windows_user,connector_version,terms_version,created_at,last_seen
-    FROM devices ORDER BY created_at,id`).all()).results;
+  const devices = (await db.prepare(`SELECT ${DEVICE_COLUMNS} FROM devices ORDER BY created_at,id`).all()).results;
   const perDevice = (await db.prepare(`SELECT device,kind,name,SUM(count) AS uses FROM usage WHERE day>=?
     GROUP BY device,kind,name ORDER BY uses DESC,name`).bind(since).all()).results;
   const perName = (await db.prepare(`SELECT kind,name,SUM(count) AS uses,COUNT(DISTINCT device) AS people,MAX(day) AS last_day FROM usage
@@ -67,12 +76,7 @@ async function desiredRows(db, today) {
     if (r.kind in s) s[r.kind] += r.uses;
     if (r.kind === 'skill' && s.top.length < 3) s.top.push(`${r.name} (${r.uses})`);
   }
-  const members = devices.map(d => {
-    const s = stats[d.id] ?? {skill:0,tool:0,top:[]};
-    return {key:d.id,values:{Name:d.person_name || d.label,Email:d.email,PC:d.pc_name,'Windows user':d.windows_user,Version:d.connector_version,
-      Status:d.active === 1 ? 'Active' : 'Blocked',Joined:isoTime(d.created_at),'Last seen':isoTime(d.last_seen),
-      'Skill uses (30 days)':s.skill,'Tool uses (30 days)':s.tool,'Top skills':s.top.join(', '),'Terms version':d.terms_version,'Device ID':d.id}};
-  });
+  const members = devices.map(d => memberRow(d,stats[d.id]));
   const usage = perName.map(r => {
     const key = `${r.kind}:${r.name}`;
     return {key,values:{Name:r.name,Kind:r.kind === 'tool' ? 'Tool' : 'Skill','Uses (30 days)':r.uses,'People (30 days)':r.people,'Last used':r.last_day,Key:key}};
@@ -137,11 +141,13 @@ export function notionClient(env, {fetcher = (...args) => fetch(...args), sleep 
   return {call,readAll,get calls() { return calls; }};
 }
 
-// Status set by hand in Team members: blocks or unblocks the PC. A change counts only when Notion's Status differs from
+const reviewerIds = env => [...new Set(String(env.NOTION_REVIEWERS ?? '').split(',').map(v=>v.trim().toLowerCase()).filter(Boolean))];
+
+// Status set by hand in Team members: Active approves or unblocks the PC, Blocked denies or blocks it. A change counts only when Notion's Status differs from
 // the one the service last saw there (devices.notion_status) and the person who last edited the row is in
 // NOTION_REVIEWERS, because everyone with edit access can change a row. Anyone else's change is put back by this run.
 async function applyStatusEdits(db, env, pages, control) {
-  const reviewers = new Set(String(env.NOTION_REVIEWERS ?? '').split(',').map(v=>v.trim().toLowerCase()).filter(Boolean));
+  const reviewers = new Set(reviewerIds(env));
   const devices = new Map((await db.prepare('SELECT id,notion_status FROM devices').all()).results.map(d=>[d.id,d]));
   const seen = new Set();
   for (const page of pages) {
@@ -157,8 +163,46 @@ async function applyStatusEdits(db, env, pages, control) {
       if (editor && !control.editors.includes(editor) && control.editors.length < 5) control.editors.push(editor);
       continue;
     }
-    await db.prepare('UPDATE devices SET active=?,notion_status=? WHERE id=?').bind(status === 'Active' ? 1 : 0,status,id).run();
+    await db.prepare('UPDATE devices SET active=?,pending=0,notion_status=? WHERE id=?').bind(status === 'Active' ? 1 : 0,status,id).run();
     control[status === 'Active' ? 'unblocked' : 'blocked']++;
+  }
+}
+
+// The join notice: a comment on the member's row that @mentions every reviewer, so Notion alerts them
+// (inbox, phone and email, per each person's Notion settings). Without reviewers the comment has no mention.
+async function notify(db, env, call, pageId, d) {
+  const mentions = reviewerIds(env).flatMap(id=>[{type:'mention',mention:{type:'user',user:{id}}},{type:'text',text:{content:' '}}]);
+  const who = [d.person_name || d.label, d.pc_name && `(${d.pc_name})`, d.email].filter(Boolean).join(' ');
+  await call('POST','/comments',{parent:{page_id:pageId},rich_text:[...mentions,{type:'text',text:{content:
+    text(`New PC waiting for your approval: ${who}. Set Status to Active to approve, or Blocked to deny.`)}}]});
+  await db.prepare('UPDATE devices SET notified_at=? WHERE id=?').bind(Math.floor(Date.now()/1000),d.id).run();
+}
+
+// Called right after a PC joins: its row and the reviewers' mention appear at once instead of at the next sync.
+export async function announceJoin(env, deviceId, {fetcher = (...args) => fetch(...args), sleep = ms => new Promise(r=>setTimeout(r,ms))} = {}) {
+  if (!env.NOTION_TOKEN || !env.NOTION_MEMBERS_SOURCE) return {skipped:'not configured'};
+  const d = await env.DB.prepare(`SELECT ${DEVICE_COLUMNS} FROM devices WHERE id=?`).bind(deviceId).first();
+  if (!d) return {skipped:'unknown device'};
+  const {call} = notionClient(env,{fetcher,sleep});
+  const row = memberRow(d);
+  const page = await call('POST','/pages',{parent:{type:'data_source_id',data_source_id:env.NOTION_MEMBERS_SOURCE},
+    properties:Object.fromEntries(Object.entries(row.values).map(([n,v])=>[n,toProp(MEMBER[n],v)]))});
+  await env.DB.prepare('UPDATE devices SET notion_status=? WHERE id=?').bind(row.values.Status,deviceId).run();
+  await notify(env.DB,env,call,page.id,d);
+  return {created:true,notified:true};
+}
+
+// Every 10 minutes: only reads Team members and applies reviewers' Status changes, so an approval needs no hourly wait.
+// Writes nothing to Notion; the hourly sync puts back changes made by others.
+export async function applyApprovals(env, {fetcher = (...args) => fetch(...args), sleep = ms => new Promise(r=>setTimeout(r,ms))} = {}) {
+  const at = Math.floor(Date.now()/1000);
+  if (!env.NOTION_TOKEN || !env.NOTION_MEMBERS_SOURCE) return {skipped:'not configured',at};
+  const control = {blocked:0,unblocked:0,refused:0,editors:[]};
+  try {
+    await applyStatusEdits(env.DB,env,await notionClient(env,{fetcher,sleep}).readAll(env.NOTION_MEMBERS_SOURCE),control);
+    return {control,at};
+  } catch (error) {
+    return {control,at,error:error instanceof NotionError ? error.message : 'Notion approval check failed'};
   }
 }
 
@@ -174,14 +218,19 @@ export async function syncToNotion(env, {fetcher = (...args) => fetch(...args), 
   const at = Math.floor(Date.now()/1000);
   if (!env.NOTION_TOKEN || !env.NOTION_MEMBERS_SOURCE || !env.NOTION_USAGE_SOURCE) return {skipped:'not configured',at};
   const summary = {members:{created:0,updated:0,unchanged:0},usage:{created:0,updated:0,unchanged:0},pending:0,
-    control:{blocked:0,unblocked:0,refused:0,editors:[]},at};
+    control:{blocked:0,unblocked:0,refused:0,editors:[],notified:0},at};
   const client = notionClient(env,{fetcher,sleep});
   const {call,readAll} = client;
   let queue = [], desired = null, planned = false;
+  const pageIds = new Map();  // Device ID → its Team members row, for join notices.
   const pendingMembers = () => new Set(queue.filter(w=>w.part === 'members').map(w=>w.key));
   try {
     const memberPages = await readAll(env.NOTION_MEMBERS_SOURCE);
     await applyStatusEdits(env.DB,env,memberPages,summary.control);
+    for (const page of memberPages) {
+      const key = text(fromProp('rich_text',page.properties?.['Device ID']));
+      if (key && !page.archived && !page.in_trash && !pageIds.has(key)) pageIds.set(key,page.id);
+    }
     desired = await desiredRows(env.DB,at);
     const members = plan(MEMBER,'Device ID',desired.members,memberPages);
     const usage = plan(USAGE,'Key',desired.usage,await readAll(env.NOTION_USAGE_SOURCE),
@@ -195,13 +244,22 @@ export async function syncToNotion(env, {fetcher = (...args) => fetch(...args), 
     while (queue.length && writes < maxWrites && client.calls < BUDGET) {
       const w = queue[0];
       if (w.page) await call('PATCH',`/pages/${encodeURIComponent(w.page)}`,{properties:w.properties});
-      else await call('POST','/pages',{parent:{type:'data_source_id',data_source_id:w.source},properties:w.properties});
+      else {
+        const created = await call('POST','/pages',{parent:{type:'data_source_id',data_source_id:w.source},properties:w.properties});
+        if (w.part === 'members') pageIds.set(w.key,created.id);
+      }
       queue.shift();
       writes++;
       summary[w.part][w.page ? 'updated' : 'created']++;
     }
     summary.pending = queue.length;
     await recordStatus(env.DB,desired.members,pendingMembers());
+    // Join notices that could not be posted when the PC joined (Notion down, or before this version).
+    const waiting = (await env.DB.prepare(`SELECT ${DEVICE_COLUMNS} FROM devices WHERE pending=1 AND notified_at IS NULL ORDER BY created_at`).all()).results;
+    for (const d of waiting) {
+      if (client.calls >= BUDGET) break;
+      if (pageIds.has(d.id)) { await notify(env.DB,env,call,pageIds.get(d.id),d); summary.control.notified++; }
+    }
     return summary;
   } catch (error) {
     // Rows written before the failure still count as seen; the failed row stays in the queue.

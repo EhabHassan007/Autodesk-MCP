@@ -232,7 +232,8 @@ export const DASHBOARD_JS = `'use strict';
       el('div', {class: 'tile'}, el('b', {}, data.devices.length), 'people / PCs'),
       el('div', {class: 'tile'}, el('b', {}, data.devices.filter(d => d.last_seen >= week).length), 'active in last 7 days'),
       el('div', {class: 'tile'}, el('b', {}, opens), 'skill opens (7 days)'),
-      el('div', {class: 'tile'}, el('b', {}, data.devices.filter(d => !d.active).length), 'blocked'));
+      el('div', {class: 'tile'}, el('b', {}, data.devices.filter(d => d.pending).length), 'waiting for approval'),
+      el('div', {class: 'tile'}, el('b', {}, data.devices.filter(d => !d.active && !d.pending).length), 'blocked'));
 
     const totals = {};
     for (const u of data.usage) if (u.kind === 'skill' && u.last7) totals[u.name] = (totals[u.name] || 0) + u.last7;
@@ -255,7 +256,11 @@ export const DASHBOARD_JS = `'use strict';
       const subs = data.submissions.filter(s => s.device === d.id);
       const detail = el('tr', {class: 'detail', hidden: ''}, el('td', {colspan: '9'}, detailView(d, usage, subs)));
       const toggle = el('button', {type: 'button', class: 'link', on: {click() { detail.hidden = !detail.hidden; toggle.textContent = detail.hidden ? 'Details' : 'Hide'; }}}, 'Details');
-      const action = el('button', {type: 'button', class: d.active ? 'danger' : 'ghost', on: {click: () => setActive(d, !d.active)}}, d.active ? 'Block' : 'Unblock');
+      // A PC that waits gets Approve and Deny; otherwise Block or Unblock.
+      const action = d.pending
+        ? el('span', {}, el('button', {type: 'button', class: 'ghost', on: {click: () => setActive(d, true)}}, 'Approve'), ' ',
+            el('button', {type: 'button', class: 'danger', on: {click: () => setActive(d, false)}}, 'Deny'))
+        : el('button', {type: 'button', class: d.active ? 'danger' : 'ghost', on: {click: () => setActive(d, !d.active)}}, d.active ? 'Block' : 'Unblock');
       rows.push(el('tr', {},
         el('td', {}, el('b', {}, d.person_name || d.label), el('span', {class: 'sub'}, d.email || (d.source === 'admin' ? 'added by administrator' : ''))),
         el('td', {}, d.pc_name || '—', el('span', {class: 'sub'}, d.windows_user || '')),
@@ -264,7 +269,7 @@ export const DASHBOARD_JS = `'use strict';
         el('td', {title: when(d.last_seen)}, ago(d.last_seen), el('span', {class: 'sub'}, d.connector_version ? 'v' + d.connector_version : '')),
         el('td', {}, chips(usage, 'skill')),
         el('td', {class: 'num'}, subs.length),
-        el('td', {}, el('span', {class: d.active ? 'status-on' : 'status-off'}, d.active ? 'Active' : 'Blocked')),
+        el('td', {}, el('span', {class: d.active ? 'status-on' : 'status-off'}, d.pending ? 'Pending' : d.active ? 'Active' : 'Blocked')),
         el('td', {}, toggle, ' ', action)), detail);
     }
     $('people').tBodies[0].replaceChildren(...(rows.length ? rows : [el('tr', {}, el('td', {colspan: '9', class: 'muted'}, q ? 'Nobody matches that filter.' : 'Nobody has joined yet.'))]));
@@ -283,7 +288,8 @@ export const DASHBOARD_JS = `'use strict';
 
   async function setActive(d, active) {
     const who = d.person_name || d.label;
-    if (!confirm((active ? 'Unblock ' : 'Block ') + who + '?' + (active ? '' : ' Their PC will stop sharing and downloading skills until unblocked.'))) return;
+    const verb = d.pending ? (active ? 'Approve ' : 'Deny ') : (active ? 'Unblock ' : 'Block ');
+    if (!confirm(verb + who + '?' + (active ? '' : ' Their PC will not share or download skills until unblocked.'))) return;
     try { await api('/admin/devices/' + d.id + '/' + (active ? 'unblock' : 'block'), 'POST'); await load(); }
     catch (e) { if (e.message !== 'denied') alert(e.message); }
   }
