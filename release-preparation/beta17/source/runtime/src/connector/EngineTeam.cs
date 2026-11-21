@@ -7,7 +7,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 
-// Joining the team skill service: the administrator's enrollment file (or the team installer's join code), the device
+// Joining the team skill service: the administrator's enrollment file (or an open join with name and email), the device
 // token kept encrypted for this Windows user (DPAPI), and the secure deletion of the plaintext. The C# port of
 // Import-SkillServiceEnrollment, Register-SkillServiceDevice and Remove-PlaintextFileSecurely in Setup-BimCad.ps1 and of
 // scripts\Initialize-SkillService.ps1 (which Skills Sync's own scripts read the result of: service.json).
@@ -124,9 +124,9 @@ namespace SmartConnector
             return status;
         }
 
-        // The team installer: this PC joins the skill service with the join code in installer\team-join.json and the name and
-        // email typed in the setup window; the service answers with this PC's own device token, which is stored like an
-        // administrator's enrollment file (so the same logging and secure deletion apply).
+        // Joining the team: this PC sends the name and email typed in the setup window to the skill service (no team code
+        // needed); the service answers with this PC's own device token, which is stored like an administrator's enrollment
+        // file (so the same logging and secure deletion apply).
         private string RegisterSkillServiceDevice(string root)
         {
             string joinConfigPath = Path.Combine(Paths.Root, "installer", "team-join.json");
@@ -138,10 +138,15 @@ namespace SmartConnector
             }
             try
             {
-                if (!File.Exists(joinConfigPath)) throw new EngineException("This installer has no team join code. Ask your administrator for the team installer.");
+                // Joining needs no team code. The setup window writes the service address into team-join.json; without
+                // the file (a scripted install) the built-in address is used. A code in an older TEAM build is still sent.
                 OMap join;
-                try { join = OJson.ReadFile(joinConfigPath) as OMap; if (join == null) throw new FormatException(); }
-                catch (Exception) { throw new EngineException("The team join file in this installer is damaged."); }
+                if (!File.Exists(joinConfigPath)) { join = new OMap(); join.Set("service_url", TeamJoin.ServiceUrl); }
+                else
+                {
+                    try { join = OJson.ReadFile(joinConfigPath) as OMap; if (join == null) throw new FormatException(); }
+                    catch (Exception) { throw new EngineException("The team join file in this installer is damaged."); }
+                }
                 Uri uri;
                 if (!Uri.TryCreate(PsJson.Text(join.Get("service_url")), UriKind.Absolute, out uri) || !EngineNet.IsSecure(uri) || uri.UserInfo.Length > 0 || uri.Query.Length > 0 || uri.Fragment.Length > 0)
                     throw new EngineException("The team join file has an invalid service address.");
@@ -195,7 +200,7 @@ namespace SmartConnector
                 request.Method = "POST";
                 request.UserAgent = "Autodesk-MCP-Connector/" + version;
                 request.ContentType = "application/json; charset=utf-8";
-                request.Headers["Authorization"] = "Bearer " + joinCode;
+                if (!String.IsNullOrWhiteSpace(joinCode)) request.Headers["Authorization"] = "Bearer " + joinCode;
                 request.Headers["X-Connector-Version"] = version;
                 request.Timeout = 60000;
                 request.ServicePoint.Expect100Continue = false;

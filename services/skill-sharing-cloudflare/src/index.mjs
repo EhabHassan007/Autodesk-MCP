@@ -231,17 +231,11 @@ export async function handle(request, env, backend) {
       return json(summary,summary.error ? 502 : 200);
     }
     if (path === '/v1/enroll' && request.method === 'POST') {
-      const ip = clientIP(request) || 'unknown';
-      // An office shares one public address, so successful joins get a loose limit
-      // while wrong codes are cut off after 10 an hour, before the code is even compared.
-      const failures = await env.DB.prepare('SELECT hour,count FROM limits WHERE key=?').bind('joinfail:'+ip).first();
-      if (failures && failures.hour === Math.floor(now()/3600) && failures.count >= 10) throw new HTTPError(429,'Too many attempts; retry later.');
-      await limit(env.DB,'join:'+ip,60);
-      if (typeof env.JOIN_CODE !== 'string' || env.JOIN_CODE.trim().length < 32) throw new HTTPError(503,'Team joining is not configured.');
-      if (!await secretMatches(request,env.JOIN_CODE)) {
-        await limit(env.DB,'joinfail:'+ip,Infinity);
-        throw new HTTPError(403,'The team join code is not valid. Ask your administrator for the current installer.');
-      }
+      // Open joining: no team code. A new PC is active at once; the owner blocks it in Notion (Team members → Status)
+      // or on the dashboard. An office shares one public address, so the per-address limit is loose; the overall
+      // hourly limit stops a flood of fake PCs. Older installers still send a team code; it is ignored.
+      await limit(env.DB,'join:'+(clientIP(request) || 'unknown'),60);
+      await limit(env.DB,'join:all',200);
       let profile;
       try { profile = validateProfile(await readJSON(request)); }
       catch (error) { throw error instanceof HTTPError ? error : new HTTPError(422,error.message); }

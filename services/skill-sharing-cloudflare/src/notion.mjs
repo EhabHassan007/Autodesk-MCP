@@ -1,5 +1,6 @@
 // Hourly copy of team members and skill/tool usage into two Notion databases.
-// The Worker stays the source of truth; Notion is only a view. Rows are matched by
+// The Worker stays the source of truth; Notion is a view, except Team members → Status, which a reviewer
+// (NOTION_REVIEWERS) may set to Active or Blocked to unblock or block that PC. Rows are matched by
 // "Device ID" / "Key", only rows that differ are written, and nothing is deleted.
 const API = 'https://api.notion.com/v1';
 const DAY = 86400;
@@ -92,13 +93,13 @@ export function plan(schema, keyProp, desired, pages, zeroed) {
   const diff = (page, values) => {
     const changed = Object.keys(values).filter(n => norm(schema[n],values[n]) !== norm(schema[n],fromProp(schema[n],page.properties?.[n])));
     if (!changed.length) return unchanged++;
-    writes.push({page:page.id,properties:Object.fromEntries(changed.map(n=>[n,toProp(schema[n],values[n])]))});
+    writes.push({key:text(fromProp('rich_text',page.properties?.[keyProp])),page:page.id,properties:Object.fromEntries(changed.map(n=>[n,toProp(schema[n],values[n])]))});
   };
   for (const row of desired) {
     const page = existing.get(row.key);
     existing.delete(row.key);
     if (page) diff(page,row.values);
-    else writes.push({properties:Object.fromEntries(Object.entries(row.values).map(([n,v])=>[n,toProp(schema[n],v)]))});
+    else writes.push({key:row.key,properties:Object.fromEntries(Object.entries(row.values).map(([n,v])=>[n,toProp(schema[n],v)]))});
   }
   // Rows Notion still has with no recent use: zero the counts, keep "Last used".
   for (const [key,page] of existing) if (zeroed?.test(key)) diff(page,zeroed.values);
@@ -136,22 +137,60 @@ export function notionClient(env, {fetcher = (...args) => fetch(...args), sleep 
   return {call,readAll,get calls() { return calls; }};
 }
 
+// Status set by hand in Team members: blocks or unblocks the PC. A change counts only when Notion's Status differs from
+// the one the service last saw there (devices.notion_status) and the person who last edited the row is in
+// NOTION_REVIEWERS, because everyone with edit access can change a row. Anyone else's change is put back by this run.
+async function applyStatusEdits(db, env, pages, control) {
+  const reviewers = new Set(String(env.NOTION_REVIEWERS ?? '').split(',').map(v=>v.trim().toLowerCase()).filter(Boolean));
+  const devices = new Map((await db.prepare('SELECT id,notion_status FROM devices').all()).results.map(d=>[d.id,d]));
+  const seen = new Set();
+  for (const page of pages) {
+    if (page.archived || page.in_trash) continue;
+    const id = text(fromProp('rich_text',page.properties?.['Device ID']));
+    if (!id || seen.has(id)) continue;  // Same rule as plan(): the first row with a Device ID is the one that counts.
+    seen.add(id);
+    const device = devices.get(id), status = text(fromProp('select',page.properties?.Status));
+    if (!device?.notion_status || !['Active','Blocked'].includes(status) || status === device.notion_status) continue;
+    const editor = String(page.last_edited_by?.id ?? '').toLowerCase();
+    if (!reviewers.has(editor)) {
+      control.refused++;
+      if (editor && !control.editors.includes(editor) && control.editors.length < 5) control.editors.push(editor);
+      continue;
+    }
+    await db.prepare('UPDATE devices SET active=?,notion_status=? WHERE id=?').bind(status === 'Active' ? 1 : 0,status,id).run();
+    control[status === 'Active' ? 'unblocked' : 'blocked']++;
+  }
+}
+
+// Remembers the Status each member row now holds in Notion: written or already equal, not still pending.
+async function recordStatus(db, members, pendingKeys) {
+  for (const row of members) {
+    if (pendingKeys.has(row.key)) continue;
+    await db.prepare('UPDATE devices SET notion_status=? WHERE id=? AND notion_status IS NOT ?').bind(row.values.Status,row.key,row.values.Status).run();
+  }
+}
+
 export async function syncToNotion(env, {fetcher = (...args) => fetch(...args), maxWrites = 40, sleep = ms => new Promise(r=>setTimeout(r,ms))} = {}) {
   const at = Math.floor(Date.now()/1000);
   if (!env.NOTION_TOKEN || !env.NOTION_MEMBERS_SOURCE || !env.NOTION_USAGE_SOURCE) return {skipped:'not configured',at};
-  const summary = {members:{created:0,updated:0,unchanged:0},usage:{created:0,updated:0,unchanged:0},pending:0,at};
+  const summary = {members:{created:0,updated:0,unchanged:0},usage:{created:0,updated:0,unchanged:0},pending:0,
+    control:{blocked:0,unblocked:0,refused:0,editors:[]},at};
   const client = notionClient(env,{fetcher,sleep});
   const {call,readAll} = client;
-  let queue = [];
+  let queue = [], desired = null, planned = false;
+  const pendingMembers = () => new Set(queue.filter(w=>w.part === 'members').map(w=>w.key));
   try {
-    const desired = await desiredRows(env.DB,at);
-    const members = plan(MEMBER,'Device ID',desired.members,await readAll(env.NOTION_MEMBERS_SOURCE));
+    const memberPages = await readAll(env.NOTION_MEMBERS_SOURCE);
+    await applyStatusEdits(env.DB,env,memberPages,summary.control);
+    desired = await desiredRows(env.DB,at);
+    const members = plan(MEMBER,'Device ID',desired.members,memberPages);
     const usage = plan(USAGE,'Key',desired.usage,await readAll(env.NOTION_USAGE_SOURCE),
       {test:key => /^(skill|tool):/.test(key),values:{'Uses (30 days)':0,'People (30 days)':0}});
     summary.members.unchanged = members.unchanged;
     summary.usage.unchanged = usage.unchanged;
     queue = [...members.writes.map(w=>({...w,part:'members',source:env.NOTION_MEMBERS_SOURCE})),
       ...usage.writes.map(w=>({...w,part:'usage',source:env.NOTION_USAGE_SOURCE}))];
+    planned = true;
     let writes = 0;
     while (queue.length && writes < maxWrites && client.calls < BUDGET) {
       const w = queue[0];
@@ -162,8 +201,11 @@ export async function syncToNotion(env, {fetcher = (...args) => fetch(...args), 
       summary[w.part][w.page ? 'updated' : 'created']++;
     }
     summary.pending = queue.length;
+    await recordStatus(env.DB,desired.members,pendingMembers());
     return summary;
   } catch (error) {
+    // Rows written before the failure still count as seen; the failed row stays in the queue.
+    if (planned) await recordStatus(env.DB,desired.members,pendingMembers()).catch(()=>{});
     // Only the status code is reported: never the token, request bodies or personal data.
     return {...summary,pending:queue.length,error:error instanceof NotionError ? error.message : 'Notion sync failed'};
   }

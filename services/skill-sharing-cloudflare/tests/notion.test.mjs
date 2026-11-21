@@ -294,3 +294,91 @@ test('scheduled run syncs and stores the summary',async t=>{
   assert.equal(row.at,summary.at);
   assert.equal(notion.pages[MEMBERS].length,2);
 });
+
+// Status in Team members controls the PC: a reviewer's change applies, anyone else's is put back.
+const OWNER = 'owner-user-id', OTHER = 'other-user-id';
+function editStatus(notion, deviceId, status, editor) {
+  const page = notion.pages[MEMBERS].find(p=>p.properties['Device ID'].rich_text[0].plain_text === deviceId);
+  page.properties.Status = {type:'select',select:{id:'opt',name:status}};
+  page.last_edited_by = {object:'user',id:editor};
+}
+const active = (s, id) => s.sqlite.prepare('SELECT active FROM devices WHERE id=?').get(id).active;
+
+test('a reviewer sets Blocked in Notion: the PC is blocked and nothing is written back; Active unblocks it',async t=>{
+  const s = setup(t,{NOTION_REVIEWERS:` ${OWNER.toUpperCase()} , someone-else`}), notion = fakeNotion();
+  team(s);
+  await syncToNotion(s.env,{fetcher:notion.fetcher});
+  assert.deepEqual(s.sqlite.prepare('SELECT id,notion_status FROM devices ORDER BY id').all().map(r=>({...r})),
+    [{id:'d1',notion_status:'Active'},{id:'d2',notion_status:'Blocked'}],'first run records what Notion shows');
+  editStatus(notion,'d1','Blocked',OWNER);
+  notion.reset();
+  const r = await syncToNotion(s.env,{fetcher:notion.fetcher});
+  assert.deepEqual(r.control,{blocked:1,unblocked:0,refused:0,editors:[]});
+  assert.equal(active(s,'d1'),0);
+  assert.equal(notion.writes().length,0,'Notion already shows Blocked');
+  editStatus(notion,'d2','Active',OWNER);
+  const again = await syncToNotion(s.env,{fetcher:notion.fetcher});
+  assert.deepEqual(again.control,{blocked:0,unblocked:1,refused:0,editors:[]});
+  assert.equal(active(s,'d2'),1);
+  notion.reset();
+  const quiet = await syncToNotion(s.env,{fetcher:notion.fetcher});
+  assert.deepEqual(quiet.control,{blocked:0,unblocked:0,refused:0,editors:[]},'a change is applied once');
+  assert.equal(notion.writes().length,0);
+});
+
+test('a Status change by someone not in NOTION_REVIEWERS is refused and put back',async t=>{
+  for (const reviewers of [OWNER,undefined]) {
+    const s = setup(t,{NOTION_REVIEWERS:reviewers}), notion = fakeNotion();
+    team(s);
+    await syncToNotion(s.env,{fetcher:notion.fetcher});
+    editStatus(notion,'d2','Active',OTHER);
+    notion.reset();
+    const r = await syncToNotion(s.env,{fetcher:notion.fetcher});
+    assert.deepEqual(r.control,{blocked:0,unblocked:0,refused:1,editors:[OTHER]});
+    assert.equal(active(s,'d2'),0,'still blocked');
+    assert.deepEqual(notion.writes().map(w=>w.body),[{properties:{Status:{select:{name:'Blocked'}}}}]);
+    assert.equal(notion.value(MEMBERS,'d2','Status'),'Blocked');
+  }
+});
+
+test('blocking on the dashboard reaches Notion and is not mistaken for a Notion change; unknown Status values are ignored',async t=>{
+  const s = setup(t,{NOTION_REVIEWERS:OWNER}), notion = fakeNotion();
+  team(s);
+  await syncToNotion(s.env,{fetcher:notion.fetcher});
+  s.sqlite.prepare("UPDATE devices SET active=0 WHERE id='d1'").run();
+  await syncToNotion(s.env,{fetcher:notion.fetcher});
+  assert.equal(notion.value(MEMBERS,'d1','Status'),'Blocked');
+  assert.equal(s.sqlite.prepare("SELECT notion_status FROM devices WHERE id='d1'").get().notion_status,'Blocked');
+  editStatus(notion,'d1','Paused',OWNER);
+  const r = await syncToNotion(s.env,{fetcher:notion.fetcher});
+  assert.deepEqual(r.control,{blocked:0,unblocked:0,refused:0,editors:[]});
+  assert.equal(active(s,'d1'),0);
+  assert.equal(notion.value(MEMBERS,'d1','Status'),'Blocked','put back to the real state');
+});
+
+test('a Status edit before the first sync recorded the row is not applied; a pending row is not recorded',async t=>{
+  const s = setup(t,{NOTION_REVIEWERS:OWNER}), notion = fakeNotion();
+  team(s);
+  await syncToNotion(s.env,{fetcher:notion.fetcher,maxWrites:1});
+  assert.deepEqual(s.sqlite.prepare('SELECT id,notion_status FROM devices ORDER BY id').all().map(r=>({...r})),
+    [{id:'d1',notion_status:null},{id:'d2',notion_status:'Blocked'}],'d1 was not written yet (oldest PCs go first)');
+  s.sqlite.prepare("UPDATE devices SET notion_status=NULL").run();
+  editStatus(notion,'d2','Active',OWNER);
+  const r = await syncToNotion(s.env,{fetcher:notion.fetcher});
+  assert.equal(r.control.unblocked,0);
+  assert.equal(active(s,'d2'),0);
+  assert.equal(notion.value(MEMBERS,'d2','Status'),'Blocked');
+});
+
+test('a failed write keeps that member unrecorded',async t=>{
+  const s = setup(t,{NOTION_REVIEWERS:OWNER}), notion = fakeNotion();
+  team(s);
+  notion.hooks.push(null,null,()=>Response.json({},{status:500}));
+  const r = await syncToNotion(s.env,{fetcher:notion.fetcher});
+  assert.equal(r.error,'Notion HTTP 500');
+  assert.deepEqual(s.sqlite.prepare('SELECT notion_status FROM devices ORDER BY id').all().map(r=>r.notion_status),[null,null]);
+  notion.hooks.push(()=>Response.json({},{status:500}));
+  const early = await syncToNotion(s.env,{fetcher:notion.fetcher});
+  assert.equal(early.error,'Notion HTTP 500');
+  assert.deepEqual(s.sqlite.prepare('SELECT notion_status FROM devices ORDER BY id').all().map(r=>r.notion_status),[null,null],'a read failure records nothing');
+});

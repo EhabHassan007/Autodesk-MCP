@@ -40,8 +40,8 @@ namespace SmartConnector
         // The team skill service the dashboard reads; the same address the TEAM build writes into team-join.json.
         internal const string ServiceUrl = "https://autodesk-skill-service.autodesk-skills-ehabhassan007.workers.dev";
 
-        // Offered on every PC that has not joined yet. The join code comes from a TEAM build's installer\team-join.json
-        // or, in the normal setup, is typed by the person (the administrator hands it out); no secret is in the setup file.
+        // Offered on every PC that has not joined yet. Joining needs no team code: a new PC is active at once and the
+        // administrator blocks it in Notion (Team members, Status) or on the dashboard.
         internal static bool Required(string payloadInstaller)
         {
             return !File.Exists(Path.Combine(Paths.LocalAppData, "AutodeskMcpSkillCollection", "service.json"));
@@ -52,20 +52,14 @@ namespace SmartConnector
             return File.Exists(Path.Combine(payloadInstaller, "team-join.json"));
         }
 
-        // The service checks the code; this only refuses what cannot be one (the service's codes are 32+ characters).
-        internal static bool ValidCode(string code)
-        {
-            string value = (code ?? "").Trim();
-            return value.Length >= 32 && value.Length <= 256 && !Regex.IsMatch(value, "\\s");
-        }
-
-        // Writes installer\team-join.json for the install engine's team step, which deletes it when the step ends.
-        internal static void WriteJoinFile(string code)
+        // Writes installer\team-join.json (the service address only) for the install engine's team step, which deletes
+        // it when the step ends. A TEAM build from before open joining already carries one, with a code the service ignores.
+        internal static void WriteJoinFile()
         {
             string directory = Path.Combine(Paths.Root, "installer");
             Directory.CreateDirectory(directory);
             File.WriteAllText(Path.Combine(directory, "team-join.json"),
-                Json.Serializer.Serialize(Json.Object("service_url", ServiceUrl, "join_code", code.Trim())), new UTF8Encoding(false));
+                Json.Serializer.Serialize(Json.Object("service_url", ServiceUrl)), new UTF8Encoding(false));
         }
 
         internal static void DeleteJoinFile()
@@ -263,10 +257,10 @@ namespace SmartConnector
         private Form _form;
         private StepBar _rail;
         private Button _back, _next, _cancel;
-        private Label _hint, _revitNote, _problem, _nameLabel, _emailLabel, _codeLabel, _joinNote, _currentTask, _doneTitle, _doneSummary;
+        private Label _hint, _revitNote, _problem, _nameLabel, _emailLabel, _joinNote, _currentTask, _doneTitle, _doneSummary;
         private Panel _body, _reviewRows, _installing, _doneRows;
         private CheckBox _accept, _skillsBox, _updatesBox, _joinBox, _openAppBox;
-        private TextBox _nameBox, _codeBox, _emailBox, _logBox;
+        private TextBox _nameBox, _emailBox, _logBox;
         private LinkLabel _detailsLink;
         private ProgressBar _progress;
         private readonly Dictionary<string, Label> _stepLabels = new Dictionary<string, Label>();
@@ -411,15 +405,13 @@ namespace SmartConnector
             choose.Controls.AddRange(new Control[] { _skillsBox, _updatesBox });
             _joinBox = new CheckBox(); _joinBox.Text = "Join the team (your skills and usage appear on the team dashboard)"; _joinBox.Checked = true; _joinBox.AutoSize = true; _joinBox.Location = new Point(28, 300);
             _joinBox.Visible = _askDetails; choose.Controls.Add(_joinBox);
-            // Name and email always; the team code only when this setup does not carry one (the normal setup file).
-            int nameWidth = _codeBundled ? 240 : 160, emailLeft = _codeBundled ? 284 : 200, emailWidth = _codeBundled ? 248 : 170;
+            // Name and email only: joining needs no team code.
+            int nameWidth = 240, emailLeft = 284, emailWidth = 248;
             _nameLabel = AddText(choose, "Your name", 28, 328, 0, 9, true);
             _nameBox = new TextBox(); _nameBox.Location = new Point(28, 348); _nameBox.Size = new Size(nameWidth, 26); _nameBox.MaxLength = 80;
             _emailLabel = AddText(choose, "Work email", emailLeft, 328, 0, 9, true);
             _emailBox = new TextBox(); _emailBox.Location = new Point(emailLeft, 348); _emailBox.Size = new Size(emailWidth, 26); _emailBox.MaxLength = 254;
-            _codeLabel = AddText(choose, "Team code", 382, 328, 0, 9, true);
-            _codeBox = new TextBox(); _codeBox.Location = new Point(382, 348); _codeBox.Size = new Size(150, 26); _codeBox.MaxLength = 256; _codeBox.UseSystemPasswordChar = true;
-            choose.Controls.AddRange(new Control[] { _nameBox, _emailBox, _codeBox });
+            choose.Controls.AddRange(new Control[] { _nameBox, _emailBox });
             _joinNote = AddText(choose, TeamJoin.Notice, 28, 378, 500, 8, false, true);
             _problem = AddText(choose, "", 28, 404, 500, 9); _problem.ForeColor = Brand.Bad;
             foreach (Group group in new[] { _aiGroup, _cadGroup })
@@ -431,7 +423,6 @@ namespace SmartConnector
             _joinBox.CheckedChanged += delegate { ValidateChoices(); };
             _nameBox.TextChanged += delegate { ValidateChoices(); };
             _emailBox.TextChanged += delegate { ValidateChoices(); };
-            _codeBox.TextChanged += delegate { ValidateChoices(); };
 
             // --- 3 AI connections (review before installing)
             Panel review = NewPage();
@@ -534,13 +525,11 @@ namespace SmartConnector
             }
             bool joining = _askDetails && _joinBox.Checked;
             foreach (Control c in new Control[] { _nameLabel, _nameBox, _emailLabel, _emailBox, _joinNote }) c.Visible = joining;
-            foreach (Control c in new Control[] { _codeLabel, _codeBox }) c.Visible = joining && !_codeBundled;
             string message = "";
             int ai = Selected(_aiGroup).Count, cad = Selected(_cadGroup).Count;
             if (ai == 0) message = "Choose at least one AI app.";
             else if (_cadGroup.Boxes.Any(b => b.Enabled) && cad == 0) message = "Choose at least one Autodesk program.";
             else if (joining && !(TeamJoin.ValidName(_nameBox.Text) && TeamJoin.ValidEmail(_emailBox.Text))) message = "Enter your name and work email to join the team, or untick Join the team.";
-            else if (joining && !_codeBundled && !TeamJoin.ValidCode(_codeBox.Text)) message = "Enter the team code from your administrator, or untick Join the team.";
             _problem.Text = message;
             if (_page == 2) _next.Enabled = message.Length == 0;
             _hint.Text = ai + " AI app" + (ai == 1 ? "" : "s") + " - " + cad + " Autodesk program" + (cad == 1 ? "" : "s");
@@ -645,7 +634,7 @@ namespace SmartConnector
             if (_join != null) arguments.AddRange(new[] { "-JoinName", _join[0], "-JoinEmail", _join[1] });
             // The typed team code reaches the engine's team step the same way a TEAM build's code does; it is deleted
             // when that step ends, and again when setup ends in case the engine stopped before it.
-            if (_join != null && !_codeBundled && !_smoke) { TeamJoin.WriteJoinFile(_codeBox.Text); }
+            if (_join != null && !_codeBundled && !_smoke) { TeamJoin.WriteJoinFile(); }
             List<string> hidden = new List<string>();
             if (!(_hasEnrollmentFile || _join != null)) hidden.Add("team");
             if (product == "Revit") hidden.Add("autocad");

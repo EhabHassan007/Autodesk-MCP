@@ -15,10 +15,10 @@ function Test-TeamJoinEmail {
     $value.Length -le 254 -and $value -match '^[^@\s"]+@[^@\s"]+\.[^@\s"]+$'
 }
 
+# Offered on every PC that has not joined yet; joining needs no team code. $PayloadInstaller is kept for callers.
 function Test-TeamJoinRequired {
     param([string]$PayloadInstaller)
-    (Test-Path -LiteralPath (Join-Path $PayloadInstaller 'team-join.json') -PathType Leaf) -and
-        -not (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'AutodeskMcpSkillCollection\service.json') -PathType Leaf)
+    -not (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'AutodeskMcpSkillCollection\service.json') -PathType Leaf)
 }
 
 function Show-TeamJoinDialog {
