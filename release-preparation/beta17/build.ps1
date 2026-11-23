@@ -2,8 +2,11 @@
 #   powershell -ExecutionPolicy Bypass -File release-preparation\beta17\build.ps1
 # Add -Team to also build the PRIVATE team installer, which carries the team join code.
 # The team ZIP is git-ignored: share it inside the company only, never in public releases.
+# Add -LibreDwgPack <folder> to carry the LibreDWG pack (the offline DWG tools, bin\libredwg) in the release ZIP and the setup .exe.
+# Build the folder with scripts/build-libredwg-windows.sh; every file must match libredwg-pack.json. It is never committed.
 param(
     [switch]$Team,
+    [string]$LibreDwgPack = '',
     [string]$ServiceUrl = 'https://autodesk-skill-service.autodesk-skills-ehabhassan007.workers.dev',
     # Prompted for (hidden) with -Team when omitted. Never pass it as plain text.
     [Security.SecureString]$TeamJoinCode
@@ -33,6 +36,24 @@ function Add-Text($Zip, [string]$Name, [string]$Text) {
     $writer = New-Object IO.StreamWriter($entry.Open(), $utf8)
     try { $writer.Write($Text) } finally { $writer.Dispose() }
 }
+# The LibreDWG pack (GPL-3.0-or-later programs, started by dwg_inspect and dwg_convert, never linked). Only a pack whose files
+# all match the SHA-256 values in libredwg-pack.json is accepted; nothing else may be in the folder except SHA256SUMS.
+$script:LibreDwgFiles = @()
+if ($LibreDwgPack) {
+    $manifest = Get-Content -LiteralPath (Join-Path $b 'libredwg-pack.json') -Raw | ConvertFrom-Json
+    $packFolder = (Resolve-Path -LiteralPath $LibreDwgPack).Path
+    $expectedFiles = @($manifest.files.PSObject.Properties)
+    if (-not $expectedFiles.Count) { throw 'libredwg-pack.json lists no files.' }
+    foreach ($entry in $expectedFiles) {
+        $path = Join-Path $packFolder $entry.Name
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "The LibreDWG pack is missing $($entry.Name)." }
+        if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ne $entry.Value.ToUpperInvariant()) { throw "The LibreDWG pack file $($entry.Name) does not match libredwg-pack.json. Rebuild it with scripts/build-libredwg-windows.sh, or update the manifest after review." }
+        $script:LibreDwgFiles += [pscustomobject]@{ Full = $path; Name = $entry.Name }
+    }
+    foreach ($file in Get-ChildItem -LiteralPath $packFolder -File) {
+        if (($expectedFiles.Name -notcontains $file.Name) -and $file.Name -ne 'SHA256SUMS') { throw "The LibreDWG pack has an unexpected file: $($file.Name)." }
+    }
+}
 # $Program adds the compiled bin/SmartConnector.exe. The payload stored in the repository is built without it, so it
 # stays source only and no binary is committed; the release ZIP and the setup .exe carry it.
 # -ScriptFree leaves out every script outside the approved skill library (some skills carry their own helper scripts).
@@ -46,6 +67,8 @@ function Add-Payload($Zip, [string]$JoinJson, [string]$Program, [switch]$ScriptF
         Add-File $Zip $f.Full ('Autodesk-MCP-Payload/' + $f.Rel)
     }
     if ($Program) { Add-File $Zip $Program 'Autodesk-MCP-Payload/bin/SmartConnector.exe' }
+    # Only the compiled payloads carry the LibreDWG pack; the payload stored in the repository never does.
+    if ($Program) { foreach ($packFile in $script:LibreDwgFiles) { Add-File $Zip $packFile.Full ('Autodesk-MCP-Payload/bin/libredwg/' + $packFile.Name) } }
     if ($JoinJson) { Add-Text $Zip 'Autodesk-MCP-Payload/installer/team-join.json' $JoinJson }
 }
 function Add-Release($Zip, [string]$PayloadPath) {
