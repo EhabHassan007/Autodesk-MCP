@@ -1,0 +1,20 @@
+{
+  "description": "LibreDWG pack for Smart Connector's dwg_inspect and dwg_convert tools. Built by scripts/build-libredwg-windows.sh; build.ps1 -LibreDwgPack <folder> refuses a pack whose files differ from these hashes. The pack itself is never committed.",
+  "libredwg_repository": "https://github.com/libredwg/libredwg",
+  "libredwg_commit": "a5fdc8ef80c675b3a36dbefd11a902e9e3bfff9f",
+  "jsmn_commit": "85695f3d5903b1cd5b4030efe50db3b4f5f3c928",
+  "licence": "GPL-3.0-or-later",
+  "target": "x86_64-windows-gnu (Zig 0.17.1), MinSizeRel, shared libredwg.dll",
+  "install_folder": "bin/libredwg",
+  "files": {
+    "COPYING": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
+    "SOURCE.txt": "182ae32d99c86de73a7566f09e117490df13339f2c77d5bba09a4832b6276e78",
+    "dwg2dxf.exe": "1c14344bfbbf868bd121aa15388798a88e7a83aea890587550ab758df497f26d",
+    "dwgbmp.exe": "bc8052abbac790e31beba4f43b38b9aeb83dcb44a2f7c3f1ea6699819ad43287",
+    "dwggrep.exe": "72b09739e9a24966c6d99ba10aec48c65040de6f5335e16b66f9ec22b48e80b7",
+    "dwglayers.exe": "2c763263e3644b1e17e5c823535551ddae321ff42f79228e383630261cfa01b9",
+    "dwgread.exe": "013e22da97751b4f673e1109cc062aa97c7e9617a67d64a4cb460bd570043a5b",
+    "dwgrewrite.exe": "06bd7b0c309c983a5fa130875c1880762c96d142dccefea5d6b78aafdbd1b57e",
+    "libredwg.dll": "9a15266c2ba9c18c322ff25f7eb30f6e9545b506e75418e4b6e720f2071ac26d"
+  }
+}
