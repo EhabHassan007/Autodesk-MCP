@@ -1,3 +1,19 @@
-/.agents/skills/ @EhabHassan007
-/scripts/submit-team-knowledge.ps1 @EhabHassan007
+# Code owners are requested for review on every pull request that touches these paths.
+# This only blocks a merge when branch protection on main has "Require review from Code Owners" switched on
+# (Settings > Branches). Without that setting the file requests reviews but does not enforce them.
+#
+# These paths either run on team PCs (installer, scripts, src, release payload), change how updates and
+# skills are distributed (release-preparation, workflows, services), or change the rules the AI follows
+# (AGENTS.md, skills). Keep this file itself owned so the list cannot be narrowed without review.
+
+/.github/CODEOWNERS @EhabHassan007
 /.github/workflows/ @EhabHassan007
+/.agents/skills/ @EhabHassan007
+/AGENTS.md @EhabHassan007
+/VERSION @EhabHassan007
+/.codex/ @EhabHassan007
+/installer/ @EhabHassan007
+/scripts/ @EhabHassan007
+/src/ @EhabHassan007
+/services/ @EhabHassan007
+/release-preparation/ @EhabHassan007
