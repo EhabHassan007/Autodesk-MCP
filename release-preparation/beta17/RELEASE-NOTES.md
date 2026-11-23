@@ -1,3 +1,9 @@
+Smart Connector for Autodesk Revit and AutoCAD 1.2.1
+
+New in 1.2.1 (offline DWG tools and open team joining; everything from 1.2.0 below is included):
+- Offline DWG tools (new; the connector compiles and its tests pass in CI, but the bundled programs have not yet been run on a real drawing on Windows): `dwg_inspect` lists the layers of a closed .dwg and searches its text, and `dwg_convert` writes a DXF, a JSON file, a DWG saved as another version (r12 to r2018) or the drawing's preview image. They need no AutoCAD session. A conversion always writes a new file next to the source (or in `output_dir`), uses a numbered name instead of overwriting, and never changes the source. They start the LibreDWG programs from `bin\libredwg` as separate programs (LibreDWG is GPL-3.0-or-later; its licence text and source offer are installed beside them). LibreDWG is not AutoCAD: a rewritten DWG can lose dynamic blocks, proxy objects, solids and annotative detail, so open and audit it in AutoCAD before it goes to an authority. The approved workflow `libredwg-offline-dwg` asks for a yes before any conversion. A connector installed without the LibreDWG pack answers that the tools are not installed.
+- Joining the team skill service no longer needs a team code: setup has no code box. A new PC joins as waiting and every skill-service call answers that it is waiting for the administrator until the owner approves it, in the Notion Team members database (Status Active; Blocked refuses) or on the dashboard; approvals apply within 10 minutes. Older team installers keep working.
+
 Smart Connector for Autodesk Revit and AutoCAD 1.2.0
 
 New in 1.2.0 (AutoCAD Detail Generator and connector safety; everything from 1.1.0 below is included):
