@@ -397,8 +397,8 @@ namespace SmartConnector
             object[][] rows =
             {
                 new object[] { "claude", "Claude Desktop", s.ClaudeDesktop, "Listed as \"Smart Connector\" in its connectors." },
-                new object[] { "claude", "Claude Code", s.ClaudeCode, "User-level MCP server named autodesk." },
-                new object[] { "codex", "Codex", s.Codex, "MCP server named autodesk in config.toml." }
+                new object[] { "claude", "Claude Code", s.ClaudeCode, "User-level MCP server named smart-connector." },
+                new object[] { "codex", "Codex", s.Codex, "MCP server named smart-connector in config.toml." }
             };
             for (int i = 0; i < rows.Length; i++)
             {
