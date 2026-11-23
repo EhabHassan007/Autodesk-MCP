@@ -22,8 +22,13 @@ jobs:
   # The LibreDWG pack (the programs behind dwg_inspect and dwg_convert) is never committed. It is cross-compiled here on
   # Linux (half the minutes of Windows), only once per pinned version thanks to the cache, and checked file by file
   # against libredwg-pack.json; build.ps1 checks it again before it goes into the installer.
+  # The binaries depend on WHERE Zig is installed (the same source, Zig, CMake and Ninja gave other bytes with Zig in a
+  # virtualenv), not on the CMake or Ninja version or Zig's cache folder. The pinned hashes come from Zig 0.17.1 installed
+  # by pip into /usr/local/lib/python3.13/site-packages, which is exactly where pip puts it in the python:3.13 image, so
+  # the job runs in that container (the plain runner put Zig elsewhere and every binary differed).
   libredwg-pack:
     runs-on: ubuntu-latest
+    container: python:3.13-bookworm
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     timeout-minutes: 20
     steps:
@@ -38,8 +43,9 @@ jobs:
       - name: Build the LibreDWG pack
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
-          command -v ninja >/dev/null || sudo apt-get install -y ninja-build
-          python3 -m pip install --quiet ziglang==0.17.1
+          python3 -m pip install --quiet --root-user-action=ignore ziglang==0.17.1 cmake==3.28.3 ninja==1.11.1.1
+          python3 -c "import ziglang, os; print('Zig is in', os.path.dirname(ziglang.__file__))"
+          cmake --version | head -n 1
           bash scripts/build-libredwg-windows.sh libredwg-pack
 
       - name: Check the pack against libredwg-pack.json
