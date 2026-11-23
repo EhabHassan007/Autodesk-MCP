@@ -542,8 +542,8 @@ namespace SmartConnector
             string[][] specs =
             {
                 new[] { "ClaudeDesktop", "claude", "Claude Desktop", _check.ClaudeDesktop ? "Adds \"Smart Connector\" to its connectors; Claude restarts" : "Installs Claude Desktop, then adds Smart Connector" },
-                new[] { "ClaudeCode", "claude", "Claude Code", "Adds a user-level MCP server named autodesk" },
-                new[] { "Codex", "codex", "Codex", "Adds an MCP server named autodesk to config.toml" }
+                new[] { "ClaudeCode", "claude", "Claude Code", "Adds a user-level MCP server named smart-connector" },
+                new[] { "Codex", "codex", "Codex", "Adds an MCP server named smart-connector to config.toml" }
             };
             for (int i = 0; i < 3; i++)
             {

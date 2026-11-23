@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -441,6 +442,142 @@ namespace SmartConnector
             return new ClaudeDesktopInstallation { Source = "winget" };
         }
 
+        // ---------- reading the registration back ----------
+
+        // Whether Codex's config.toml has the [mcp_servers.<name>] table and its command starts this program. Codex,
+        // ChatGPT Desktop and the Codex app all read this file, whoever wrote it.
+        internal static bool CodexConfigHasConnector(string name, string command)
+        {
+            string configPath = Path.Combine(CodexHome, "config.toml");
+            try
+            {
+                if (!File.Exists(configPath)) return false;
+                string program = Path.GetFileName(command);
+                bool inTable = false;
+                foreach (string line in File.ReadAllLines(configPath))
+                {
+                    Match header = Regex.Match(line, @"^\s*\[(?!\[)\s*mcp_servers\.(""[^""]*""|'[^']*'|[A-Za-z0-9_-]+)\s*\]");
+                    if (header.Success) { inTable = String.Equals(header.Groups[1].Value.Trim('"', '\''), name, StringComparison.OrdinalIgnoreCase); continue; }
+                    if (Regex.IsMatch(line, @"^\s*\[")) { inTable = false; continue; }
+                    if (inTable && Regex.IsMatch(line, @"^\s*command\s*=") && line.IndexOf(program, StringComparison.OrdinalIgnoreCase) >= 0) return true;
+                }
+            }
+            catch (Exception) { }
+            return false;
+        }
+
+        // Claude Code keeps user-level MCP servers in .claude.json in the home folder (or in CLAUDE_CONFIG_DIR when set).
+        internal static string ClaudeCodeConfigPath
+        {
+            get
+            {
+                string folder = Env.Variable("CLAUDE_CONFIG_DIR");
+                return Path.Combine(String.IsNullOrWhiteSpace(folder) ? Env.Home : folder, ".claude.json");
+            }
+        }
+
+        internal static bool ClaudeCodeConfigHasConnector(string name, string command)
+        {
+            try
+            {
+                if (!File.Exists(ClaudeCodeConfigPath)) return false;
+                OMap config = OJson.ReadFile(ClaudeCodeConfigPath) as OMap;
+                OMap servers = config == null ? null : config.Get("mcpServers") as OMap;
+                OMap entry = servers == null ? null : servers.Get(name) as OMap;
+                return entry != null && Convert.ToString(entry.Get("command")).IndexOf(Path.GetFileName(command), StringComparison.OrdinalIgnoreCase) >= 0;
+            }
+            catch (Exception) { return false; }
+        }
+
+        // Claude Code's user-level entry written into .claude.json directly, as `claude mcp add --scope user` writes it,
+        // for when the claude command failed or did not answer. Every other key of the file is kept; the new file is
+        // written beside the old one, read back, then put in place.
+        private void RegisterClaudeCodeConfigFile(string name, string bridge, string[] bridgeArguments, string[] legacyNames)
+        {
+            string configPath = ClaudeCodeConfigPath;
+            Step("Registering the " + name + " MCP server in Claude Code's settings at " + configPath + "...");
+            int id = Process.GetCurrentProcess().Id;
+            string temporaryPath = configPath + ".smart-connector-" + id + ".tmp";
+            bool hadConfig = File.Exists(configPath);
+            try
+            {
+                OMap config = hadConfig ? OJson.ReadFile(configPath) as OMap : new OMap();
+                if (config == null) throw new EngineException("Claude Code's settings file is not a JSON object.");
+                if (!config.Has("mcpServers") || config.Get("mcpServers") == null) config.Set("mcpServers", new OMap());
+                OMap servers = config.Get("mcpServers") as OMap;
+                if (servers == null) throw new EngineException("Claude Code's settings file has an mcpServers value that is not an object.");
+                foreach (string legacyName in legacyNames)
+                    if (servers.Has(legacyName) && IsOwnConnectorEntry(OJson.Write(servers.Get(legacyName)))) servers.Remove(legacyName);
+                McpLaunch launch = GetMcpLaunch(bridge, bridgeArguments);
+                OMap entry = new OMap();
+                entry.Set("type", "stdio");
+                entry.Set("command", launch.Command);
+                entry.Set("args", new List<object>(launch.Arguments.Cast<object>()));
+                entry.Set("env", new OMap());
+                servers.Set(name, entry);
+                Directory.CreateDirectory(Path.GetDirectoryName(configPath));
+                File.WriteAllText(temporaryPath, OJson.Write(config), EngineText.Utf8);
+                OJson.ReadFile(temporaryPath);   // what was written must read back
+                if (hadConfig) File.Copy(temporaryPath, configPath, true); else File.Move(temporaryPath, configPath);
+                Step("Smart Connector is registered for Claude Code. Restart Claude Code to load it.");
+            }
+            finally { if (File.Exists(temporaryPath)) File.Delete(temporaryPath); }
+        }
+
+        // The command-line registration, then a read of the app's own settings file. When the command failed, did not
+        // answer, or reported success without writing the entry, the entry is written into the file directly.
+        private string RegisterCodexChecked(string bridge, string[] arguments, string[] legacyNames)
+        {
+            McpLaunch launch = GetMcpLaunch(bridge, arguments);
+            string problem = null;
+            try
+            {
+                WithCommandTimeout(AiCommandTimeoutMs, delegate
+                {
+                    RegisterMcpServer(CliServerName, bridge, arguments, legacyNames);
+                    if (!bridge.EndsWith(".ps1", StringComparison.OrdinalIgnoreCase)) RemoveStaleBridgeCliEntries("Codex", FindCommand("codex"), CliServerName, new string[0]);
+                });
+            }
+            catch (Exception exception) { problem = exception.Message; }
+            if (problem == null && CodexConfigHasConnector(CliServerName, launch.Command))
+            {
+                Step("Checked Codex's settings file: the Smart Connector entry is there.");
+                return "";
+            }
+            Warning(problem != null
+                ? "The codex command could not register Smart Connector (" + problem.Split('\n')[0].Trim() + "). Writing Codex's settings file directly."
+                : "The codex command reported success, but Codex's settings file has no Smart Connector entry. Writing it directly.");
+            RegisterCodexConfigFile(CliServerName, bridge, arguments, legacyNames);
+            if (!CodexConfigHasConnector(CliServerName, launch.Command)) throw new EngineException("Codex's settings file still has no Smart Connector entry after writing it.");
+            return "written to Codex's settings file; restart Codex";
+        }
+
+        private string RegisterClaudeCodeChecked(string bridge, string[] arguments, string[] legacyNames)
+        {
+            McpLaunch launch = GetMcpLaunch(bridge, arguments);
+            string problem = null;
+            try
+            {
+                WithCommandTimeout(AiCommandTimeoutMs, delegate
+                {
+                    RegisterClaudeCodeMcpServer(CliServerName, bridge, arguments, legacyNames);
+                    if (!bridge.EndsWith(".ps1", StringComparison.OrdinalIgnoreCase)) RemoveStaleBridgeCliEntries("Claude Code", FindCommand("claude"), CliServerName, new[] { "--scope", "user" });
+                });
+            }
+            catch (Exception exception) { problem = exception.Message; }
+            if (problem == null && ClaudeCodeConfigHasConnector(CliServerName, launch.Command))
+            {
+                Step("Checked Claude Code's settings file: the Smart Connector entry is there.");
+                return "";
+            }
+            Warning(problem != null
+                ? "The claude command could not register Smart Connector (" + problem.Split('\n')[0].Trim() + "). Writing Claude Code's settings file directly."
+                : "The claude command reported success, but Claude Code's settings file has no Smart Connector entry. Writing it directly.");
+            RegisterClaudeCodeConfigFile(CliServerName, bridge, arguments, legacyNames);
+            if (!ClaudeCodeConfigHasConnector(CliServerName, launch.Command)) throw new EngineException("Claude Code's settings file still has no Smart Connector entry after writing it.");
+            return "written to Claude Code's settings file; restart Claude Code";
+        }
+
         // ---------- Claude Code ----------
 
         private void RegisterClaudeCodeMcpServer(string name, string bridge, string[] bridgeArguments, string[] legacyNames)
@@ -453,7 +590,7 @@ namespace SmartConnector
             }
             if (!File.Exists(bridge)) throw new EngineException("MCP bridge is missing: " + bridge);
 
-            string configPath = Path.Combine(Env.Home, ".claude.json");
+            string configPath = ClaudeCodeConfigPath;
             string backupPath = configPath + ".autodesk-mcp-" + Process.GetCurrentProcess().Id + ".bak";
             bool hadConfig = File.Exists(configPath);
             if (hadConfig) File.Copy(configPath, backupPath, true);
@@ -569,6 +706,9 @@ namespace SmartConnector
 
         // ---------- all the AI apps ----------
 
+        // False for the quiet reconnect after an update (ConnectAiApps): it never closes Claude Desktop under the user.
+        private bool _restartClaudeDesktop = true;
+
         private void RegisterDetectedAiClients(string root, string[] clients)
         {
             string bridge = Path.Combine(root, "src", "autodesk", "autodesk-bridge.ps1");
@@ -592,10 +732,9 @@ namespace SmartConnector
             {
                 try
                 {
-                    RegisterMcpServer(CliServerName, bridge, arguments, legacyNames);
-                    if (!bridge.EndsWith(".ps1", StringComparison.OrdinalIgnoreCase)) RemoveStaleBridgeCliEntries("Codex", FindCommand("codex"), CliServerName, new string[0]);
+                    string note = RegisterCodexChecked(bridge, arguments, legacyNames);
                     detected++;
-                    Result("codex", "ok");
+                    if (note.Length > 0) Result("codex", "ok", note); else Result("codex", "ok");
                 }
                 catch (Exception exception)
                 {
@@ -629,10 +768,9 @@ namespace SmartConnector
             {
                 try
                 {
-                    RegisterClaudeCodeMcpServer(CliServerName, bridge, arguments, legacyNames);
-                    if (!bridge.EndsWith(".ps1", StringComparison.OrdinalIgnoreCase)) RemoveStaleBridgeCliEntries("Claude Code", FindCommand("claude"), CliServerName, new[] { "--scope", "user" });
+                    string note = RegisterClaudeCodeChecked(bridge, arguments, legacyNames);
                     detected++;
-                    Result("claude_code", "ok");
+                    if (note.Length > 0) Result("claude_code", "ok", note); else Result("claude_code", "ok");
                 }
                 catch (Exception exception)
                 {
@@ -665,8 +803,16 @@ namespace SmartConnector
                             Warning("Could not update Claude config at " + configPath + "; continuing with other paths.");
                         }
                     }
-                    Result("claude_desktop", desktopFailed ? "failed" : "ok", desktopFailed ? "see the setup log" : "Claude restarts to load it");
-                    RestartClaudeDesktopIfRunning(claudeDesktopProcesses, claudeDesktopInstallation);
+                    if (_restartClaudeDesktop)
+                    {
+                        Result("claude_desktop", desktopFailed ? "failed" : "ok", desktopFailed ? "see the setup log" : "Claude restarts to load it");
+                        RestartClaudeDesktopIfRunning(claudeDesktopProcesses, claudeDesktopInstallation);
+                    }
+                    else
+                    {
+                        Result("claude_desktop", desktopFailed ? "failed" : "ok", desktopFailed ? "see the setup log" : "loads the next time Claude starts");
+                        if (claudeDesktopProcesses.Length > 0) Step("Claude Desktop is open and was left running; it loads Smart Connector the next time it starts.");
+                    }
                 }
                 else
                 {
@@ -684,14 +830,80 @@ namespace SmartConnector
                 Step("No supported AI client was detected. Connector files and skills were installed; run Install / Repair after installing Codex or Claude.");
         }
 
+        // ---------- reconnecting the AI apps after an update ----------
+
+        // An update is installed by the PREVIOUS version's program, which then connects the AI apps with its own code, so a
+        // fix to that code reaches a PC only through this: the first time this version's program starts after the update
+        // (the app, a Revit or AutoCAD button, the daily update check, or Claude starting the connector), it connects the
+        // AI apps once more in the background with this version's code. It never closes Claude Desktop. The outcome is
+        // kept in ai-apps-connected.json and the run in ai-apps.log (both in %LOCALAPPDATA%\AutodeskMcpConnector).
+        private void ConnectAiApps()
+        {
+            using (Mutex mutex = new Mutex(false, @"Local\SmartConnector.ConnectAiApps"))
+            {
+                bool acquired;
+                try { acquired = mutex.WaitOne(0); }
+                catch (AbandonedMutexException) { acquired = true; }
+                if (!acquired) { Step("The AI apps are already being reconnected."); return; }
+                try
+                {
+                    // Lets an update or setup that started this program finish writing the same settings files first.
+                    Thread.Sleep(15000);
+                    AiAppsState.Save("started", "");
+                    InstallChoices choices = GetInstallChoices("", "All", false, "", InstallChoicesPath);
+                    Step("Reconnecting the AI apps for Smart Connector " + Paths.Version + ": " + (choices.AiClients.Length > 0 ? String.Join(", ", choices.AiClients) : "none") + ".");
+                    _restartClaudeDesktop = false;
+                    try
+                    {
+                        RegisterDetectedAiClients(Paths.Root, choices.AiClients);
+                        AiAppsState.Save("ok", "");
+                        Step("The AI apps are connected.");
+                    }
+                    catch (Exception exception)
+                    {
+                        AiAppsState.Save("failed", exception.Message);
+                        Warning(exception.Message);
+                        // Reported to the administrator like a failed tool (cleaned of names and paths, joined PCs only).
+                        Failures.Failed("connect_ai_apps", "connector", exception.Message);
+                    }
+                }
+                finally { mutex.ReleaseMutex(); }
+            }
+        }
+
+        // Whether this version still has to reconnect the AI apps on this PC: only an install whose setup has run to the
+        // end (its choices are saved and no setup is pending), and only once per version (a run that never finished is
+        // tried again after a day).
+        internal static bool AiAppsReconnectDue()
+        {
+            if (!File.Exists(Path.Combine(Paths.Root, "bin", "SmartConnector.exe"))) return false;
+            // Only the installed program (setup's folder): a copy built elsewhere, such as a test build, must never point
+            // this PC's AI apps at itself.
+            string installRoot = Path.GetFullPath(Path.Combine(Paths.LocalAppData, "BIM-CAD-MCP")).TrimEnd('\\');
+            if (!String.Equals(Path.GetFullPath(Paths.Root).TrimEnd('\\'), installRoot, StringComparison.OrdinalIgnoreCase)) return false;
+            if (!File.Exists(InstallChoicesPath)) return false;
+            if (File.Exists(Path.Combine(Paths.Root, "setup", "setup-pending.txt"))) return false;
+            OMap state = AiAppsState.Read();
+            if (state == null) return true;
+            if (!String.Equals(Convert.ToString(state.Get("version")), Paths.Version, StringComparison.OrdinalIgnoreCase)) return true;
+            if (!String.Equals(Convert.ToString(state.Get("state")), "started", StringComparison.Ordinal)) return false;
+            DateTime at;
+            return !DateTime.TryParse(Convert.ToString(state.Get("utc")), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out at) || DateTime.UtcNow - at.ToUniversalTime() > TimeSpan.FromDays(1);
+        }
+
         // The checks at the end of Install, Test and Status.
         private void TestAutodeskRegistration()
+        {
+            WithCommandTimeout(AiCommandTimeoutMs, TestAiAppRegistration);
+        }
+
+        private void TestAiAppRegistration()
         {
             string codex = FindCommand("codex");
             if (codex != null)
             {
                 External registration = InvokeAllowFailure(codex, "mcp", "get", CliServerName);
-                Step(registration.ExitCode == 0 ? "Codex has the Smart Connector registration." : "Smart Connector is not registered yet.");
+                Step(registration.ExitCode == 0 || ConnectorStatus.CodexConnected() ? "Codex has the Smart Connector registration." : "Smart Connector is not registered in Codex yet.");
             }
             else if (ConnectorStatus.ChatGptDesktopInstalled())
             {
@@ -705,7 +917,7 @@ namespace SmartConnector
             if (claude != null)
             {
                 External registration = InvokeAllowFailure(claude, "mcp", "get", CliServerName);
-                Step(registration.ExitCode == 0 ? "Claude Code has the Smart Connector registration." : "Smart Connector is not registered in Claude Code yet.");
+                Step(registration.ExitCode == 0 || ConnectorStatus.ClaudeCodeConnected() ? "Claude Code has the Smart Connector registration." : "Smart Connector is not registered in Claude Code yet.");
             }
             else Step("Claude Code command was not detected.");
 
@@ -723,6 +935,68 @@ namespace SmartConnector
                 catch (Exception) { Step("Claude Desktop was detected, but its local MCP configuration is missing or invalid."); }
             }
             else Step("Claude Desktop was not detected. Its local MCP registration is not installed.");
+        }
+    }
+
+    // ai-apps-connected.json: which version last connected the AI apps on this PC, and how it went.
+    internal static class AiAppsState
+    {
+        internal static string FolderPath { get { return Path.Combine(Paths.LocalAppData, "AutodeskMcpConnector"); } }
+        internal static string StatePath { get { return Path.Combine(FolderPath, "ai-apps-connected.json"); } }
+        internal static string LogPath { get { return Path.Combine(FolderPath, "ai-apps.log"); } }
+
+        internal static OMap Read()
+        {
+            try { return File.Exists(StatePath) ? OJson.ReadFile(StatePath) as OMap : null; }
+            catch (Exception) { return null; }
+        }
+
+        internal static void Save(string state, string detail)
+        {
+            try
+            {
+                OMap map = new OMap();
+                map.Set("version", Paths.Version);
+                map.Set("state", state);
+                map.Set("detail", detail ?? "");
+                map.Set("utc", DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture));
+                Directory.CreateDirectory(FolderPath);
+                File.WriteAllText(StatePath, OJson.Write(map) + "\r\n", EngineText.Utf8);
+            }
+            catch (Exception) { }
+        }
+
+        // Called at every start of this program. The commands people and the AI apps start count; setup, the install
+        // engine's own install and update, the update window and Skills Sync (which the previous version's updater runs
+        // from the new files while it is still working) do not.
+        internal static bool Counts(string[] args)
+        {
+            if (args.Contains("--smoke-test")) return false;
+            string command = args.Length > 0 ? args[0] : "";
+            if (command == "app" || command == "settings" || command == "mcp") return true;
+            string action = "";
+            for (int i = 1; i + 1 < args.Length; i++) if (args[i] == "--action") action = args[i + 1];
+            if (command == "action") return action != "InstallUpdate";
+            if (command == "engine") return action == "CheckUpdate" || action == "Status" || action == "Test";
+            return false;
+        }
+
+        internal static void StartIfDue(string[] args)
+        {
+            try
+            {
+                if (!Counts(args) || !InstallEngine.AiAppsReconnectDue()) return;
+                // Claimed before starting, so programs starting at the same moment do not each start one.
+                Save("started", "");
+                // Through the Windows shell, so the background run holds none of this program's handles (Claude's pipes
+                // when this is the MCP server).
+                ProcessStartInfo info = new ProcessStartInfo(System.Reflection.Assembly.GetExecutingAssembly().Location, "engine --action ConnectAiApps");
+                info.UseShellExecute = true;
+                info.WindowStyle = ProcessWindowStyle.Hidden;
+                info.WorkingDirectory = Paths.LocalAppData;
+                Process.Start(info).Dispose();
+            }
+            catch (Exception) { }
         }
     }
 }

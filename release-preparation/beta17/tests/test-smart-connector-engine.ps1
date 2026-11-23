@@ -149,6 +149,8 @@ if defined FAKE_CODEX_FAIL_ADD (
   exit /b 1
 )
 echo registered>"%FAKE_CLI_DIR%\codex-%~3.txt"
+>>"%CODEX_HOME%\config.toml" echo [mcp_servers.%~3]
+>>"%CODEX_HOME%\config.toml" echo command = '%~5'
 echo Added %~3
 exit /b 0
 :remove
@@ -172,6 +174,7 @@ echo no such server %~3 1>&2
 exit /b 1
 :add
 echo registered>"%FAKE_CLI_DIR%\claude-%~7.txt"
+if not defined FAKE_CLAUDE_NO_CONFIG >"%USERPROFILE%\.claude.json" echo {"mcpServers":{"%~7":{"type":"stdio","command":"%~nx9","args":["mcp"]}}}
 echo Added %~7
 exit /b 0
 :remove
@@ -276,14 +279,62 @@ exit /b 0
     Assert ((Test-Path (Join-Path $s.Local 'AutodeskMcpConnector\install-choices.json'))) 'The choices were not saved'
     'PASS: a malformed Claude Desktop config is left untouched, the other path and the other clients are still done, and the failed step is reported'
 
-    # A failing Codex registration does not stop Claude; the reason is reported and the exit code is 1.
+    # A failing `codex mcp add` no longer leaves Codex unconnected: the entry is written into Codex's config.toml directly
+    # (the file Codex, ChatGPT Desktop and the Codex app read), and Claude Code is still registered.
     $s = New-State 'install-codex-fails'
+    [IO.File]::WriteAllText((Join-Path $s.Codex 'config.toml'), "model = `"gpt-5`"`r`n`r`n[mcp_servers.keep-me]`r`ncommand = `"keep.exe`"`r`n")
     $run = Invoke-Engine -State $s -Arguments @('--action', 'Install', '--repository-path', $root, '--skills', 'Off', '--ai-clients', 'Codex,ClaudeCode') -ExtraEnv @{ FAKE_CODEX_FAIL_ADD = '1' }
-    Assert ($run.Code -eq 1) ('Setup must exit 1 when a registration fails: ' + (Show-Run $run))
-    Assert ((Has-Line $run '^\[RESULT\] codex=failed see the setup log$') -and (Has-Line $run '^\[RESULT\] claude_code=ok$')) ('Claude Code must still be registered: ' + (Show-Run $run))
-    Assert ((Has-Line $run '^WARNING: Codex registration failed; continuing with other clients: ') -and (Has-Line $run 'Codex: ')) ('The Codex failure was not reported: ' + (Show-Run $run))
-    Assert (-not (Test-Path (Join-Path $s.Fake 'codex-smart-connector.txt'))) 'A failed registration left an entry'
-    'PASS: a Codex failure is reported, Claude Code is still registered, and setup exits with an error'
+    Assert ($run.Code -eq 0) ('A failed codex command must fall back to the settings file: ' + (Show-Run $run))
+    Assert ((Has-Line $run "^\[RESULT\] codex=ok written to Codex's settings file; restart Codex$") -and (Has-Line $run '^\[RESULT\] claude_code=ok$')) ('Codex and Claude Code must both be connected: ' + (Show-Run $run))
+    Assert (Has-Line $run '^WARNING: The codex command could not register Smart Connector \(') ('The codex failure was not reported: ' + (Show-Run $run))
+    $toml = [IO.File]::ReadAllText((Join-Path $s.Codex 'config.toml'))
+    Assert ($toml.Contains('[mcp_servers.smart-connector]') -and $toml.Contains('command = "' + $exe.Replace('\', '\\') + '"') -and $toml.Contains('[mcp_servers.keep-me]') -and $toml.Contains('model = "gpt-5"')) "config.toml is wrong:`n$toml"
+    Assert (-not (Test-Path (Join-Path $s.Fake 'codex-smart-connector.txt'))) 'The failed command left an entry'
+    'PASS: when the codex command fails, the entry is written into config.toml (other settings kept) and Claude Code is still registered'
+
+    # Claude Desktop from the Microsoft Store puts a Claude.exe start alias in %LOCALAPPDATA%\Microsoft\WindowsApps, which
+    # is on every user's PATH. It is the desktop app, never Claude Code: setup must not run `mcp add` against it.
+    $s = New-State 'store-alias'
+    $alias = Join-Path $s.Base 'Microsoft\WindowsApps'
+    New-Item -ItemType Directory -Force $alias | Out-Null
+    [IO.File]::WriteAllText((Join-Path $alias 'claude.cmd'), "@echo off`r`necho %* >>`"%FAKE_CLI_DIR%\alias.log`"`r`nexit /b 0`r`n", [Text.Encoding]::ASCII)
+    $run = Invoke-Engine -State $s -Path ($alias + ';' + $fakeBin) -Arguments @('--action', 'Install', '--repository-path', $root, '--skills', 'Off', '--ai-clients', 'ClaudeCode', '--product', 'Revit')
+    Assert ($run.Code -eq 0 -and (Has-Line $run '^\[RESULT\] claude_code=ok$')) ('Claude Code was not registered past the alias: ' + (Show-Run $run))
+    Assert (-not (Test-Path (Join-Path $s.Fake 'alias.log'))) ('The Store alias was run as Claude Code: ' + (Get-Content (Join-Path $s.Fake 'alias.log') -Raw))
+    $s = New-State 'store-alias-only'
+    $alias = Join-Path $s.Base 'Microsoft\WindowsApps'
+    New-Item -ItemType Directory -Force $alias | Out-Null
+    [IO.File]::WriteAllText((Join-Path $alias 'claude.cmd'), "@echo off`r`necho %* >>`"%FAKE_CLI_DIR%\alias.log`"`r`nexit /b 0`r`n", [Text.Encoding]::ASCII)
+    $run = Invoke-Engine -State $s -Path $alias -Arguments @('--action', 'Install', '--repository-path', $root, '--skills', 'Off', '--ai-clients', 'ClaudeCode', '--product', 'Revit')
+    Assert ((Has-Line $run '^\[RESULT\] claude_code=skipped Claude Code is not installed$') -and -not (Test-Path (Join-Path $s.Fake 'alias.log'))) ('With only the Store alias, Claude Code must count as not installed: ' + (Show-Run $run))
+    'PASS: the Store start alias of Claude Desktop is never taken for Claude Code'
+
+    # `claude mcp add` that reports success without writing the entry: setup reads .claude.json back and writes it itself.
+    $s = New-State 'claude-no-config'
+    [IO.File]::WriteAllText((Join-Path $s.Home '.claude.json'), '{"numStartups":5,"mcpServers":{"keep":{"command":"k.exe","args":[]}},"theme":"dark"}')
+    $run = Invoke-Engine -State $s -Arguments @('--action', 'Install', '--repository-path', $root, '--skills', 'Off', '--ai-clients', 'ClaudeCode', '--product', 'Revit') -ExtraEnv @{ FAKE_CLAUDE_NO_CONFIG = '1' }
+    Assert ($run.Code -eq 0 -and (Has-Line $run "^\[RESULT\] claude_code=ok written to Claude Code's settings file; restart Claude Code$")) ('The missing entry was not written: ' + (Show-Run $run))
+    $claudeJson = Get-Content (Join-Path $s.Home '.claude.json') -Raw | ConvertFrom-Json
+    Assert ($claudeJson.mcpServers.'smart-connector'.command -eq $exe -and $claudeJson.mcpServers.'smart-connector'.type -eq 'stdio' -and (@($claudeJson.mcpServers.'smart-connector'.args) -join ',') -eq 'mcp') '.claude.json has no correct smart-connector entry'
+    Assert ($claudeJson.mcpServers.keep.command -eq 'k.exe' -and $claudeJson.numStartups -eq 5 -and $claudeJson.theme -eq 'dark') '.claude.json lost other settings'
+    'PASS: a claude command that reports success without writing the entry is caught by reading .claude.json back, and the entry is written'
+
+    # After an update the previous version's program has connected the AI apps with its own code; this version connects
+    # them again once (engine --action ConnectAiApps), in the background, logging to ai-apps.log.
+    $s = New-State 'reconnect'
+    $run = Invoke-Engine -State $s -Arguments @('--action', 'Install', '--repository-path', $root, '--skills', 'Off', '--ai-clients', 'Codex,ClaudeCode', '--product', 'Revit')
+    Assert ($run.Code -eq 0) ('Install before the reconnect failed: ' + (Show-Run $run))
+    $connected = Get-Content (Join-Path $s.Local 'AutodeskMcpConnector\ai-apps-connected.json') -Raw | ConvertFrom-Json
+    Assert ($connected.version -eq $version -and $connected.state -eq 'ok') 'Install did not record that this version connected the AI apps'
+    Remove-Item (Join-Path $s.Home '.claude.json'), (Join-Path $s.Codex 'config.toml'), (Join-Path $s.Local 'AutodeskMcpConnector\ai-apps-connected.json') -Force
+    $run = Invoke-Engine -State $s -Arguments @('--action', 'ConnectAiApps', '--repository-path', $root)
+    $log = [IO.File]::ReadAllText((Join-Path $s.Local 'AutodeskMcpConnector\ai-apps.log'))
+    Assert ($run.Code -eq 0 -and $log -match 'Reconnecting the AI apps for Smart Connector' -and $log -match 'The AI apps are connected\.') ("ConnectAiApps failed:`n$log`n" + (Show-Run $run))
+    $connected = Get-Content (Join-Path $s.Local 'AutodeskMcpConnector\ai-apps-connected.json') -Raw | ConvertFrom-Json
+    Assert ($connected.version -eq $version -and $connected.state -eq 'ok') 'ConnectAiApps did not record its outcome'
+    Assert ((Test-Path (Join-Path $s.Home '.claude.json')) -and ([IO.File]::ReadAllText((Join-Path $s.Codex 'config.toml'))).Contains('[mcp_servers.smart-connector]')) 'ConnectAiApps did not register Codex and Claude Code again'
+    Assert ($log -notmatch 'Restarting Claude Desktop') 'The background reconnect must never restart Claude Desktop'
+    'PASS: Install records the version that connected the AI apps; ConnectAiApps reconnects them with the saved choices, logs, and records the outcome'
 
     # ---------- 2. Install choices ----------
     $s = New-State 'choices'

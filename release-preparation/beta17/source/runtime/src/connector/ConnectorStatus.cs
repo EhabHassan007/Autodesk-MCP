@@ -68,6 +68,37 @@ namespace SmartConnector
             catch (Exception) { }
         }
 
+        // %LOCALAPPDATA%\Microsoft\WindowsApps (on every Windows user's PATH) holds the start aliases of Microsoft Store
+        // apps. Claude Desktop from the Store puts Claude.exe there, and Windows file names ignore case, so a PATH search
+        // for "claude" found the DESKTOP app and setup ran `Claude.exe mcp add ...` against it: nothing was registered,
+        // or Claude Desktop opened and setup waited for it to close. The command-line tools are never Store aliases
+        // under these names, so the AI commands skip that folder (codex keeps it as the very last resort, see FindCommand).
+        internal static bool IsAiCommand(string name)
+        {
+            return String.Equals(name, "claude", StringComparison.OrdinalIgnoreCase) || String.Equals(name, "codex", StringComparison.OrdinalIgnoreCase);
+        }
+
+        internal static bool IsStoreAliasFolder(string directory)
+        {
+            string trimmed = (directory ?? "").Trim().Trim('"').TrimEnd('\\', '/');
+            return trimmed.EndsWith(@"\WindowsApps", StringComparison.OrdinalIgnoreCase) || trimmed.EndsWith("/WindowsApps", StringComparison.OrdinalIgnoreCase);
+        }
+
+        // Claude Desktop's own program folders: a Claude.exe there is the desktop app, never Claude Code.
+        internal static bool IsClaudeDesktopFolder(string directory)
+        {
+            string trimmed = (directory ?? "").Trim().Trim('"').TrimEnd('\\', '/');
+            return Regex.IsMatch(trimmed, @"[\\/](AnthropicClaude(?:[\\/]app-[^\\/]*)?|Programs[\\/]Claude|Local[\\/]Claude)$", RegexOptions.IgnoreCase);
+        }
+
+        // A folder on PATH that cannot hold the real command-line tool of this AI command.
+        internal static bool SkipFolderFor(string name, string directory)
+        {
+            if (!IsAiCommand(name)) return false;
+            if (IsStoreAliasFolder(directory)) return true;
+            return String.Equals(name, "claude", StringComparison.OrdinalIgnoreCase) && IsClaudeDesktopFolder(directory);
+        }
+
         private static string ReadPath(RegistryKey hive, string subKey)
         {
             try { using (RegistryKey key = hive.OpenSubKey(subKey)) { return key == null ? "" : Convert.ToString(key.GetValue("Path", "")); } }
@@ -245,7 +276,7 @@ namespace SmartConnector
 
         internal static bool ClaudeCodeConnected()
         {
-            object servers = PsJson.Value(PsJson.Read(Path.Combine(Env.Home, ".claude.json")), "mcpServers");
+            object servers = PsJson.Value(PsJson.Read(InstallEngine.ClaudeCodeConfigPath), "mcpServers");
             return servers != null && (PsJson.Has(servers, "smart-connector") || PsJson.Has(servers, "autodesk"));
         }
 
@@ -282,7 +313,7 @@ namespace SmartConnector
                 try
                 {
                     string directory = folder.Trim().Trim('"');
-                    if (directory.Length == 0) continue;
+                    if (directory.Length == 0 || CommandPath.SkipFolderFor(name, directory)) continue;
                     foreach (string extension in extensions) if (File.Exists(Path.Combine(directory, name + extension))) return true;
                 }
                 catch (Exception) { }
