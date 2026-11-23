@@ -65,7 +65,7 @@ try {
     $expected = @(Get-AutodeskMcpTools)
     $allTools = @((Invoke-Mcp 'tools/list').result.tools)
     # Tools that only SmartConnector.exe has; the PowerShell fallback bridge does not. Every other tool must match exactly.
-    $exeOnlyTools = @('apply_plan', 'execute_autocad', 'generate_detail', 'prepare_layout', 'verify_standards', 'get_job', 'revision_cloud_info', 'create_revision_clouds')
+    $exeOnlyTools = @('apply_plan', 'execute_autocad', 'generate_detail', 'prepare_layout', 'verify_standards', 'get_job', 'revision_cloud_info', 'create_revision_clouds', 'dwg_inspect', 'dwg_convert')
     # Tools the exe has improved on purpose (summary and fields for the readers, a product filter for the workflow list); the fallback bridge keeps the old form. Only their names and order must match.
     $exeChangedTools = @('list_entities', 'get_entity', 'list_skill_workflows')
     Assert (@($allTools | Where-Object { $exeOnlyTools -contains $_.name }).Count -eq $exeOnlyTools.Count) ('An exe-only tool is missing from the tool list: ' + (($allTools | ForEach-Object name) -join ','))

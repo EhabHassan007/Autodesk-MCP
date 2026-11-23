@@ -233,6 +233,8 @@ namespace SmartConnector
         private static List<Dictionary<string, object>> _tools;
         private static readonly Dictionary<string, bool> ReadOnly = new Dictionary<string, bool>();
         private static readonly HashSet<string> AutoCadNames = new HashSet<string>();
+        // Offline DWG tools (LibreDWG, DwgOffline.cs): they work on closed .dwg files and need neither AutoCAD nor Revit.
+        private static readonly HashSet<string> DwgNames = new HashSet<string>();
         private static readonly HashSet<string> RevitNames = new HashSet<string>();
 
         // "" = both products; "autocad" or "revit" = only that product's tools (plus connection_status and the skill tools).
@@ -245,6 +247,7 @@ namespace SmartConnector
                 if (_tools != null) return _tools;
                 List<Dictionary<string, object>> tools = new List<Dictionary<string, object>>();
                 if (Product != "revit") foreach (Dictionary<string, object> tool in AutoCadBridge.Tools) { tools.Add(tool); AutoCadNames.Add((string)tool["name"]); }
+                if (Product != "revit") foreach (Dictionary<string, object> tool in DwgOffline.Tools) { tools.Add(tool); DwgNames.Add((string)tool["name"]); }
                 foreach (Dictionary<string, object> source in RevitBridge.Tools)
                 {
                     if (Product == "autocad" && (string)source["name"] != "connection_status") continue;
@@ -349,6 +352,7 @@ namespace SmartConnector
                 else if (name == "read_skill_workflow") data = Workflows.Read(Json.GetString(arguments, "name"), Json.GetString(arguments, "file"));
                 else if (name == "get_revit_rules") { data = RevitRules.Get(); _revitRulesReadAt = DateTime.UtcNow; }
                 else if (name == "connection_status") data = ConnectionStatus(arguments);
+                else if (DwgNames.Contains(name)) data = DwgOffline.Invoke(name, arguments);
                 else if (AutoCadNames.Contains(name)) data = WithWriteLock(name, delegate { return AutoCadBridge.Invoke(name, arguments); });
                 else if (RevitNames.Contains(name))
                 {
