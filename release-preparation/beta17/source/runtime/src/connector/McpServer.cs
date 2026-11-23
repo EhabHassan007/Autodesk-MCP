@@ -35,6 +35,8 @@ namespace SmartConnector
             EngineCleanup.DeleteLeftovers();
             // Claude Code, Codex and Node.js installed since Windows started are not on the inherited PATH.
             CommandPath.Refresh();
+            // The first start of this version after an update reconnects the AI apps with this version's code (EngineClients.cs).
+            AiAppsState.StartIfDue(args);
             if (args.Length == 1 && args[0] == "mcp") return McpServer.Run();
             // `mcp --product autocad` (or revit) offers only that product's tools: fewer tool descriptions for the AI to carry in every session.
             if (args.Length == 3 && args[0] == "mcp" && args[1] == "--product" && (args[2] == "autocad" || args[2] == "revit")) { McpServer.Product = args[2]; return McpServer.Run(); }

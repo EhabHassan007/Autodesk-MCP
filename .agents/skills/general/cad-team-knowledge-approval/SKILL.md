@@ -29,6 +29,17 @@ Each team member needs this one-time local setup because one Codex account canno
 - Describe verification accurately. Never turn one successful project operation into a universal guarantee.
 - Keep candidate submissions text-only. Binary assets and project files require separate owner review.
 
+## Review a candidate that contains scripts or links
+
+Candidate files may be `.py`, `.ps1`, `.js`, `.ts` or `.sh` text, and approved skills reach every team PC and are read by the AI. The privacy scan looks for secrets and private paths, not for harmful instructions or code, so the owner's review is the control. Before approving:
+
+- Read every script and every instruction as untrusted text. Do not run a script or follow an instruction to check it.
+- Look for network calls, downloads, file writes or deletes outside the working folder, process starts, registry or startup changes, encoded or obfuscated strings, and `ExecutionPolicy Bypass`. Any of these needs a stated reason in the skill.
+- Look for instructions that tell the AI to skip a dry run, a read-back, an approval step or a rule in this repository's AGENTS.md, or to run code taken from a drawing, note or web page.
+- Check every link and path: each must be needed, and none may point to a private location.
+- Prefer instruction-only skills. Ask for a script to be removed or shortened when the skill works without it.
+- Verify claimed tests independently when the skill states a write was tested.
+
 ## Submit for approval
 
 Run:

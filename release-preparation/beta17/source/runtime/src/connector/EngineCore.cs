@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
 
 // The install engine: installer\Setup-BimCad.ps1 compiled into SmartConnector.exe, so setup, repair and update run no
 // PowerShell. It prints the same lines the script did, because the windows read them:
@@ -33,7 +34,7 @@ namespace SmartConnector
 
     internal sealed class EngineOptions
     {
-        internal static readonly string[] Actions = { "Status", "Install", "Update", "Test", "Collect", "TeamStatus", "CheckUpdate", "EnableNotifications", "DisableNotifications", "ConnectGitHub", "UninstallAutoCadPanel" };
+        internal static readonly string[] Actions = { "Status", "Install", "Update", "Test", "Collect", "TeamStatus", "CheckUpdate", "EnableNotifications", "DisableNotifications", "ConnectGitHub", "UninstallAutoCadPanel", "ConnectAiApps" };
         internal static readonly string[] Products = { "All", "AutoCAD", "Revit" };
         internal static readonly string[] AllAiClients = { "ClaudeDesktop", "ClaudeCode", "Codex" };
 
@@ -152,6 +153,15 @@ namespace SmartConnector
                 EngineOptions options;
                 try { options = EngineOptions.Parse(args); }
                 catch (EngineException exception) { error.WriteLine(exception.Message); return 1; }
+                if (options.Action == "ConnectAiApps")
+                {
+                    Directory.CreateDirectory(AiAppsState.FolderPath);
+                    using (StreamWriter log = new StreamWriter(AiAppsState.LogPath, false, EngineText.Utf8))
+                    {
+                        log.AutoFlush = true;
+                        return new InstallEngine(options, log, log).Run();
+                    }
+                }
                 return new InstallEngine(options, output, error).Run();
             }
             finally { output.Flush(); error.Flush(); }
@@ -235,6 +245,7 @@ namespace SmartConnector
                         return 0;
                     case "Install": Install(); return 0;
                     case "Update": Update(); return 0;
+                    case "ConnectAiApps": ConnectAiApps(); return 0;
                 }
                 return 0;
             }
@@ -344,6 +355,8 @@ namespace SmartConnector
                 }
             });
             RunInstallStep("codex", delegate { RegisterDetectedAiClients(root, choices.AiClients); });
+            // This version's own code connected the AI apps, so its first start does not reconnect them again.
+            AiAppsState.Save(_failedInstallSteps.Any(step => step == "codex" || step == "claude_code" || step == "claude_desktop") ? "failed" : "ok", "");
             // Setup has run to the end: Smart Connector opens normally from now on (Repair is in Components).
             string pendingMarker = Path.Combine(root, "setup", "setup-pending.txt");
             if (File.Exists(pendingMarker)) File.Delete(pendingMarker);
@@ -387,6 +400,7 @@ namespace SmartConnector
             if (WantsProduct("Revit") && TestRevit2024Installed()) InstallRevitAddin(root);
             else if (WantsProduct("Revit")) Step("Revit 2024 was not detected, so its add-in was skipped.");
             if (WantsProduct("AutoCAD")) InstallAutoCadBundleStep(root);
+            // Not recorded as connected: this is the previous version's code; the new version reconnects once when it first starts.
             RegisterDetectedAiClients(root, choices.AiClients);
             RemoveBackgroundTasks(root, true);
             // Connections now start SmartConnector.exe, so the scripts an older version left behind are not needed.
@@ -595,6 +609,13 @@ namespace SmartConnector
                 candidates.Add(Path.Combine(Paths.LocalAppData, "Programs", "Claude Code", "claude.exe"));
             }
             foreach (string candidate in candidates) if (File.Exists(candidate)) return candidate;
+            // Last resort for codex only: a Store start alias. It may be the Codex app rather than the command-line tool;
+            // calls to it are time-limited and the Codex registration falls back to writing config.toml itself.
+            if (name == "codex")
+            {
+                string alias = Path.Combine(Paths.LocalAppData, "Microsoft", "WindowsApps", "codex.exe");
+                if (File.Exists(alias)) return alias;
+            }
             return null;
         }
 
@@ -609,7 +630,7 @@ namespace SmartConnector
                 try
                 {
                     string directory = folder.Trim().Trim('"');
-                    if (directory.Length == 0) continue;
+                    if (directory.Length == 0 || CommandPath.SkipFolderFor(name, directory)) continue;
                     foreach (string extension in extensions)
                     {
                         string file = Path.Combine(directory, name + extension);
@@ -646,15 +667,42 @@ namespace SmartConnector
             info.WorkingDirectory = Paths.LocalAppData;
             if (environment != null) foreach (KeyValuePair<string, string> pair in environment) info.EnvironmentVariables[pair.Key] = pair.Value;
             External result = new External();
-            object gate = new object();
-            using (Process process = Process.Start(info))
+            // A command that already ran past its time limit in this run is not started again (each retry would wait the
+            // whole limit once more, and setup removes several old entries one call at a time).
+            if (_commandTimeoutMs > 0 && _unresponsive.Contains(file))
             {
-                process.OutputDataReceived += delegate(object sender, DataReceivedEventArgs e) { if (e.Data != null) lock (gate) result.Output.Add(e.Data); };
-                process.ErrorDataReceived += delegate(object sender, DataReceivedEventArgs e) { if (e.Data != null) lock (gate) result.Output.Add(e.Data); };
-                process.BeginOutputReadLine(); process.BeginErrorReadLine();
-                try { process.StandardInput.Close(); } catch (Exception) { }
-                process.WaitForExit();
-                result.ExitCode = process.ExitCode;
+                result.ExitCode = -1;
+                result.Output.Add(file + " did not answer earlier in this run, so it was not started again.");
+            }
+            else
+            {
+                object gate = new object();
+                using (ManualResetEvent outDone = new ManualResetEvent(false), errDone = new ManualResetEvent(false))
+                using (Process process = Process.Start(info))
+                {
+                    process.OutputDataReceived += delegate(object sender, DataReceivedEventArgs e) { if (e.Data != null) { lock (gate) result.Output.Add(e.Data); } else outDone.Set(); };
+                    process.ErrorDataReceived += delegate(object sender, DataReceivedEventArgs e) { if (e.Data != null) { lock (gate) result.Output.Add(e.Data); } else errDone.Set(); };
+                    process.BeginOutputReadLine(); process.BeginErrorReadLine();
+                    try { process.StandardInput.Close(); } catch (Exception) { }
+                    if (_commandTimeoutMs <= 0) { process.WaitForExit(); result.ExitCode = process.ExitCode; }
+                    else if (process.WaitForExit(_commandTimeoutMs))
+                    {
+                        // A timed wait does not wait for the output readers: wait for both pipes to close, but not on a child
+                        // process that kept them open. One handle at a time: WaitAll is not supported on this STA thread.
+                        DateTime until = DateTime.UtcNow.AddSeconds(10);
+                        outDone.WaitOne(TimeSpan.FromTicks(Math.Max(0, (until - DateTime.UtcNow).Ticks)));
+                        errDone.WaitOne(TimeSpan.FromTicks(Math.Max(0, (until - DateTime.UtcNow).Ticks)));
+                        result.ExitCode = process.ExitCode;
+                    }
+                    else
+                    {
+                        // Not a command-line tool answering (for example a desktop app that opened its window): stop it.
+                        _unresponsive.Add(file);
+                        StopProcessTree(process);
+                        result.ExitCode = -1;
+                        lock (gate) result.Output.Add(file + " did not finish within " + (_commandTimeoutMs / 1000) + " seconds and was stopped. It may be a desktop app rather than the command-line tool.");
+                    }
+                }
             }
             if (!quiet) foreach (string line in result.Output) _out.WriteLine(line);
             if (!allowFailure && result.ExitCode != 0)
@@ -665,6 +713,33 @@ namespace SmartConnector
                 throw new EngineException(file + " [" + operation + "] failed with exit code " + result.ExitCode + ".\r\n" + details);
             }
             return result;
+        }
+
+        // The AI apps' command-line tools (codex, claude) answer within seconds; anything that has not finished after this
+        // long is not the tool. 0 = no limit (installers, git sign-in and this program's own steps can take long).
+        private int _commandTimeoutMs;
+        private readonly HashSet<string> _unresponsive = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        internal const int AiCommandTimeoutMs = 90000;
+
+        private void WithCommandTimeout(int milliseconds, Action body)
+        {
+            int previous = _commandTimeoutMs;
+            _commandTimeoutMs = milliseconds;
+            try { body(); }
+            finally { _commandTimeoutMs = previous; }
+        }
+
+        private static void StopProcessTree(Process process)
+        {
+            try
+            {
+                ProcessStartInfo kill = new ProcessStartInfo(Path.Combine(Env.Windows, "System32", "taskkill.exe"), "/PID " + process.Id + " /T /F");
+                kill.UseShellExecute = false; kill.CreateNoWindow = true;
+                using (Process killer = Process.Start(kill)) { killer.WaitForExit(10000); }
+            }
+            catch (Exception) { }
+            try { if (!process.HasExited) process.Kill(); } catch (Exception) { }
+            try { process.WaitForExit(5000); } catch (Exception) { }
         }
 
         private External Invoke(string file, params string[] arguments) { return Invoke(file, arguments, false, false, null); }
