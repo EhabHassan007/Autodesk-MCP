@@ -688,8 +688,10 @@ namespace SmartConnector
                     else if (process.WaitForExit(_commandTimeoutMs))
                     {
                         // A timed wait does not wait for the output readers: wait for both pipes to close, but not on a child
-                        // process that kept them open.
-                        WaitHandle.WaitAll(new WaitHandle[] { outDone, errDone }, 10000);
+                        // process that kept them open. One handle at a time: WaitAll is not supported on this STA thread.
+                        DateTime until = DateTime.UtcNow.AddSeconds(10);
+                        outDone.WaitOne(TimeSpan.FromTicks(Math.Max(0, (until - DateTime.UtcNow).Ticks)));
+                        errDone.WaitOne(TimeSpan.FromTicks(Math.Max(0, (until - DateTime.UtcNow).Ticks)));
                         result.ExitCode = process.ExitCode;
                     }
                     else
