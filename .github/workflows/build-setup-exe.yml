@@ -19,7 +19,49 @@ permissions:
   contents: read
 
 jobs:
+  # The LibreDWG pack (the programs behind dwg_inspect and dwg_convert) is never committed. It is cross-compiled here on
+  # Linux (half the minutes of Windows), only once per pinned version thanks to the cache, and checked file by file
+  # against libredwg-pack.json; build.ps1 checks it again before it goes into the installer.
+  libredwg-pack:
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        id: cache
+        with:
+          path: libredwg-pack
+          key: libredwg-pack-${{ hashFiles('release-preparation/beta17/libredwg-pack.json', 'scripts/build-libredwg-windows.sh') }}
+
+      - name: Build the LibreDWG pack
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          command -v ninja >/dev/null || sudo apt-get install -y ninja-build
+          python3 -m pip install --quiet ziglang==0.17.1
+          bash scripts/build-libredwg-windows.sh libredwg-pack
+
+      - name: Check the pack against libredwg-pack.json
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, pathlib, sys
+          manifest = json.load(open('release-preparation/beta17/libredwg-pack.json'))
+          folder = pathlib.Path('libredwg-pack')
+          bad = [n for n, h in manifest['files'].items()
+                 if not (folder / n).is_file() or hashlib.sha256((folder / n).read_bytes()).hexdigest() != h.lower()]
+          if bad: sys.exit('The LibreDWG pack does not match libredwg-pack.json: ' + ', '.join(bad))
+          print('LibreDWG pack matches libredwg-pack.json:', len(manifest['files']), 'files')
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: libredwg-pack
+          path: libredwg-pack/
+          retention-days: 1
+
   setup-exe:
+    needs: libredwg-pack
     # GitHub's Windows machine for pull requests and pushes. WINDOWS_RUNNER (Settings > Secrets and variables > Actions >
     # Variables), the label of a self-hosted runner, is used only for a run the owner starts by hand (workflow_dispatch),
     # because this repository is public: a pull request from anyone would otherwise run its own code on that PC. Run the
@@ -30,16 +72,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: libredwg-pack
+          path: libredwg-pack
+
       - name: Install Inno Setup if the runner lacks it
         shell: powershell
         run: |
           $iscc = @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe") | Where-Object { Test-Path $_ }
           if (-not $iscc -and -not (Get-Command ISCC.exe -ErrorAction SilentlyContinue)) { choco install innosetup -y --no-progress }
 
-      # Public build only: no -Team, so no join code is involved.
+      # Public build only: no -Team, so no join code is involved. The LibreDWG pack goes into the release ZIP and the setup exe.
       - name: Build installer ZIP and setup exe
         shell: powershell
-        run: powershell -ExecutionPolicy Bypass -File release-preparation\beta17\build.ps1
+        run: powershell -ExecutionPolicy Bypass -File release-preparation\beta17\build.ps1 -LibreDwgPack libredwg-pack
 
       - name: Check the setup exe
         shell: powershell
@@ -63,6 +110,11 @@ jobs:
           if (-not (Test-Path -LiteralPath $program -PathType Leaf)) { throw 'bin\SmartConnector.exe was not installed.' }
           if (-not (Test-Path -LiteralPath (Join-Path $root 'setup\setup-pending.txt'))) { throw 'The first-open marker was not written.' }
           if (-not (Test-Path -LiteralPath (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Smart Connector.lnk'))) { throw 'The Start menu entry was not created.' }
+          # The offline DWG tools: every file of the LibreDWG pack is installed in bin\libredwg.
+          $pack = (Get-Content -LiteralPath release-preparation\beta17\libredwg-pack.json -Raw | ConvertFrom-Json).files.PSObject.Properties.Name
+          $missing = @($pack | Where-Object { -not (Test-Path -LiteralPath (Join-Path $root "bin\libredwg\$_") -PathType Leaf) })
+          if ($missing.Count) { throw ('The LibreDWG pack was not installed: ' + ($missing -join ', ')) }
+          "LibreDWG pack installed: $($pack.Count) files in bin\libredwg."
           $types = '.ps1', '.psm1', '.psd1', '.cmd', '.bat', '.vbs', '.js', '.wsf'
           $library = (Join-Path $root '.agents') + '\'
           function Get-Scripts { @(Get-ChildItem -LiteralPath $root -Recurse -File -Force | Where-Object { $types -contains $_.Extension.ToLowerInvariant() }) }
@@ -113,4 +165,19 @@ jobs:
         with:
           name: smart-autodesk-connector-setup
           path: release-preparation/beta17/Smart-Connector-Setup-*.exe
+          retention-days: 30
+
+      # Every file of a public release, from this one build, so the update files and their SHA-256 values match the
+      # ZIPs: download this artifact and attach its files to the release in Autodesk-MCP-Releases. Nothing is published here.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: smart-connector-release
+          path: |
+            release-preparation/beta17/Autodesk-MCP-Connector-*.zip
+            release-preparation/beta17/Smart-Connector-*.zip
+            release-preparation/beta17/latest.json
+            release-preparation/beta17/smart-connector.json
+            release-preparation/beta17/RELEASE-NOTES.md
+            release-preparation/beta17/Smart-Connector-Setup-*.exe
+          if-no-files-found: error
           retention-days: 30
