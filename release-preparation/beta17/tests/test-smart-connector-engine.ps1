@@ -300,7 +300,9 @@ exit /b 0
     [IO.File]::WriteAllText((Join-Path $alias 'claude.cmd'), "@echo off`r`necho %* >>`"%FAKE_CLI_DIR%\alias.log`"`r`nexit /b 0`r`n", [Text.Encoding]::ASCII)
     $run = Invoke-Engine -State $s -Path ($alias + ';' + $fakeBin) -Arguments @('--action', 'Install', '--repository-path', $root, '--skills', 'Off', '--ai-clients', 'ClaudeCode', '--product', 'Revit')
     Assert ($run.Code -eq 0 -and (Has-Line $run '^\[RESULT\] claude_code=ok$')) ('Claude Code was not registered past the alias: ' + (Show-Run $run))
-    Assert (-not (Test-Path (Join-Path $s.Fake 'alias.log'))) ('The Store alias was run as Claude Code: ' + (Get-Content (Join-Path $s.Fake 'alias.log') -Raw))
+    # The message is built even when the check passes, so it must not read alias.log (which then does not exist).
+    $aliasLog = Join-Path $s.Fake 'alias.log'
+    Assert (-not (Test-Path $aliasLog)) ('The Store alias was run as Claude Code; see ' + $aliasLog)
     $s = New-State 'store-alias-only'
     $alias = Join-Path $s.Base 'Microsoft\WindowsApps'
     New-Item -ItemType Directory -Force $alias | Out-Null
