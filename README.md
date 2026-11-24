@@ -1,6 +1,6 @@
 # Autodesk MCP Connector
 
-Current test package version: **1.0.0-beta.15** (the root `VERSION` file, used by the legacy ZIP build; the compiled Smart Connector 1.2.1 is prepared in `release-preparation/beta17`). See [TESTING.md](TESTING.md) before sharing the package with testers.
+Current test package version: **1.0.0-beta.15** (the root `VERSION` file, used by the legacy ZIP build; the compiled Smart Connector 1.2.2 is prepared in `release-preparation/beta17`). See [TESTING.md](TESTING.md) before sharing the package with testers.
 
 The shareable ZIP is intentionally compact. After extraction its root shows `INSTALL Autodesk MCP Connector.cmd`, `Autodesk MCP Skills for Claude.zip`, `README-FIRST.txt`, and a `Support` folder. Double-click the installer once; it installs the connector, skills, Revit add-in, and user-level Codex, Claude Code, and Claude Desktop registrations automatically, writes `%LOCALAPPDATA%\AutodeskMcpConnector\setup.log`, and displays a restart message when finished. Claude Desktop Free and paid accounts use the local registration; Claude web and mobile use the authenticated remote mode described in [Claude remote setup](REMOTE-CLAUDE.md). Claude Chat users upload the included combined skill once through **Customize > Skills**; Team and Enterprise owners may provision it organization-wide.
 

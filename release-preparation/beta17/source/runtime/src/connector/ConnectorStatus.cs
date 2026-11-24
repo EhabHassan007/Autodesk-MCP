@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.Win32;
 
@@ -256,17 +257,19 @@ namespace SmartConnector
             catch (Exception) { return new string[0]; }
         }
 
-        // True when a Claude Desktop config (roaming or Microsoft Store copy) lists the Smart Connector entry.
+        // True when every Claude Desktop config that exists (the standard ones and those setup found) lists the Smart
+        // Connector entry. One file with it is not enough: Claude reads only one of them, and which one depends on its version.
         internal static bool ClaudeDesktopConnected()
         {
-            List<string> paths = new List<string> { Path.Combine(Env.AppData, "Claude", "claude_desktop_config.json") };
-            foreach (string package in ClaudePackages()) paths.Add(Path.Combine(package, "LocalCache", "Roaming", "Claude", "claude_desktop_config.json"));
-            foreach (string path in paths)
+            bool any = false;
+            foreach (string path in ClaudeConfigFiles.Known())
             {
+                if (!File.Exists(path)) continue;
+                any = true;
                 object servers = PsJson.Value(PsJson.Read(path), "mcpServers");
-                if (servers != null && PsJson.Has(servers, "Smart Connector")) return true;
+                if (servers == null || !PsJson.Has(servers, "Smart Connector")) return false;
             }
-            return false;
+            return any;
         }
 
         internal static bool ClaudeDesktopInstalled()
@@ -472,6 +475,103 @@ namespace SmartConnector
                 Available = PsJson.Text(PsJson.Value(state, "available_version")),
                 LastChecked = PsJson.Truthy(PsJson.Value(state, "last_checked_utc")) ? PsJson.Text(PsJson.Value(state, "last_checked_utc")) : ""
             };
+        }
+    }
+
+    // Where Claude Desktop keeps claude_desktop_config.json. The standard places are %APPDATA%\Claude and, for the
+    // Microsoft Store version, %LOCALAPPDATA%\Packages\<Claude package>\LocalCache\Roaming\Claude. Claude Desktop 6.x from
+    // the Store was found reading a third copy elsewhere, so setup also searches AppData for every file of that name,
+    // registers Smart Connector in each, and remembers what it found for the status checks (which must not search).
+    internal static class ClaudeConfigFiles
+    {
+        internal const string FileName = "claude_desktop_config.json";
+        private const int MaxDepth = 8;
+        private static readonly TimeSpan SearchBudget = TimeSpan.FromSeconds(15);
+        // Folders that never hold Claude's settings but can hold a great many files.
+        private static readonly HashSet<string> SkipNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "Temp", "node_modules", ".git", "Cache", "Code Cache", "GPUCache", "DawnCache", "GrShaderCache", "ShaderCache",
+            "Service Worker", "IndexedDB", "blob_storage", "Crashpad", "CrashDumps", "npm-cache", "pip", "NuGet",
+            "INetCache", "WebCache", "Microsoft", "Google", "Mozilla", "BIM-CAD-MCP", "AutodeskMcpSkillCollection", "Autodesk"
+        };
+
+        internal static string ListPath { get { return Path.Combine(Paths.LocalAppData, "AutodeskMcpConnector", "claude-desktop-configs.txt"); } }
+
+        internal static string[] Standard()
+        {
+            List<string> paths = new List<string> { Path.Combine(Env.AppData, "Claude", FileName) };
+            try
+            {
+                string packages = Path.Combine(Paths.LocalAppData, "Packages");
+                if (Directory.Exists(packages))
+                    foreach (string package in Directory.GetDirectories(packages, "*Claude*")) paths.Add(Path.Combine(package, "LocalCache", "Roaming", "Claude", FileName));
+            }
+            catch (Exception) { }
+            return paths.ToArray();
+        }
+
+        // Every file of that name under %APPDATA% and %LOCALAPPDATA%, breadth first, within the depth and time limits.
+        // Linked folders are not followed. Best effort: a folder that cannot be read is skipped.
+        internal static string[] Search()
+        {
+            List<string> found = new List<string>();
+            string[] roots = new[] { Env.AppData, Paths.LocalAppData }.Where(root => !String.IsNullOrEmpty(root) && Directory.Exists(root)).ToArray();
+            // First, with no time limit, the folders named after Claude or Anthropic (directly under AppData and in
+            // Packages), so a large AppData cannot use up the time before Claude's own folders are reached.
+            List<string> priority = new List<string>();
+            foreach (string root in roots.Concat(new[] { Path.Combine(Paths.LocalAppData, "Packages") }))
+            {
+                try { if (Directory.Exists(root)) priority.AddRange(Directory.GetDirectories(root).Where(d => Regex.IsMatch(Path.GetFileName(d), "Claude|Anthropic", RegexOptions.IgnoreCase))); }
+                catch (Exception) { }
+            }
+            Walk(priority.Select(d => new KeyValuePair<string, int>(d, 1)), DateTime.MaxValue, found);
+            // Then the rest of AppData, within the time limit.
+            Walk(roots.Select(r => new KeyValuePair<string, int>(r, 0)), DateTime.UtcNow + SearchBudget, found);
+            return found.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        }
+
+        private static void Walk(IEnumerable<KeyValuePair<string, int>> starts, DateTime until, List<string> found)
+        {
+            Queue<KeyValuePair<string, int>> queue = new Queue<KeyValuePair<string, int>>(starts);
+            while (queue.Count > 0 && DateTime.UtcNow < until)
+            {
+                KeyValuePair<string, int> item = queue.Dequeue();
+                try
+                {
+                    string file = Path.Combine(item.Key, FileName);
+                    if (File.Exists(file)) found.Add(file);
+                    if (item.Value >= MaxDepth) continue;
+                    foreach (string child in Directory.GetDirectories(item.Key))
+                    {
+                        if (SkipNames.Contains(Path.GetFileName(child))) continue;
+                        try { if ((File.GetAttributes(child) & FileAttributes.ReparsePoint) != 0) continue; } catch (Exception) { continue; }
+                        queue.Enqueue(new KeyValuePair<string, int>(child, item.Value + 1));
+                    }
+                }
+                catch (Exception) { }
+            }
+        }
+
+        internal static string[] Remembered()
+        {
+            try { return File.Exists(ListPath) ? File.ReadAllLines(ListPath).Select(line => line.Trim()).Where(line => line.Length > 0).ToArray() : new string[0]; }
+            catch (Exception) { return new string[0]; }
+        }
+
+        internal static void Remember(IEnumerable<string> paths)
+        {
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(ListPath));
+                File.WriteAllLines(ListPath, paths.Distinct(StringComparer.OrdinalIgnoreCase).ToArray(), new UTF8Encoding(false));
+            }
+            catch (Exception) { }
+        }
+
+        // For the status checks: the standard places and the files setup found last time, without searching.
+        internal static string[] Known()
+        {
+            return Standard().Concat(Remembered()).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         }
     }
 }
