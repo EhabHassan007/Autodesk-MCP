@@ -345,13 +345,11 @@ namespace SmartConnector
             return null;
         }
 
-        private static string ClaudeDesktopConfigPath { get { return Path.Combine(Env.AppData, "Claude", "claude_desktop_config.json"); } }
 
+        // The standard places (created when missing), then every other claude_desktop_config.json found under AppData.
         private static string[] ClaudeDesktopConfigPaths()
         {
-            List<string> paths = new List<string> { ClaudeDesktopConfigPath };
-            foreach (string package in ClaudePackageFolders()) paths.Add(Path.Combine(package, "LocalCache", "Roaming", "Claude", "claude_desktop_config.json"));
-            return paths.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            return ClaudeConfigFiles.Standard().Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         }
 
         private static Process[] GetClaudeDesktopProcesses()
@@ -789,7 +787,8 @@ namespace SmartConnector
                 if (claudeDesktopInstallation != null || _o.InstallClaudeDesktopIfMissing)
                 {
                     bool desktopFailed = false;
-                    foreach (string configPath in ClaudeDesktopConfigPaths())
+                    string[] standard = ClaudeDesktopConfigPaths();
+                    foreach (string configPath in standard)
                     {
                         try
                         {
@@ -803,6 +802,22 @@ namespace SmartConnector
                             Warning("Could not update Claude config at " + configPath + "; continuing with other paths.");
                         }
                     }
+                    // Claude Desktop 6.x from the Microsoft Store was found reading a third copy, so every other
+                    // claude_desktop_config.json under AppData gets the entry too. A found file that cannot be read is
+                    // reported and left as it is; it does not fail the step, because it may not be the one Claude uses.
+                    List<string> registered = new List<string>(standard.Where(File.Exists));
+                    string[] others = ClaudeConfigFiles.Search().Where(found => !standard.Contains(found, StringComparer.OrdinalIgnoreCase)).ToArray();
+                    if (others.Length > 0) Step("Found " + others.Length + " more Claude Desktop config file(s); adding Smart Connector there too.");
+                    foreach (string configPath in others)
+                    {
+                        try
+                        {
+                            RegisterClaudeDesktopMcpServer("Smart Connector", bridge, arguments, claudeDesktopLegacyNames, configPath);
+                            registered.Add(configPath);
+                        }
+                        catch (Exception exception) { Warning("Left the Claude Desktop config at " + configPath + " unchanged: " + exception.Message); }
+                    }
+                    ClaudeConfigFiles.Remember(registered);
                     if (_restartClaudeDesktop)
                     {
                         Result("claude_desktop", desktopFailed ? "failed" : "ok", desktopFailed ? "see the setup log" : "Claude restarts to load it");
@@ -923,16 +938,21 @@ namespace SmartConnector
 
             if (GetClaudeDesktopInstallation() != null)
             {
-                string configPath = ClaudeDesktopConfigPath;
-                try
+                // Every config that exists, not only the first: Claude reads one of them, and which one depends on its version.
+                string[] existing = ClaudeConfigFiles.Known().Where(File.Exists).ToArray();
+                if (existing.Length == 0) Step("Claude Desktop was detected, but its local MCP configuration is missing.");
+                foreach (string configPath in existing)
                 {
-                    OMap config = OJson.ReadFile(configPath) as OMap;
-                    if (config == null) throw new EngineException("not an object");
-                    OMap servers = config.Get("mcpServers") as OMap;
-                    if (servers != null && servers.Has("Smart Connector")) Step("Claude Desktop has the Smart Connector registration at " + configPath + ".");
-                    else Step("Smart Connector is not registered in Claude Desktop yet.");
+                    try
+                    {
+                        OMap config = OJson.ReadFile(configPath) as OMap;
+                        if (config == null) throw new EngineException("not an object");
+                        OMap servers = config.Get("mcpServers") as OMap;
+                        if (servers != null && servers.Has("Smart Connector")) Step("Claude Desktop has the Smart Connector registration at " + configPath + ".");
+                        else Step("Smart Connector is not registered in the Claude Desktop config at " + configPath + " yet.");
+                    }
+                    catch (Exception) { Step("The Claude Desktop config at " + configPath + " is invalid."); }
                 }
-                catch (Exception) { Step("Claude Desktop was detected, but its local MCP configuration is missing or invalid."); }
             }
             else Step("Claude Desktop was not detected. Its local MCP registration is not installed.");
         }

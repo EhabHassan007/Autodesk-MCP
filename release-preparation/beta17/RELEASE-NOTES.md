@@ -1,3 +1,12 @@
+Smart Connector for Autodesk Revit and AutoCAD 1.2.2
+
+New in 1.2.2 (Claude Desktop from the Microsoft Store; everything from 1.2.1 below is included):
+- Fixed: Smart Connector did not appear in Claude Desktop 6.x from the Microsoft Store although setup reported it as connected. That version reads a claude_desktop_config.json in another place than the two setup wrote to (%APPDATA%\Claude and the package's LocalCache\Roaming\Claude). Setup, Repair and the reconnect after an update now also search AppData for every claude_desktop_config.json (up to eight folders deep, at most 15 seconds, cache and browser folders skipped, linked folders not followed) and add the Smart Connector entry to each, keeping every other server and setting. A file found this way that cannot be read is reported in the setup log and left unchanged; it does not fail setup.
+- The files that were updated are remembered in %LOCALAPPDATA%\AutodeskMcpConnector\claude-desktop-configs.txt. The Smart Connector app and the end of setup now report Claude Desktop as connected only when every one of these files has the entry (before, one file was enough, so a PC could show "connected" while Claude read another file), and the setup log lists each file.
+- PCs on 1.2.1: the update is installed by 1.2.1's program, and the first start of 1.2.2 reconnects the AI apps in the background with this code, as in 1.2.1. Quit Claude Desktop from the system tray and reopen it once afterwards.
+
+Not verified on a real PC: the search was tested offline with a config placed outside the standard folders, not yet with Claude Desktop 6.x itself; the manual repair that used the same approach made Smart Connector appear on the PC that reported the problem.
+
 Smart Connector for Autodesk Revit and AutoCAD 1.2.1
 
 New in 1.2.1 (AI apps reliably connected, offline DWG tools and open team joining; everything from 1.2.0 below is included):
@@ -74,4 +83,4 @@ Lean core: Smart Connector now runs nothing in the background. This removes the 
 - `verify_standards`: an `expected_counts` type of `total`, `all` or `any` (or none) counts every object; an unknown type is refused instead of being counted as zero.
 - Detail Generator, found in the first run on the office template: the viewport step is retried when AutoCAD answers "call rejected" (busy), and leader notes are spaced for the office label block's real text size so wrapped notes no longer overprint.
 
-SHA-256: 828E0D726CD4F1FF080589C65825BB1D1FB9C4EDA1AE0883EFFD7590425D10E9
+SHA-256: 21E03B7E9EBC91623094EA05B4DB1239949B11403B3E67F7FC8BE740AE323021

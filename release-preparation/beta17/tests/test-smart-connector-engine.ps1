@@ -292,6 +292,31 @@ exit /b 0
     Assert (-not (Test-Path (Join-Path $s.Fake 'codex-smart-connector.txt'))) 'The failed command left an entry'
     'PASS: when the codex command fails, the entry is written into config.toml (other settings kept) and Claude Code is still registered'
 
+    # Claude Desktop 6.x from the Microsoft Store was found reading a third claude_desktop_config.json, neither the roaming
+    # one nor the package's LocalCache copy. Setup searches AppData for every file of that name and registers in each; a
+    # found file it cannot read is reported and left as it is, without failing the step.
+    $s = New-State 'claude-third-config'
+    New-Item -ItemType Directory -Force (Join-Path $s.Local 'AnthropicClaude') | Out-Null
+    [IO.File]::WriteAllText((Join-Path $s.Local 'AnthropicClaude\Claude.exe'), 'not a program')
+    $third = Join-Path $s.Local 'Packages\Claude_test\LocalCache\Roaming\Claude-6\Profiles\default\claude_desktop_config.json'
+    $decoy = Join-Path $s.Roaming 'SomeOtherApp\claude_desktop_config.json'
+    New-Item -ItemType Directory -Force (Split-Path $third), (Split-Path $decoy) | Out-Null
+    [IO.File]::WriteAllText($third, '{"mcpServers":{"Revit Connector":{"command":"uv","args":["run"]},"bimnexus-revit":{"command":"C:\\x\\BIMNEXUS.Mcp.exe","args":[]}},"coworkUserFilesPath":"C:\\Users\\x\\Claude","preferences":{"sidebarMode":"chat","list":["one"]}}')
+    [IO.File]::WriteAllText($decoy, '{not json')
+    $run = Invoke-Engine -State $s -Arguments @('--action', 'Install', '--repository-path', $root, '--skills', 'Off', '--ai-clients', 'ClaudeDesktop', '--product', 'Revit')
+    Assert ($run.Code -eq 0 -and (Has-Line $run '^\[RESULT\] claude_desktop=ok')) ('A found config that cannot be read must not fail the step: ' + (Show-Run $run))
+    Assert (Has-Line $run 'Found 2 more Claude Desktop config file\(s\)') ('The other configs were not found: ' + (Show-Run $run))
+    $parsed = Get-Content $third -Raw | ConvertFrom-Json
+    Assert ($parsed.mcpServers.'Smart Connector'.command -eq $exe -and (@($parsed.mcpServers.'Smart Connector'.args) -join ',') -eq 'mcp') "The third config has no Smart Connector entry:`n$(Get-Content $third -Raw)"
+    Assert ($parsed.mcpServers.'Revit Connector'.command -eq 'uv' -and $parsed.mcpServers.'bimnexus-revit'.command -eq 'C:\x\BIMNEXUS.Mcp.exe' -and $parsed.coworkUserFilesPath -eq 'C:\Users\x\Claude' -and $parsed.preferences.sidebarMode -eq 'chat' -and (@($parsed.preferences.list) -join ',') -eq 'one') 'Other servers or preferences in the third config were changed'
+    Assert ([IO.File]::ReadAllText($decoy) -eq '{not json') 'A config that cannot be read was changed'
+    Assert (Has-Line $run '^WARNING: Left the Claude Desktop config at .*SomeOtherApp') ('The unreadable config was not reported: ' + (Show-Run $run))
+    $remembered = @(Get-Content (Join-Path $s.Local 'AutodeskMcpConnector\claude-desktop-configs.txt'))
+    Assert ($remembered -contains $third -and $remembered -notcontains $decoy) ('The configs registered were not remembered: ' + ($remembered -join '; '))
+    $escapedThird = [regex]::Escape($third)
+    Assert (Has-Line $run "Claude Desktop has the Smart Connector registration at $escapedThird\.") ('The final check does not report the third config: ' + (Show-Run $run))
+    'PASS: a claude_desktop_config.json outside the standard places gets the entry (other servers and preferences kept), an unreadable one is left as it is, and the list is remembered'
+
     # Claude Desktop from the Microsoft Store puts a Claude.exe start alias in %LOCALAPPDATA%\Microsoft\WindowsApps, which
     # is on every user's PATH. It is the desktop app, never Claude Code: setup must not run `mcp add` against it.
     $s = New-State 'store-alias'
