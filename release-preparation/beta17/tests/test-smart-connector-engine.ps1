@@ -386,7 +386,50 @@ exit /b 0
     Assert ((Get-Content (Join-Path $s.Local 'AutodeskMcpConnector\update-state.json') -Raw | ConvertFrom-Json).notifications_user_disabled -eq $false) 'EnableNotifications did not record the choice'
     $run = Invoke-Engine -State $s -Arguments @('--action', 'DisableNotifications', '--repository-path', $root)
     Assert ($run.Code -eq 0 -and (Has-Line $run 'Update checks are off\.') -and (Get-Content (Join-Path $s.Local 'AutodeskMcpConnector\update-state.json') -Raw | ConvertFrom-Json).notifications_user_disabled -eq $true) (Show-Run $run)
+    # A copy that is not the installed program never writes the PC's real Run key (this test build runs from a temporary folder).
+    Assert (Has-Line $run 'sign-in: left as it is') ('A temporary copy must leave the real sign-in entry alone: ' + (Show-Run $run))
+    $realRun = (Get-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -ErrorAction SilentlyContinue).'Smart Connector update check'
+    Assert (-not $realRun -or $realRun -notlike "*$t*") ('A test build added itself to the real sign-in entries: ' + $realRun)
     'PASS: choices are saved, reused by Repair, replaced only where given, validated; update checks switch on and off'
+
+    # The update reminder at Windows sign-in follows the switch: on adds the Run entry, off removes it (a test key under HKCU).
+    $testKey = 'Software\SmartConnectorTest-' + [guid]::NewGuid().ToString('N') + '\Run'
+    try {
+        $run = Invoke-Engine -State $s -Arguments @('--action', 'EnableNotifications', '--repository-path', $root) -ExtraEnv @{ SMARTCONNECTOR_TEST_RUN_KEY = $testKey }
+        $entry = (Get-ItemProperty -Path ('HKCU:\' + $testKey) -ErrorAction SilentlyContinue).'Smart Connector update check'
+        Assert ($run.Code -eq 0 -and (Has-Line $run 'sign-in: on') -and $entry -eq ('"' + $exe + '" signin-check')) ('EnableNotifications did not add the sign-in entry (' + $entry + '): ' + (Show-Run $run))
+        $run = Invoke-Engine -State $s -Arguments @('--action', 'DisableNotifications', '--repository-path', $root) -ExtraEnv @{ SMARTCONNECTOR_TEST_RUN_KEY = $testKey }
+        $entry = (Get-ItemProperty -Path ('HKCU:\' + $testKey) -ErrorAction SilentlyContinue).'Smart Connector update check'
+        Assert ($run.Code -eq 0 -and (Has-Line $run 'sign-in: off') -and -not $entry) ('DisableNotifications did not remove the sign-in entry: ' + (Show-Run $run))
+
+        # signin-check --report: the decision without waiting or asking. Off while update checks are off; not due when
+        # Revit, AutoCAD or the app checked today (the shared day stamp); it never touches the network in those cases.
+        function Invoke-SignIn {
+            $info = New-Object Diagnostics.ProcessStartInfo($exe, 'signin-check --report')
+            $info.UseShellExecute = $false; $info.CreateNoWindow = $true; $info.RedirectStandardOutput = $true; $info.RedirectStandardError = $true
+            $info.StandardOutputEncoding = [Text.Encoding]::UTF8
+            $info.EnvironmentVariables['LOCALAPPDATA'] = $s.Local; $info.EnvironmentVariables['APPDATA'] = $s.Roaming
+            $info.EnvironmentVariables['USERPROFILE'] = $s.Home; $info.EnvironmentVariables['SMARTCONNECTOR_TEST_RUN_KEY'] = $testKey
+            $process = [Diagnostics.Process]::Start($info)
+            try {
+                $out = $process.StandardOutput.ReadToEndAsync(); $null = $process.StandardError.ReadToEndAsync()
+                if (-not $process.WaitForExit(60000)) { $process.Kill(); throw 'signin-check --report did not finish.' }
+                $process.WaitForExit()
+                [pscustomobject]@{ Code = $process.ExitCode; Text = $out.Result; Lines = @($out.Result -split "`r?`n" | Where-Object { $_ }); Err = '' }
+            }
+            finally { $process.Dispose() }
+        }
+        $sign = Invoke-SignIn
+        Assert ($sign.Code -eq 0 -and (Has-Line $sign '^off: ')) ('signin-check must do nothing while update checks are off: ' + (Show-Run $sign))
+        $null = Invoke-Engine -State $s -Arguments @('--action', 'EnableNotifications', '--repository-path', $root) -ExtraEnv @{ SMARTCONNECTOR_TEST_RUN_KEY = $testKey }
+        $today = ((Get-Date).ToUniversalTime() - [datetime]'1970-01-01').TotalDays
+        New-Item -ItemType Directory -Force (Join-Path $s.Local 'AutodeskMcpConnector') | Out-Null
+        [IO.File]::WriteAllText((Join-Path $s.Local 'AutodeskMcpConnector\open-check.txt'), $today.ToString('0.000', [Globalization.CultureInfo]::InvariantCulture))
+        $sign = Invoke-SignIn
+        Assert ($sign.Code -eq 0 -and (Has-Line $sign '^not due: ')) ('signin-check must not check again on a day Revit or the app already checked: ' + (Show-Run $sign))
+        'PASS: the sign-in update reminder is added with update checks on, removed with them off, does nothing while off and checks at most once a day with Revit, AutoCAD and the app'
+    }
+    finally { Remove-Item -Path ('HKCU:\' + (Split-Path -Parent $testKey)) -Recurse -Force -ErrorAction SilentlyContinue }
 
     # Skills On runs the shipped skill installer for Codex and Claude Code (the skill scripts stay PowerShell).
     $s = New-State 'skills'

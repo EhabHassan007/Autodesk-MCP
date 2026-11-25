@@ -534,8 +534,8 @@ namespace SmartConnector
 
         private void SetInstalledRelease(string version) { SetInstalledRelease(version, ""); }
 
-        // Update checks run when Revit, AutoCAD or the Smart Connector app opens (at most once a day); they read this
-        // switch. Nothing here goes online.
+        // Update checks run at Windows sign-in and when Revit, AutoCAD or the Smart Connector app opens (at most once a
+        // day between them); they read this switch. The sign-in entry follows it (SignInCheck.cs). Nothing here goes online.
         private void EnableUpdateNotifications()
         {
             OMap state = ReadUpdateState();
@@ -547,6 +547,7 @@ namespace SmartConnector
             WriteUpdateState(state);
             RemoveLegacyUpdateTask();
             Step("Update checks are on: Revit, AutoCAD and Smart Connector look for a new version once a day when they open, and ask before installing.");
+            Step(SignInCheck.Register());
         }
 
         private void DisableUpdateNotifications()
@@ -556,6 +557,7 @@ namespace SmartConnector
             state.Set("notifications_enabled", false);
             state.Set("notifications_user_disabled", true);
             WriteUpdateState(state);
+            Step(SignInCheck.Unregister());
             Step("Update checks are off. Use Check Updates to look for a new version.");
         }
 

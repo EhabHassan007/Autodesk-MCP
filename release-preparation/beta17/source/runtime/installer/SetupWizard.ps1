@@ -158,7 +158,7 @@ function Show-SetupWizard {
         @('revit', 'Revit and AutoCAD', 'Claude and Codex work with your open model or drawing.'),
         @('assistant', 'Claude and Codex', 'Connected for you. No settings files to edit.'),
         @('skills', 'Team workflow skills', 'Approved skills installed and kept in sync.'),
-        @('updates', 'Update checks', 'Once a day, when Revit, AutoCAD or Smart Connector opens. You are asked before anything installs.')
+        @('updates', 'Update checks', 'Once a day, at sign-in or when Revit, AutoCAD or Smart Connector opens. You are asked before anything installs.')
     )
     for ($i = 0; $i -lt 4; $i++) {
         $card = New-BrandCard (28 + ($i % 2) * 254) (112 + [Math]::Floor($i / 2) * 80) 242 70; $welcome.Controls.Add($card)

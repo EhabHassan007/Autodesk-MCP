@@ -311,7 +311,7 @@ function Show-Overview {
         @('Workflow skills', 'skills', @("$(@(Get-InstalledWorkflowSkills).Count) installed", 'Good'),
             $(if ($s.LastSync) { 'Last sync ' + (Format-When $s.LastSync) } else { 'Not synced yet.' }) + "`n" + $(if ($s.TeamJoined) { 'Joined to the team skill service.' } else { 'Not joined to the team.' }), 'Skills'),
         @('Updates', 'updates', $(if ($s.AvailableVersion -and $s.AvailableVersion -ne $s.Version) { @("$($s.AvailableVersion) ready", 'Info') } else { @('Up to date', 'Good') }),
-            "Version $($s.Version)`n" + $(if ($s.AutoUpdates) { 'Checked when Revit, AutoCAD or this app opens.' } else { 'Update checks are off.' }), 'Updates')
+            "Version $($s.Version)`n" + $(if ($s.AutoUpdates) { 'Checked at sign-in and when Revit, AutoCAD or this app opens.' } else { 'Update checks are off.' }), 'Updates')
     )
     for ($i = 0; $i -lt $cards.Count; $i++) {
         $spec = $cards[$i]
@@ -387,7 +387,7 @@ function Show-Components {
         @('revit', 'Revit 2024 add-in', 'Smart Connector tab in Revit', $(if ($s.RevitAddin) { @('Installed', 'Good') } elseif ($s.RevitInstalled) { @('Missing', 'Warn') } else { @('Not needed', 'Off') })),
         @('autocad', 'AutoCAD panel', 'Add-ins tab buttons and AI Markup', $(if ($s.AutoCadPanel) { @('Installed', 'Good') } elseif ($s.AutoCadInstalled) { @('Missing', 'Warn') } else { @('Not needed', 'Off') })),
         @('team', 'Team skill service', 'Shares your saved skills for review', $(if ($s.TeamJoined) { @('Joined', 'Good') } else { @('Not joined', 'Off') })),
-        @('updates', 'Update checks', 'When Revit, AutoCAD or this app opens. Nothing runs in the background.', $(if ($s.AutoUpdates) { @('On', 'Good') } else { @('Off', 'Off') }))
+        @('updates', 'Update checks', 'At sign-in and when Revit, AutoCAD or this app opens, once a day.', $(if ($s.AutoUpdates) { @('On', 'Good') } else { @('Off', 'Off') }))
     )
     for ($i = 0; $i -lt $rows.Count; $i++) { Add-StatusRow $card ($i * 76) $rows[$i][0] $rows[$i][1] $rows[$i][2] $rows[$i][3][0] $rows[$i][3][1] }
     $null = Add-ActionButton $script:Content $(if ($script:App.Repair) { 'Repairing...' } else { 'Repair' }) 'Repair' 32 492 -Primary -Width 116

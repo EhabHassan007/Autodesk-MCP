@@ -361,7 +361,7 @@ namespace SmartConnector
                 new object[] { "Codex", "codex", ClientStatus(s.Codex), (s.Codex.Installed ? "Codex uses the connector tools." : "Install Codex, then choose Repair.") + "\n ", "AI" },
                 new object[] { "Workflow skills", "skills", new[] { ConnectorStatus.InstalledWorkflowSkills().Count + " installed", "Good" },
                     (s.LastSync.Length > 0 ? "Last sync " + FormatWhen(s.LastSync) : "Not synced yet.") + "\n" + (s.TeamJoined ? "Joined to the team skill service." : "Not joined to the team."), "Skills" },
-                new object[] { "Updates", "updates", updates, "Version " + s.Version + "\n" + (s.AutoUpdates ? "Checked when Revit, AutoCAD or this app opens." : "Update checks are off."), "Updates" }
+                new object[] { "Updates", "updates", updates, "Version " + s.Version + "\n" + (s.AutoUpdates ? "Checked at sign-in and when Revit, AutoCAD or this app opens." : "Update checks are off."), "Updates" }
             };
             for (int i = 0; i < cards.Length; i++)
             {
@@ -448,7 +448,7 @@ namespace SmartConnector
                 new[] { "revit", "Revit 2024 add-in", "Smart Connector tab in Revit", s.RevitAddin ? "Installed" : s.RevitInstalled ? "Missing" : "Not needed", s.RevitAddin ? "Good" : s.RevitInstalled ? "Warn" : "Off" },
                 new[] { "autocad", "AutoCAD panel", "Add-ins tab buttons and AI Markup", s.AutoCadPanel ? "Installed" : s.AutoCadInstalled ? "Missing" : "Not needed", s.AutoCadPanel ? "Good" : s.AutoCadInstalled ? "Warn" : "Off" },
                 new[] { "team", "Team skill service", "Shares your saved skills for review", s.TeamJoined ? "Joined" : "Not joined", s.TeamJoined ? "Good" : "Off" },
-                new[] { "updates", "Update checks", "When Revit, AutoCAD or this app opens. Nothing runs in the background.", s.AutoUpdates ? "On" : "Off", s.AutoUpdates ? "Good" : "Off" }
+                new[] { "updates", "Update checks", "At sign-in and when Revit, AutoCAD or this app opens, once a day.", s.AutoUpdates ? "On" : "Off", s.AutoUpdates ? "Good" : "Off" }
             };
             for (int i = 0; i < rows.Length; i++) AddStatusRow(card, i * 76, rows[i][0], rows[i][1], rows[i][2], rows[i][3], rows[i][4]);
             AddActionButton(_content, _repair != null ? "Repairing..." : "Repair", "Repair", 32, 492, true, 116);
