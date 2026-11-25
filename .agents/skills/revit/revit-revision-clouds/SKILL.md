@@ -10,7 +10,7 @@ Follow the Revit rules first (`get_revit_rules`), then `revit-csharp-runner` for
 
 ## Before anything is created
 
-1. `list_sessions`, `document_info`, `connection_status` (Revit must report idle). If every call is refused with "More than one Revit session is running", follow `revit-model-operations-recovery`.
+1. `list_sessions`, `document_info`, `connection_status` (Revit must report idle). With two Revit windows open, confirm from `list_sessions` which model you are on, pass its `session_id`, and follow `revit-model-operations-recovery` if a call is refused.
 2. Agree the scope with the user: which categories (columns by default; shafts only when asked), which linked model, which view template, which revision. Nothing is written before this.
 3. Resolve every object by a stable key at the start of each session and again after any restart or synchronisation, never from an id remembered from earlier (a restart changed a revision's id, and a count by the old id reported zero clouds):
    - the revision by sequence number and description;

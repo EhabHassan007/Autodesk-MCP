@@ -69,6 +69,7 @@ _No approved skills yet._
 
 ### Not yet categorised
 
+- [hatch-pet](uncategorized/hatch-pet/SKILL.md): Create, repair, validate, visually QA, and package Codex-compatible v2 animated pets from character art, generated images, company or prospect brand cues, or visual references. Use for any new Codex pet, custom mascot, non-pixel pet style, brand-inspired pet, existing-pet repair, or 8x11 spritesheet workflow requiring all 9 standard animation rows, 16 look directions, deterministic assembly, QA artifacts, and spriteVersionNumber 2 packaging.
 - [indesign-desktop-portfolio](uncategorized/indesign-desktop-portfolio/SKILL.md): Style or refine an architecture portfolio directly in desktop Adobe InDesign, including editable CV-based cover and introduction pages. Use for native INDD portfolio work and learned InDesign scripting techniques, not Adobe Express designs.
 - [indesign-portfolio-presentation](uncategorized/indesign-portfolio-presentation/SKILL.md): Style an architecture or landscape architecture portfolio directly in desktop Adobe InDesign, including a CV-based cover and introduction pages. Use when the user supplies a CV for styled introductory pages, asks for a saved portfolio treatment, or provides an updated portfolio for restyling.
 - [mem-search](uncategorized/mem-search/SKILL.md): Search what earlier Claude Code sessions did (prompts, files changed, commands run), as recorded locally by mem-lite. Use when the user asks what was done before, "last time", "yesterday", or which session touched a file.

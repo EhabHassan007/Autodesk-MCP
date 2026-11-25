@@ -6,6 +6,7 @@ using System.Globalization;
 using System.IO;
 using System.IO.Pipes;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -32,7 +33,7 @@ namespace SmartConnector
             {
                 if (_tools != null) return _tools;
                 Func<Dictionary<string, object>> str = () => Json.Object("type", "string", "minLength", 1);
-                Func<Dictionary<string, object>> session = () => Json.Object("type", "string", "minLength", 1, "description", "Revit session ID returned by list_sessions. Optional only when one Revit session is running.");
+                Func<Dictionary<string, object>> session = () => Json.Object("type", "string", "minLength", 1, "description", "Revit session ID returned by list_sessions. Optional: with several Revit windows open, a call without it goes to the session whose active document is expected_document, otherwise to the Revit window used last.");
                 _tools = new List<Dictionary<string, object>>
                 {
                     Schema.Tool("list_sessions", "List running Revit sessions, their unique session IDs, active documents, and connection state. Call this first when more than one Revit window is open.", Json.Object(), new string[0], true),
@@ -134,9 +135,9 @@ namespace SmartConnector
             return sessions.OrderBy(s => s.ProcessId).ToList();
         }
 
-        private static Dictionary<string, object> SessionEntry(string id, object processId, object status, string error)
+        private static Dictionary<string, object> SessionEntry(string id, object processId, object status, string error, bool front)
         {
-            return Json.Object("session_id", id, "process_id", processId, "revit_version", Version,
+            return Json.Object("session_id", id, "process_id", processId, "revit_version", Version, "front", front,
                 "document_id", Json.GetString(status, "document_id"), "online", status != null,
                 "recent_client", true.Equals(Json.Get(status, "recent_client")),
                 "busy", true.Equals(Json.Get(status, "busy")), "busy_state", Json.GetString(status, "busy_state"),
@@ -148,15 +149,19 @@ namespace SmartConnector
         private static List<Dictionary<string, object>> Sessions(Dictionary<string, object> statuses)
         {
             List<Dictionary<string, object>> results = new List<Dictionary<string, object>>();
-            foreach (Session session in RegisteredSessions())
+            List<Session> registered = RegisteredSessions();
+            // front: the Revit window used last, which answers calls that name no session_id and no expected_document.
+            Session front = registered.Count > 1 ? FrontSession(registered) : null;
+            foreach (Session session in registered)
             {
+                bool isFront = registered.Count == 1 || session == front;
                 try
                 {
                     object status = Pipe(session.PipeName, "connection_status", new string[0], 500);
                     statuses[session.Id] = status;
-                    results.Add(SessionEntry(session.Id, session.ProcessId, status, ""));
+                    results.Add(SessionEntry(session.Id, session.ProcessId, status, "", isFront));
                 }
-                catch (Exception exception) { results.Add(SessionEntry(session.Id, session.ProcessId, null, exception.Message)); }
+                catch (Exception exception) { results.Add(SessionEntry(session.Id, session.ProcessId, null, exception.Message, isFront)); }
             }
             if (results.Count == 0)
             {
@@ -164,7 +169,7 @@ namespace SmartConnector
                 {
                     object status = Pipe(LegacyPipe, "connection_status", new string[0], 250);
                     statuses["legacy-" + Version] = status;
-                    results.Add(SessionEntry("legacy-" + Version, "", status, ""));
+                    results.Add(SessionEntry("legacy-" + Version, "", status, "", true));
                 }
                 catch (Exception) { }
             }
@@ -173,26 +178,146 @@ namespace SmartConnector
 
         private static string ResolvePipe(string sessionId)
         {
+            return Resolve(sessionId, "").PipeName;
+        }
+
+        // The session a call goes to. With session_id: that session. With one Revit window: that one. With several and no
+        // session_id: the session whose active document is expected_document (a write, or a read that names its model),
+        // otherwise the Revit window the user used last. A write is safe either way: the add-in refuses one whose
+        // expected_document is not its active document. Session is null for the legacy pipe of an add-in older than sessions.
+        private static Route Resolve(string sessionId, string expectedDocument)
+        {
             List<Session> sessions = RegisteredSessions();
             if (!String.IsNullOrWhiteSpace(sessionId))
             {
-                if (sessionId == "legacy-" + Version) return LegacyPipe;
+                if (sessionId == "legacy-" + Version) return new Route { PipeName = LegacyPipe };
                 List<Session> match = sessions.Where(s => s.Id == sessionId).ToList();
                 if (match.Count != 1) throw new ToolException("Revit session was not found: " + sessionId + ". Call list_sessions again.");
-                return match[0].PipeName;
+                return new Route { PipeName = match[0].PipeName, Session = match[0] };
             }
-            if (sessions.Count == 1) return sessions[0].PipeName;
-            if (sessions.Count > 1)
-                throw new ToolException("More than one Revit session is running (" + String.Join(", ", sessions.Select(s => s.Id)) + "). Call list_sessions and pass session_id.");
-            return LegacyPipe;
+            if (sessions.Count == 1) return new Route { PipeName = sessions[0].PipeName, Session = sessions[0] };
+            if (sessions.Count == 0) return new Route { PipeName = LegacyPipe };
+            if (!String.IsNullOrWhiteSpace(expectedDocument))
+            {
+                List<Session> matches = new List<Session>();
+                List<string> seen = new List<string>();
+                foreach (Session session in sessions)
+                {
+                    string document = "";
+                    try { document = Json.GetString(Pipe(session.PipeName, "connection_status", new string[0], 500), "document_id"); }
+                    catch (Exception) { }
+                    seen.Add(session.Id + " (" + (document.Length > 0 ? document : "no active document or no answer") + ")");
+                    if (String.Equals(document, expectedDocument, StringComparison.OrdinalIgnoreCase)) matches.Add(session);
+                }
+                if (matches.Count == 1) return new Route { PipeName = matches[0].PipeName, Session = matches[0], Chosen = true };
+                if (matches.Count == 0)
+                    throw new ToolException("[document_changed] No open Revit window has " + expectedDocument + " as its active document. Revit sessions: " + String.Join(", ", seen) +
+                        ". Ask the user to bring that model to the front in its Revit window, then read document_info again; or pass session_id.");
+                throw new ToolException("More than one Revit window has " + expectedDocument + " active: " + String.Join(", ", seen) + ". Call list_sessions and pass session_id.");
+            }
+            Session front = FrontSession(sessions);
+            if (front != null) return new Route { PipeName = front.PipeName, Session = front, Chosen = true };
+            throw new ToolException("More than one Revit session is running (" + String.Join(", ", sessions.Select(s => s.Id)) + ") and none of their windows could be found. Call list_sessions and pass session_id.");
+        }
+
+        private sealed class Route
+        {
+            internal string PipeName;
+            internal Session Session;
+            // True when the connector picked one of several sessions; the answer then names it (routed_session_id).
+            internal bool Chosen;
         }
 
         private static object Call(string operation, string[] fields, string sessionId)
         {
-            string pipe = ResolvePipe(sessionId);
-            try { return Pipe(pipe, operation, fields, 1500); }
+            return Call(operation, fields, sessionId, "");
+        }
+
+        private static object Call(string operation, string[] fields, string sessionId, string expectedDocument)
+        {
+            Route route = Resolve(sessionId, expectedDocument);
+            object answer;
+            try { answer = Pipe(route.PipeName, operation, fields, 1500); }
             catch (RevitAddInException) { throw; }
             catch (Exception exception) { throw new ToolException("Revit " + Version + " MCP session is not available. Start Revit or call list_sessions. " + exception.Message); }
+            Routed(answer, route);
+            return answer;
+        }
+
+        // Tells the client which of several Revit windows answered, so it can name the model to the user or pin the session.
+        private static void Routed(object answer, Route route)
+        {
+            IDictionary<string, object> values = answer as IDictionary<string, object>;
+            if (route.Chosen && values != null && !values.ContainsKey("routed_session_id")) values["routed_session_id"] = route.Session.Id;
+        }
+
+        // get_job without session_id while several Revit windows are open: a job id belongs to one session, so ask each.
+        private static object FindJob(string[] fields, string sessionId)
+        {
+            List<Session> sessions = RegisteredSessions();
+            if (!String.IsNullOrWhiteSpace(sessionId) || sessions.Count < 2) return Call("get_job", fields, sessionId);
+            RevitAddInException notFound = null;
+            foreach (Session session in sessions)
+            {
+                try
+                {
+                    object answer = Pipe(session.PipeName, "get_job", fields, 1500);
+                    Routed(answer, new Route { PipeName = session.PipeName, Session = session, Chosen = true });
+                    return answer;
+                }
+                catch (RevitAddInException exception)
+                {
+                    if (!exception.Message.StartsWith("[job_not_found] ", StringComparison.Ordinal)) throw;
+                    notFound = exception;
+                }
+                catch (Exception) { }
+            }
+            if (notFound != null) throw notFound;
+            throw new ToolException("Revit " + Version + " MCP session is not available. Start Revit or call list_sessions.");
+        }
+
+        // The registered session whose Revit window is highest in the window Z-order: the one the user used last, even
+        // while the AI app is in front of both. Null when no window of theirs is found.
+        private static Session FrontSession(List<Session> sessions)
+        {
+            try
+            {
+                Dictionary<uint, Session> byProcess = new Dictionary<uint, Session>();
+                foreach (Session session in sessions) byProcess[(uint)session.ProcessId] = session;
+                IntPtr window = NativeWindows.GetTopWindow(IntPtr.Zero);
+                // The Z-order can change while it is walked; the bound keeps the walk finite.
+                for (int step = 0; window != IntPtr.Zero && step < 20000; step++)
+                {
+                    if (NativeWindows.IsWindowVisible(window))
+                    {
+                        uint processId;
+                        NativeWindows.GetWindowThreadProcessId(window, out processId);
+                        Session session;
+                        if (byProcess.TryGetValue(processId, out session)) return session;
+                    }
+                    window = NativeWindows.GetWindow(window, NativeWindows.NextWindow);
+                }
+            }
+            catch (Exception) { }
+            return null;
+        }
+
+        private static class NativeWindows
+        {
+            internal const uint NextWindow = 2; // GW_HWNDNEXT
+
+            [DllImport("user32.dll")]
+            internal static extern IntPtr GetTopWindow(IntPtr parent);
+
+            [DllImport("user32.dll")]
+            internal static extern IntPtr GetWindow(IntPtr window, uint command);
+
+            [DllImport("user32.dll")]
+            [return: MarshalAs(UnmanagedType.Bool)]
+            internal static extern bool IsWindowVisible(IntPtr window);
+
+            [DllImport("user32.dll")]
+            internal static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
         }
 
         private static bool RevitRunning()
@@ -240,7 +365,7 @@ namespace SmartConnector
             bool onlyBusy = only != null && true.Equals(Json.Get(only, "busy"));
             if (online.Count > 0) { result["busy"] = online.Any(s => true.Equals(s["busy"])); if (onlyBusy) result["busy_state"] = Json.GetString(only, "busy_state"); }
             result["summary"] = online.Count == 1 ? "Revit " + Version + " is connected (session " + online[0]["session_id"] + ")" + (onlyBusy ? " but busy: " + BusyText(only) : ".")
-                : online.Count > 1 ? "Revit " + Version + " is connected with " + online.Count + " sessions; pass session_id to choose one." + (online.Any(s => true.Equals(s["busy"])) ? " At least one is busy." : "")
+                : online.Count > 1 ? "Revit " + Version + " is connected with " + online.Count + " sessions. A call without session_id goes to the session whose active document is expected_document, otherwise to the Revit window used last (front: true in sessions); pass session_id to choose one." + (online.Any(s => true.Equals(s["busy"])) ? " At least one is busy." : "")
                 : sessions.Count > 0 || running ? "Revit is running, but the Revit " + Version + " add-in is not answering; it may still be loading, or it is an older add-in that cannot report a busy state. Wait and ask again."
                 : "Revit is not running.";
             return result;
@@ -309,7 +434,7 @@ namespace SmartConnector
                 case "list_sessions": return Json.Object("sessions", Sessions(new Dictionary<string, object>()));
                 case "get_element": return Call("get_element", new[] { Json.GetString(a, "element_id") }, sessionId);
                 case "set_parameter":
-                    return Call("set_parameter", new[] { Json.GetString(a, "expected_document"), Json.GetString(a, "element_id"), Json.GetString(a, "parameter"), Json.GetString(a, "value") }, sessionId);
+                    return Call("set_parameter", new[] { Json.GetString(a, "expected_document"), Json.GetString(a, "element_id"), Json.GetString(a, "parameter"), Json.GetString(a, "value") }, sessionId, Json.GetString(a, "expected_document"));
                 case "execute_csharp":
                 {
                     if (a.ContainsKey("dry_run") && (bool)a["dry_run"] && !String.Equals(Json.GetString(a, "execution_mode"), "transaction", StringComparison.OrdinalIgnoreCase))
@@ -319,14 +444,14 @@ namespace SmartConnector
                         ((bool)a["allow_model_changes"]) ? "True" : "False", Json.GetString(a, "code"), Json.GetString(a, "parameters_json"), Json.GetString(a, "transaction_name") };
                     string options = RunOptionsText(a);
                     if (options.Length > 0) fields.Add(options);
-                    return Call("execute_csharp", fields.ToArray(), sessionId);
+                    return Call("execute_csharp", fields.ToArray(), sessionId, Json.GetString(a, "expected_document"));
                 }
                 case "get_job":
                     {
                         List<string> jobFields = new List<string> { Json.GetString(a, "job_id"), a.ContainsKey("cancel") && (bool)a["cancel"] ? "True" : "False" };
                         // Sent only when asked for, so an add-in from before wait_seconds still answers (it reads two fields).
                         if (a.ContainsKey("wait_seconds")) jobFields.Add(Convert.ToInt32(a["wait_seconds"], CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture));
-                        return Call("get_job", jobFields.ToArray(), sessionId);
+                        return FindJob(jobFields.ToArray(), sessionId);
                     }
                 case "revision_cloud_info":
                     return Call("revision_cloud_info", Strings(a.ContainsKey("view_ids") ? a["view_ids"] : null).Select(id => ElementIdText(id, "view_ids")).ToArray(), sessionId);
@@ -346,7 +471,7 @@ namespace SmartConnector
                         if (!(entries[i] is IDictionary<string, object>)) throw new ToolException("items[" + i + "] must be an object.");
                         fields.Add(CloudField(entries[i], i));
                     }
-                    return Call("create_revision_clouds", fields.ToArray(), sessionId);
+                    return Call("create_revision_clouds", fields.ToArray(), sessionId, Json.GetString(a, "expected_document"));
                 }
                 default: return Call(name, new string[0], sessionId);
             }
