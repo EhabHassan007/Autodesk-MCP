@@ -214,7 +214,7 @@ try {
     # 6. Revit add-in pipe: a stand-in add-in answers on the pipe name a single Revit 2024 session uses.
     $job = Start-Job -ScriptBlock {
         $server = New-Object IO.Pipes.NamedPipeServerStream('BimCadMcp.Revit.2024', [IO.Pipes.PipeDirection]::InOut, 1)
-        for ($n = 0; $n -lt 8; $n++) {
+        for ($n = 0; $n -lt 9; $n++) {  # one per pipe call below; count them when adding one
             $server.WaitForConnection()
             $reader = New-Object IO.StreamReader($server, [Text.Encoding]::UTF8, $false, 4096, $true)
             $writer = New-Object IO.StreamWriter($server, (New-Object Text.UTF8Encoding($false)), 4096, $true); $writer.AutoFlush = $true
