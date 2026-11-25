@@ -37,3 +37,7 @@ For a custom-shaped structural column built from a plan polygon, follow [referen
 Use a small test instance before repeating the workflow. Never ungroup, overwrite source families, or alter unrelated types. Verify every model write separately and remind the user to save or synchronize at a suitable milestone.
 
 Verification status: guide-derived methods; family reload and unusual geometry require live test-model and visual verification.
+
+## Detailed method (load only when needed)
+
+Read `references/apg-families-and-modelling.md` when the task needs the worked method: safe family edit and reload, true curved and sloped upstand walls via mass + Wall by Face, sloped floors and railings by API. It comes from the team's earlier Revit plugin and is adapted to this connector; revit-rules takes precedence where they differ.

@@ -35,3 +35,7 @@ Deletion, parameter removal, and purge require explicit approval of the exact de
 Report checkpoints, committed batches, unresolved ownership, remaining work, and recovery steps. Saving, detaching, synchronization, purge, and deletion remain explicit user actions or approvals.
 
 Verification status: operational failure and recovery guidance captured; no destructive action was executed during skill creation.
+
+## Detailed method (load only when needed)
+
+Read `references/apg-model-operations.md` when the task needs the worked method: curating view libraries, bulk deletes and purge, crashes and unsynced work, heavy sheets, several Revit sessions. It comes from the team's earlier Revit plugin and is adapted to this connector; revit-rules takes precedence where they differ.

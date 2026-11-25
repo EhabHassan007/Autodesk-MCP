@@ -31,3 +31,7 @@ Cloud-hosted links may use external-resource references instead of ordinary file
 Coordinate changes can affect all disciplines and exports. Require explicit approval of the coordinate basis, models, sites, and target values. Test one model first, verify against a control point, and have the user synchronize before proceeding to the next batch.
 
 Verification status: live-guide knowledge captured; coordinate updates themselves were not performed during skill creation.
+
+## Detailed method (load only when needed)
+
+Read `references/apg-linked-models-and-coordinates.md` when the task needs the worked method: transforms and tags across links, nested link bounding boxes, cloud (ACC) link GUIDs, survey point and shared-coordinate batch work. It comes from the team's earlier Revit plugin and is adapted to this connector; revit-rules takes precedence where they differ.

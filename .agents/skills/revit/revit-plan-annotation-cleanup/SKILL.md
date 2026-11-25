@@ -30,3 +30,7 @@ Use paper-space offsets multiplied by view scale. Prefer spatial indexing over c
 After writes, separately recount tag types, positions, missing tags, and clashes. Report moved, unchanged, added, skipped, and unresolved counts per view. A successful transaction is not verification.
 
 Verification status: this workflow was captured from an operational MCP guide; apply it first to a test view and obtain visual approval before broad rollout.
+
+## Detailed method (load only when needed)
+
+Read `references/apg-annotation-cleanup.md` when the task needs the worked method: scoring weights, candidate search and C# for the room-tag resolver, lift tags and door-tag centring. It comes from the team's earlier Revit plugin and is adapted to this connector; revit-rules takes precedence where they differ.

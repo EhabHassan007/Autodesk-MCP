@@ -64,3 +64,7 @@ Keep batches proportional to model complexity and use remaining-count loops. Ask
 Never report a count or a loss from a single check. Confirm it with a second method before telling the user.
 
 Verification status: safety rules captured from repeated operational use; each new script still requires task-specific review and live read-back. The typed errors, jobs, busy state and dry run were added on 2026-11-12 after a failed session; they compile against the Revit 2024 API and pass simulated tests, and have not yet been run in a live Revit session.
+
+## Detailed method (load only when needed)
+
+Read `references/apg-revit-csharp-runner.md` when the task needs the worked method: runner template rules, the one-shot failure logger, timeouts and batching, family reload through the UI. It comes from the team's earlier Revit plugin and is adapted to this connector; revit-rules takes precedence where they differ.

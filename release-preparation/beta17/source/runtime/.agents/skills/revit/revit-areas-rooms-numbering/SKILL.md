@@ -31,3 +31,7 @@ For nested or repeated unit links, calculate a local bounding region from link-d
 Never invent missing room, unit, or department data. Verify changes with a separate read-back and report unplaced, unenclosed, unmatched, grouped, duplicate, and ambiguous items.
 
 Verification status: guide-derived workflow; project naming patterns and thresholds require confirmation before live use.
+
+## Detailed method (load only when needed)
+
+Read `references/apg-areas-and-rooms.md` when the task needs the worked method: boundaries from linked wall centrelines, area naming from link rooms, terrace assignment, room naming from nested links, room and door numbering algorithms. It comes from the team's earlier Revit plugin and is adapted to this connector; revit-rules takes precedence where they differ.
