@@ -59,7 +59,7 @@ Hide the previous revision's clouds in each target view by hiding the cloud elem
 
 ## Recovery
 
-- `completed=false` with a `job_id`: wait and call `get_job`; never run the batch again.
+- `completed=false` with a `job_id`: call `get_job` with `wait_seconds` (up to 110) until it completes, with no sleep between calls; never run the batch again.
 - `[busy]`, or `connection_status` reporting `revit_busy` (for example Generating graphics): nothing new ran. Wait until it reports idle, read the model state, then continue with the remaining items only, using the duplicate guard.
 - Never delete and recreate every cloud and note in one transaction. One transaction of 173 clouds and 173 notes in a 236-link model timed out at 120 s and left Revit unresponsive for about 15 minutes. If a batch has to be redone, delete only that revision's clouds in that view, with the user's approval, then create them again in batches of 40.
 - Nothing is saved or synchronised unless the user asks.

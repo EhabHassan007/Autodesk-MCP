@@ -43,7 +43,7 @@ Errors come back typed. `[compile_error]` (with the line numbers of your own cod
 
 - It finished: the normal result.
 - `[busy]`: Revit never started the request (it is busy with its own work), so nothing ran and nothing changed. Check `connection_status`, wait until it reports idle, then send it again.
-- `completed=false` with a `job_id`: Revit is still working. Do not run it again. Call `get_job` until `completed` is true; the result or error is kept for 60 minutes. `background=true` returns the `job_id` at once for work you expect to be long; a background request that Revit has not started within 5 minutes is cancelled and never runs, so check `get_job` and send it again when Revit is idle. `get_job` with `cancel=true` drops a job Revit has not started; a running one cannot be stopped.
+- `completed=false` with a `job_id`: Revit is still working. Do not run it again. Call `get_job` with the `job_id` and `wait_seconds` (up to 110): it waits on the connector and answers the moment the job finishes, or with the current state and progress when the time is up, so repeat it until `completed` is true. Never sleep or pause in a shell between `get_job` calls; that only adds dead time after the job has finished. The result or error is kept for 60 minutes. `background=true` returns the `job_id` at once for work you expect to be long; a background request that Revit has not started within 5 minutes is cancelled and never runs, so check `get_job` and send it again when Revit is idle. `get_job` with `cancel=true` drops a job Revit has not started; a running one cannot be stopped.
 
 `connection_status` and `get_job` answer even while Revit is busy. `connection_status` reports `busy_state`: `idle`, `executing` (with the job and its progress), `queued`, or `revit_busy` (Revit's own work: regenerating graphics, another command, a dialog).
 
@@ -55,7 +55,7 @@ Errors come back typed. `[compile_error]` (with the line numbers of your own cod
 
 A success response does not prove Revit committed the changes. Perform a separate read-back after every write batch. If values did not persist, capture Revit failure messages for the affected document and retry only after understanding the reason.
 
-After a timeout, stop issuing writes. Never re-run the request: call `get_job` if there is a job id, otherwise `connection_status`, then inspect the model before deciding what is missing. If Revit remains blocked, ask the user to check for an open dialog. Never use blind retries or Ctrl+Z during an uncertain call.
+After a timeout, stop issuing writes. Never re-run the request: call `get_job` with `wait_seconds` if there is a job id, otherwise `connection_status`, then inspect the model before deciding what is missing. If Revit remains blocked, ask the user to check for an open dialog. Never use blind retries or Ctrl+Z during an uncertain call.
 
 Keep each write call to about 40 creations, one or two views at a time, regenerating once per batch. Never delete and recreate everything in one transaction: in a heavily linked model that blocks Revit for minutes. Before a heavy write confirm `connection_status` reports idle and ask the user to close views they do not need.
 

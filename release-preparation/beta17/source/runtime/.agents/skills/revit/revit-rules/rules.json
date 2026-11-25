@@ -49,7 +49,7 @@
       "title": "After a timeout never re-run the request",
       "category": "recovery",
       "decided_on": "2026-11-12",
-      "instruction": "A timeout does not mean the work failed: Revit often finishes it. Do not send the same request again and do not press Ctrl+Z. If the answer says completed=false or gives a job_id, call get_job until it completes and read its result. If the answer is [busy], Revit never started the request and nothing changed. Otherwise wait for the status bar to clear (no Generating graphics), call connection_status (it reports whether Revit is busy), read the model to see what actually changed, and only then continue with what is missing."
+      "instruction": "A timeout does not mean the work failed: Revit often finishes it. Do not send the same request again and do not press Ctrl+Z. If the answer says completed=false or gives a job_id, call get_job with wait_seconds (up to 110) until it completes and read its result; do not sleep or pause between get_job calls. If the answer is [busy], Revit never started the request and nothing changed. Otherwise wait for the status bar to clear (no Generating graphics), call connection_status (it reports whether Revit is busy), read the model to see what actually changed, and only then continue with what is missing."
     },
     {
       "id": "RVT-008",

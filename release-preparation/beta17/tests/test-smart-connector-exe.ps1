@@ -261,6 +261,12 @@ try {
     $jobAnswer = Invoke-Tool 'get_job' @{ job_id = 'abc123' }
     $jobFields = @(($jobAnswer.content[0].text | ConvertFrom-Json).fields)
     Assert (-not $jobAnswer.isError -and ($jobFields -join '|') -eq 'abc123|False') ("get_job sent the wrong fields: " + ($jobFields -join '|'))
+    # wait_seconds travels as a third field, only when given, so an older add-in that reads two fields still answers.
+    $jobWait = Invoke-Tool 'get_job' @{ job_id = 'abc123'; wait_seconds = 90 }
+    $jobWaitFields = @(($jobWait.content[0].text | ConvertFrom-Json).fields)
+    Assert (-not $jobWait.isError -and ($jobWaitFields -join '|') -eq 'abc123|False|90') ("get_job did not send wait_seconds as the third field: " + ($jobWaitFields -join '|'))
+    $jobTooLong = Invoke-Tool 'get_job' @{ job_id = 'abc123'; wait_seconds = 500 }
+    Assert ($jobTooLong.isError -and $jobTooLong.content[0].text -like 'Number out of range: wait_seconds') 'get_job wait_seconds above 110 must be refused'
     # Revision cloud tools: the boxes travel as "xmin;ymin;xmax;ymax;base64(comment);base64(note)".
     $clouds = Invoke-Tool 'create_revision_clouds' @{ expected_document = 'doc-1'; revision_id = '7'; view_id = '9'; note_side = 'left'; dry_run = $true; items = @(@{ x_min_mm = 0; y_min_mm = 0; x_max_mm = 400; y_max_mm = 300; note = 'REV' }) }
     $cloudFields = @(($clouds.content[0].text | ConvertFrom-Json).fields)
