@@ -19,6 +19,7 @@ using System.Web.Script.Serialization;
 //   SmartConnector.exe setup                     the setup window
 //   SmartConnector.exe action --action <name>    SkillsSync, CheckUpdates or Status, with its progress window
 //   SmartConnector.exe settings                  the update-check setting
+//   SmartConnector.exe signin-check              the once-a-day update reminder Windows starts at sign-in (SignInCheck.cs)
 //   SmartConnector.exe engine --action <name>    the install engine (setup, repair, update, checks), see EngineCore.cs
 // --smoke-test builds the windows without showing them or running anything, and exits 0.
 // Built as a Windows (GUI) program so no console window flashes; Claude and Codex still talk to `mcp` over the
@@ -37,6 +38,8 @@ namespace SmartConnector
             CommandPath.Refresh();
             // The first start of this version after an update reconnects the AI apps with this version's code (EngineClients.cs).
             AiAppsState.StartIfDue(args);
+            // The update reminder at Windows sign-in, when update checks are on and an update from 1.2.3 did not add it.
+            SignInCheck.EnsureRegistered(args);
             if (args.Length == 1 && args[0] == "mcp") return McpServer.Run();
             // `mcp --product autocad` (or revit) offers only that product's tools: fewer tool descriptions for the AI to carry in every session.
             if (args.Length == 3 && args[0] == "mcp" && args[1] == "--product" && (args[2] == "autocad" || args[2] == "revit")) { McpServer.Product = args[2]; return McpServer.Run(); }
@@ -44,6 +47,7 @@ namespace SmartConnector
             { int skillsCode; if (SkillsCommands.TryRun(args, out skillsCode)) return skillsCode; }
             string command = args.Length > 0 ? args[0] : "";
             if (command == "engine") return InstallEngine.RunCommand(args.Skip(1).ToArray());
+            if (command == "signin-check") return SignInCheck.Run(args.Skip(1).ToArray());
             if (command == "app" || command == "setup" || command == "action" || command == "settings") return WindowCommands.Run(command, args.Skip(1).ToArray());
             AttachConsole();
             Console.Error.WriteLine("Smart Connector " + Paths.Version + ". Claude and Codex start it as: SmartConnector.exe mcp. The app opens with: SmartConnector.exe app");

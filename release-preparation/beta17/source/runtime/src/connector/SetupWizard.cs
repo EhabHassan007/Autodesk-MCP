@@ -343,7 +343,7 @@ namespace SmartConnector
                 new[] { "revit", "Revit and AutoCAD", "Claude and Codex work with your open model or drawing." },
                 new[] { "assistant", "Claude and Codex", "Connected for you. No settings files to edit." },
                 new[] { "skills", "Team workflow skills", "Approved skills installed and kept in sync." },
-                new[] { "updates", "Update checks", "Once a day, when Revit, AutoCAD or Smart Connector opens. You are asked before anything installs." }
+                new[] { "updates", "Update checks", "Once a day, at sign-in or when Revit, AutoCAD or Smart Connector opens. You are asked before anything installs." }
             };
             for (int i = 0; i < 4; i++)
             {

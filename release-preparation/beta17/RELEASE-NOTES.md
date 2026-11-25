@@ -1,3 +1,14 @@
+Smart Connector for Autodesk Revit and AutoCAD 1.2.4
+
+New in 1.2.4 (update reminder at Windows sign-in; everything from 1.2.3 below is included):
+- Smart Connector now also looks for a new version when you sign in to Windows, so you hear about an update before you open Revit or AutoCAD. About 45 seconds after sign-in (so the network is up) it makes one quick check and, only when a newer version is ready, asks "Update now?". Yes opens the update window, which installs once Revit and AutoCAD are closed; No asks again the next day. It then exits: nothing stays running and no scheduled task is created. Without a network it tries three times over about three minutes and then leaves the day's check to Revit, AutoCAD or the app.
+- One reminder a day in all: the sign-in check, Revit, AutoCAD and the Smart Connector app share the same daily check, so whichever comes first asks and the others stay quiet that day.
+- It follows the Update checks switch. Turning update checks off in Settings removes the sign-in entry (it is the "Smart Connector update check" entry under Startup apps in Windows Settings); turning them on adds it back. Setup, Repair and updates add it on PCs where update checks are on.
+- PCs on 1.2.3: an update is installed by 1.2.3's program, which does not know the sign-in entry, so 1.2.4 adds it the first time it starts (opening Smart Connector, a Revit or AutoCAD button, or Claude or Codex starting the connector), when update checks are on. The reminder then starts at the next Windows sign-in.
+- Also in 1.2.3, not listed in its notes: the Revit rules gained the APG general rules (RVT-012 to RVT-060), nine APG method guides and a new revit-facade-modelling skill. In 1.2.4 the APG C# runner guide also points to `get_job` with `wait_seconds`.
+
+Not verified on a real PC: the sign-in entry, the --report decisions (switched off, already checked today) and the switch are covered by the offline engine tests; the reminder window at a real Windows sign-in is not yet seen.
+
 Smart Connector for Autodesk Revit and AutoCAD 1.2.3
 
 New in 1.2.3 (following long Revit requests without waiting blind; everything from 1.2.2 below is included):

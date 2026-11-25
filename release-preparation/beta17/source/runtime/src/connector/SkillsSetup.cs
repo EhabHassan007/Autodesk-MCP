@@ -126,8 +126,9 @@ namespace SmartConnector
         }
     }
 
-    // Runs at Install / Repair and when an earlier version installs this one as an update. Smart Connector registers nothing in
-    // the background: update checks and the weekly Skills Sync reminder happen when Revit, AutoCAD or Smart Connector opens.
+    // Runs at Install / Repair and when an earlier version installs this one as an update. Smart Connector keeps nothing running
+    // in the background: update checks happen at Windows sign-in (one short run, SignInCheck.cs) and when Revit, AutoCAD or
+    // Smart Connector opens; the weekly Skills Sync reminder when they open.
     // This removes what earlier versions set up, refreshes the Skills Sync helper scripts and keeps the person's choices.
     internal static class ConnectorTasks
     {

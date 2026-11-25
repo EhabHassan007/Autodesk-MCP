@@ -44,7 +44,7 @@ Then read the log through the device shell or file tools.
 
 ## Timeouts and batching
 
-- A timeout does not mean the work failed. Follow RVT-007: do not re-send the request; use `get_job` when a job id is returned, otherwise wait for Revit to go idle, check `connection_status`, then do a fresh read-back before anything else.
+- A timeout does not mean the work failed. Follow RVT-007: do not re-send the request; use `get_job` with `wait_seconds` (up to 110, no sleeping between calls) when a job id is returned, otherwise wait for Revit to go idle, check `connection_status`, then do a fresh read-back before anything else.
 - Keep batches small: 1–3 views per call and about 300–400 element changes. Return `remain=N` and loop.
 - Collect with `ElementMulticategoryFilter` or `OfCategory`. A bare `FilteredElementCollector(doc, viewId)` over everything is very slow with many links.
 - **Read first, write after.** Calling `get_BoundingBox(view)` or reading geometry after a move forces a regeneration on each iteration.

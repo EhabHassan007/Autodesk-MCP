@@ -26,9 +26,17 @@ try {
     $retireEngine = Join-Path $runtime 'src/connector/EngineBackground.cs'
     $code = Get-ChildItem -LiteralPath $runtime -Recurse -File -Include *.ps1, *.cs, *.lsp, *.cmd | Where-Object { $_.FullName -ne (Resolve-Path $retire).Path -and $_.FullName -ne (Resolve-Path $retireEngine).Path -and $_.Name -ne 'SkillsRetire.cs' }
     foreach ($pattern in '(?<!Un)Register-ScheduledTask', 'New-ScheduledTaskTrigger', 'schtasks', 'HttpListener', 'TcpListener', 'cloudflared', 'connector-agent\.ps1', 'Start-ScheduledTask', 'CurrentVersion\\Run') {
-        $hits = @($code | Select-String -Pattern $pattern | ForEach-Object { '{0}:{1}' -f $_.Path.Substring($runtime.Length), $_.LineNumber })
+        # The one start-up entry the owner chose (1.2.4): the update reminder at Windows sign-in, in SignInCheck.cs only.
+        $files = if ($pattern -eq 'CurrentVersion\\Run') { @($code | Where-Object { $_.Name -ne 'SignInCheck.cs' }) } else { $code }
+        $hits = @($files | Select-String -Pattern $pattern | ForEach-Object { '{0}:{1}' -f $_.Path.Substring($runtime.Length), $_.LineNumber })
         Assert ($hits.Count -eq 0) ("Found '$pattern' in: " + ($hits -join ', '))
     }
+    # That entry starts one short check and nothing else: the program with 'signin-check', which exits after one look (no
+    # loop that keeps it running, no timer, no listener), and it is written only through Register/Unregister.
+    $signIn = Get-Content -LiteralPath (Join-Path $runtime 'src/connector/SignInCheck.cs') -Raw
+    Assert ($signIn -match '"\\"" \+ Launch\.InstalledProgram \+ "\\" signin-check"') 'The sign-in entry must start only bin\SmartConnector.exe signin-check'
+    Assert ($signIn -notmatch 'while\s*\(\s*true|System\.Threading\.Timer|Forms\.Timer|Application\.Run\(|HttpListener|TcpListener|ScheduledTask') 'The sign-in check must not keep running in the background'
+    Assert ((@([regex]::Matches($signIn, 'SetValue\(')).Count) -eq 1) 'The sign-in check writes exactly one registry value'
     foreach ($gone in 'scripts/connector-agent.ps1', 'scripts/autodesk-mcp-update-notifier.ps1', 'src/autodesk/autodesk-http-gateway.ps1', 'src/autodesk/Start-AutodeskMcpRemote.ps1', 'REMOTE-CLAUDE.md') {
         Assert (-not (Test-Path -LiteralPath (Join-Path $runtime $gone))) "$gone is still shipped"
     }
@@ -37,7 +45,7 @@ try {
     # The compiled cleanup may delete tasks and processes of earlier versions; it never creates a task or a start-up entry.
     $cleanup = Get-Content -LiteralPath $retireEngine -Raw
     Assert ($cleanup.Contains('DeleteTask') -and $cleanup -notmatch 'RegisterTask|NewTask\b|schtasks|/Create|CurrentVersion\\Run|HttpListener|TcpListener') 'The compiled cleanup of earlier tasks creates something'
-    'PASS: no scheduled tasks, no agent, no web gateway or tunnel, no hidden work after setup'
+    'PASS: no scheduled tasks, no agent, no web gateway or tunnel, no hidden work after setup; the only start-up entry is the one-shot sign-in update check'
 
     # 1b. The setup .exe only installs files and a Start menu entry: it runs no program or script. The first open of
     #     Smart Connector shows the setup window; the Start menu entry opens the installed program (bin\SmartConnector.exe),
