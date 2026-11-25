@@ -263,9 +263,9 @@ namespace BimCadMcp.Revit
                         .Append(Json.Property("note", job.Note)).Append('}');
                 }
                 if (job.State == "queued")
-                    text.Append(',').Append(Json.Property("message", "Revit has not started this request: it is busy with its own work (regenerating graphics, another command or a dialog). It will run when Revit is idle. Do not send it again. Call get_job to follow it, or get_job with cancel=true to drop it."));
+                    text.Append(',').Append(Json.Property("message", "Revit has not started this request: it is busy with its own work (regenerating graphics, another command or a dialog). It will run when Revit is idle. Do not send it again. Call get_job with wait_seconds to follow it, or get_job with cancel=true to drop it."));
                 else if (job.State == "running")
-                    text.Append(',').Append(Json.Property("message", "Revit is still working on this request. Do not run it again. Call get_job with this job_id until completed is true."));
+                    text.Append(',').Append(Json.Property("message", "Revit is still working on this request. Do not run it again. Call get_job with this job_id and wait_seconds (up to 110) until completed is true; do not sleep or pause between calls."));
                 if (includeResult && job.State == "completed") text.Append(",\"result\":").Append(String.IsNullOrEmpty(job.ResultJson) ? "null" : job.ResultJson);
                 if (job.State == "failed") text.Append(',').Append(Json.Property("error", job.Error));
                 if (job.State == "cancelled") text.Append(',').Append(Json.Property("message", job.CancelReason.Length > 0 ? job.CancelReason : "The request was cancelled before Revit started it. Nothing was changed."));

@@ -384,7 +384,29 @@ namespace BimCadMcp.Revit
                     }
                 }
             }
+            if (!cancel) WaitForJob(job, arguments.Length > 2 ? arguments[2] : "");
             return Jobs.ToJson(job, true);
+        }
+
+        // get_job with wait_seconds: hold the answer until the job finishes or the time is up, so the client follows a long
+        // request with a few calls instead of sleeping between them. Runs on the pipe thread, so Revit's thread is not held,
+        // and connection_status and other get_job calls still answer meanwhile.
+        private static void WaitForJob(Job job, string waitText)
+        {
+            int seconds;
+            if (!Int32.TryParse((waitText ?? "").Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out seconds) || seconds <= 0) return;
+            DateTime until = DateTime.UtcNow.AddSeconds(Math.Min(110, seconds));
+            while (DateTime.UtcNow < until)
+            {
+                // Find also cancels a queued job that has passed its start deadline, so the wait ends then too.
+                Job current = Jobs.Find(job.Id);
+                if (current == null) return;
+                lock (current)
+                {
+                    if (current.Finished) return;
+                }
+                Thread.Sleep(250);
+            }
         }
 
         public void Dispose()
