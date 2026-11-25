@@ -32,3 +32,7 @@ Reconstructing drafting details from PDF requires extracting vectors, fills, tex
 Never ungroup, overwrite unrelated templates or types, or treat a timed-out write as failed without read-back. Report created, renamed, skipped, unresolved, and manually verified items. Ask the user to synchronize after major batches.
 
 Verification status: operational guide captured; each mode needs test-view or test-sheet validation before project-wide rollout.
+
+## Detailed method (load only when needed)
+
+Read `references/apg-views-and-sheets.md` when the task needs the worked method: bulk view and sheet renaming, dependent partial plans, STD templates, sheet duplication, fixed-row schedules, per-scale legends, image export, drafting views from PDF. It comes from the team's earlier Revit plugin and is adapted to this connector; revit-rules takes precedence where they differ.

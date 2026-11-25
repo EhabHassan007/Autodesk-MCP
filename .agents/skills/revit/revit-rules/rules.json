@@ -1,20 +1,20 @@
 {
   "schema": 1,
-  "updated": "2026-11-12",
+  "updated": "2026-11-25",
   "rules": [
     {
       "id": "RVT-001",
       "title": "Revision cloud tags sit beside their cloud, no leader",
       "category": "annotation",
       "decided_on": "",
-      "instruction": "(Partial: transcribed from a screenshot of the Notion 'Revit MCP Rules' database; the full text is in Notion.) Place every revision cloud tag directly beside its own cloud, 200 mm clear of the cloud edge, with the leader turned off. Try the side positions in this order: right (vertically centred), left, top, bottom, then the four corner-aligned side positions. Take the first position that does not overlap another tag or another cloud in the view. Set tag sizes first and regenerate once; do not regenerate inside the loop (PERF-003). Report any tag that cannot be placed clear."
+      "instruction": "Place every revision cloud tag directly beside its own cloud, about 200 mm clear of the cloud edge, with the leader turned off. Try the sides in this order: right (vertically centred), left, top, bottom, then the four corner-aligned side positions. Take the first position that does not overlap another tag or another cloud in the view. Read all tag sizes first and regenerate once, then set the head positions; do not regenerate inside the loop. Report any tag that could not be placed clear. Tags floating diagonally with leaders are hard to read in dense coordination plans."
     },
     {
       "id": "RVT-002",
       "title": "Never simulate dimensions with lines and text",
       "category": "annotation",
       "decided_on": "2026-10-25",
-      "instruction": "(Partial: transcribed from a screenshot of the Notion 'Revit MCP Rules' database; the full text is in Notion.) Do not create lines, curves, ticks, witness graphics, or text to imitate dimensions in Revit. Use native Revit Dimension elements only."
+      "instruction": "Do not create lines, curves, ticks, witness graphics, or text notes to imitate dimensions in Revit. Use native Revit Dimension elements only: graphic substitutes are not associative and break the documentation standard. If the connector or the API cannot create the required dimension type, report the limitation and create no substitute graphics."
     },
     {
       "id": "RVT-003",
@@ -28,7 +28,7 @@
       "title": "Overlapping area sets (canopy, shading, plot coverage) in their own scheme",
       "category": "areas",
       "decided_on": "",
-      "instruction": "(Partial: transcribed from a screenshot of the Notion 'Revit MCP Rules' database; the full text is in Notion.) Areas cannot overlap inside one area scheme. For overlay areas (gym, canopy, shading, plot coverage), use another existing area scheme, or ask the user to create one in the UI. The rest of the method (levels and templates, boundaries from elements, the schedule with footer totals and no grand total) was cut off in the screenshot and is not recorded here."
+      "instruction": "(Partial: transcribed from a screenshot of the Notion 'Revit MCP Rules' database; the full text is in Notion.) Areas cannot overlap inside one area scheme. For overlay areas (gym, canopy, shading, plot coverage), use another existing area scheme, or ask the user to create one in the UI. The rest of the method (levels and templates, boundaries from elements, the schedule with footer totals and no grand total) was cut off in the screenshot and is not recorded here. Areas for things that are not rooms (canopies, shading sails, plot coverage) follow the element's plan outline or the property line, not wall centrelines; merge touching outlines of one category into one area."
     },
     {
       "id": "RVT-005",
@@ -78,6 +78,349 @@
       "category": "session",
       "decided_on": "2026-11-12",
       "instruction": "If the connector's tools disappear or reappear under a different prefix in the middle of a session (for example after the device link is re-established), reload the tool list and call get_revit_rules again before any write: the connector may have restarted and the rules gate is per session. Then call connection_status and document_info before continuing, and never assume a pending request was lost or completed; check with get_job or by reading the model."
+    },
+    {
+      "id": "RVT-012",
+      "title": "Survey the model before changing it",
+      "category": "workflow",
+      "decided_on": "2026-06-12",
+      "instruction": "Before any write, read the model's own conventions: links and their names, naming patterns, parameter bindings, existing types, templates and filters, and grouped elements. Survey every building or model separately and never assume one matches another; runs built on assumptions failed or had to be redone."
+    },
+    {
+      "id": "RVT-013",
+      "title": "Test on one floor or view first",
+      "category": "workflow",
+      "decided_on": "2026-10-02",
+      "instruction": "Apply any rollout to a single test scope first (for example one floor's overall and partial plan views), show the result, and wait for the user's OK before pushing it to all views or buildings. The user reviews visually before scale-out, so mistakes stay small."
+    },
+    {
+      "id": "RVT-014",
+      "title": "Dry-run, review, then apply by ElementId",
+      "category": "workflow",
+      "decided_on": "2026-10-08",
+      "instruction": "For bulk edits: (1) a dry-run pass computes the changes and writes a CSV/TSV to the working folder the user named, (2) the user reviews it, (3) an apply pass is driven by an explicit ElementId -> value map, (4) a separate read-back verifies the result. This lets the user check the mapping before the model changes and makes the apply pass fast and repeatable."
+    },
+    {
+      "id": "RVT-015",
+      "title": "Duplicate, never overwrite",
+      "category": "workflow",
+      "decided_on": "2026-10-02",
+      "instruction": "Templates, filters, line and fill patterns, dimension types and families are duplicated, modified and then applied. New names get the suffix ' - STD' (or a new family name). The original stays untouched so the change can be rolled back. Rejected approach: modifying the model's existing templates, filters, types or families directly."
+    },
+    {
+      "id": "RVT-016",
+      "title": "Approval gates on multi-phase tasks",
+      "category": "workflow",
+      "decided_on": "2026-09-24",
+      "instruction": "Run heavy tasks in phases (audit -> setup -> as-is check -> changes per element type -> verification). Report at the end of each phase and wait for explicit approval. Approval of one phase never implies the next. A crash then costs at most one phase."
+    },
+    {
+      "id": "RVT-017",
+      "title": "Never ungroup or edit inside groups",
+      "category": "workflow",
+      "decided_on": "2026-06-12",
+      "instruction": "Skip elements with GroupId > 0 (areas, dimensions, tags, model elements) and report them. Never ungroup to make a change. Editing group members makes Revit roll back the whole transaction silently ('Changes to groups are allowed only in group edit mode'); twelve floors of edits were lost this way once. Rejected approach: ungrouping areas or details, or editing elements inside groups, to apply a change."
+    },
+    {
+      "id": "RVT-018",
+      "title": "Grouped annotation types: edit in place and rename _GRP",
+      "category": "workflow",
+      "decided_on": "2026-10-02",
+      "instruction": "When a dimension or annotation type is used inside groups, modify that type in place to the standard values and rename it with the suffix '_GRP' instead of swapping elements inside the groups. This changes the look without touching group definitions."
+    },
+    {
+      "id": "RVT-019",
+      "title": "Keep view scale and link display settings",
+      "category": "views",
+      "decided_on": "2026-10-02",
+      "instruction": "When replacing or duplicating view templates, keep each view's scale (_100 -> _100 - STD, _200 -> _200 - STD) and keep the template's Custom RVT-link display settings. Losing link settings is a failure even if everything else is right: sheets break when scales change, and linked models are the content of the plans."
+    },
+    {
+      "id": "RVT-020",
+      "title": "Fix families in the family, not in the project",
+      "category": "families",
+      "decided_on": "2026-10-02",
+      "instruction": "Layout problems that come from a family (label positions, text types, shown fields) are fixed by editing the family, not worked around in the project."
+    },
+    {
+      "id": "RVT-021",
+      "title": "Saving and Sync with Central are the user's actions",
+      "category": "workflow",
+      "decided_on": "2026-09-24",
+      "instruction": "At every approval gate and after every large batch, ask the user to Sync with Central (or save) before continuing. Revit crashed twice before a sync and all work was lost."
+    },
+    {
+      "id": "RVT-022",
+      "title": "Plan script-based reverts; never rely on Ctrl+Z",
+      "category": "recovery",
+      "decided_on": "2026-10-02",
+      "instruction": "Before bulk moves or type swaps, store the original values (positions, types, parameter values) in a backup file so they can be restored by script. After a sync the Undo stack is gone, and one Ctrl+Z reverts a whole script run."
+    },
+    {
+      "id": "RVT-023",
+      "title": "Resolve elements by name across sessions",
+      "category": "workflow",
+      "decided_on": "2026-10-02",
+      "instruction": "Look up templates, types, views and sheets by name at the start of each run. Treat stored ElementIds as hints only; ids of new elements can change after a sync."
+    },
+    {
+      "id": "RVT-024",
+      "title": "State assumptions on design elements before building",
+      "category": "workflow",
+      "decided_on": "2026-10-08",
+      "instruction": "When asked to model a design element (ramp, stair, railing, wall system) with missing parameters, list the assumed values (slope, widths, heights, code basis and edition) and ask for confirmation before building, or immediately after if the user asked for a quick test. A ramp test once used an assumed slope, widths and railing height that the user never specified."
+    },
+    {
+      "id": "RVT-025",
+      "title": "Conflict with a rule: stop and ask",
+      "category": "workflow",
+      "decided_on": "2026-10-08",
+      "instruction": "If a request conflicts with a rule here, stop before any model change, name the rule id and the conflict, and ask: 'This may conflict with your model standards (<rule id>). Do you approve continuing anyway - yes or no?'. Continue only on an explicit yes; otherwise offer a compliant alternative. Record approved exceptions in the final report. The BIM lead decides when a standard may be broken; never break one silently."
+    },
+    {
+      "id": "RVT-026",
+      "title": "Transaction mode already opens the transaction",
+      "category": "execution",
+      "decided_on": "2026-10-08",
+      "instruction": "With execute_csharp execution_mode=transaction the connector wraps the code in one Transaction; opening another Transaction on `document` throws. Use execution_mode=manual only when the code must manage its own transactions (several commits, or another document such as a family opened with EditFamily or NewFamilyDocument). SketchEditScope cannot start inside an open transaction: edit sketch curves with CurveElement.SetGeometryCurve instead."
+    },
+    {
+      "id": "RVT-027",
+      "title": "Return short summaries; dump big data to files",
+      "category": "execution",
+      "decided_on": "2026-10-08",
+      "instruction": "Return a short string from execute_csharp (counts, ids of failures, remain=N). Write large outputs to a file in the working folder the user named and read that file, instead of returning large text through the call."
+    },
+    {
+      "id": "RVT-028",
+      "title": "Every write gets a separate read-back",
+      "category": "recovery",
+      "decided_on": "2026-10-08",
+      "instruction": "After every write call, run a separate read-only call that re-measures the changed elements. Never report work as done without that read-back; report rolled-back or skipped items with counts. The runner can report success while Revit rolls the transaction back at commit."
+    },
+    {
+      "id": "RVT-029",
+      "title": "Known silent-rollback triggers",
+      "category": "recovery",
+      "decided_on": "2026-10-08",
+      "instruction": "Expect a silent rollback when touching elements inside groups, system types (for example 'Linear Dimension Style'), leaderless tags placed outside their room, read-only parameters, elements checked out by another user, or while a dialog is open in Revit. When changes do not stick, attach a one-shot FailuresProcessing logger in the same call and read the failure text from its log file."
+    },
+    {
+      "id": "RVT-030",
+      "title": "Revit unresponsive: stop and ask about dialogs",
+      "category": "recovery",
+      "decided_on": "2026-10-08",
+      "instruction": "If Revit does not answer for more than about three minutes, or results contradict the last write, stop writing and ask the user to check for an open dialog. Ask them to cancel only that dialog; never ask them to press Ctrl+Z."
+    },
+    {
+      "id": "RVT-031",
+      "title": "Final sweep for silently reverted batches",
+      "category": "recovery",
+      "decided_on": "2026-07-17",
+      "instruction": "A batch can roll back after returning OK. Finish every bulk job with a full count or sweep of the old state (for example names still in the old format) and re-apply missing ids one by one."
+    },
+    {
+      "id": "RVT-032",
+      "title": "Elements owned by another user",
+      "category": "recovery",
+      "decided_on": "2026-10-08",
+      "instruction": "In workshared models, edits to elements checked out by a colleague fail. Report them with the owner's name and ask the user to have them synced or relinquished; never force."
+    },
+    {
+      "id": "RVT-033",
+      "title": "Small batches with a remain counter",
+      "category": "performance",
+      "decided_on": "2026-10-08",
+      "instruction": "Keep batches small and loop with remain=N: 1-3 views per call; about 8-15 renames per call on heavy models; about 300-400 parameter changes; walls with many associative dimensions 1-3 per call; drafting views with full geometry 2-3 per call. Creations and deletions follow RVT-006. Larger batches timed out and rolled back."
+    },
+    {
+      "id": "RVT-034",
+      "title": "Collect with category filters",
+      "category": "performance",
+      "decided_on": "2026-10-08",
+      "instruction": "Use OfCategory or ElementMulticategoryFilter (plus BoundingBoxIntersectsFilter for links). Never scan a view with a bare FilteredElementCollector(document, viewId) on models with many links."
+    },
+    {
+      "id": "RVT-035",
+      "title": "Never use sheet-scoped collectors on big linked models",
+      "category": "performance",
+      "decided_on": "2026-11-12",
+      "instruction": "To find schedules or other elements placed on sheets, collect once for the whole document (for example FilteredElementCollector(document).OfClass(typeof(ScheduleSheetInstance))) and group by OwnerViewId or SheetId. Do not create a FilteredElementCollector(document, sheetId) per sheet: on a large workshared model with many links each one triggered a slow view regeneration, took minutes per few sheets and blocked every later call for over ten minutes."
+    },
+    {
+      "id": "RVT-036",
+      "title": "Read first, write after",
+      "category": "performance",
+      "decided_on": "2026-10-08",
+      "instruction": "Collect all positions and bounding boxes first, then do all moves. Do not read get_BoundingBox or geometry after a move inside a loop, and avoid document.Regenerate() in loops."
+    },
+    {
+      "id": "RVT-037",
+      "title": "Light active view before heavy scripts",
+      "category": "performance",
+      "decided_on": "2026-10-08",
+      "instruction": "Before heavy scripts, ask the user to switch the active view to a schedule or legend and close sheet tabs; heavy sheets with many links hang on 'Generating graphics'."
+    },
+    {
+      "id": "RVT-038",
+      "title": "Split heavy jobs into match and apply passes",
+      "category": "performance",
+      "decided_on": "2026-07-13",
+      "instruction": "For heavy write jobs, run a read-only matching pass that outputs an Id:value list, then a fast apply pass that sets values directly from that list without collectors."
+    },
+    {
+      "id": "RVT-039",
+      "title": "Do not copy views one by one between documents",
+      "category": "performance",
+      "decided_on": "2026-10-08",
+      "instruction": "Copying views between documents through the API exhausts Revit's graphics resources (about 100 views crashed Revit). To extract a subset of a view library, Save As a copy of the whole source model and delete what is not needed."
+    },
+    {
+      "id": "RVT-040",
+      "title": "Room tags stay inside their room, no leaders; least-cost clash resolver",
+      "category": "annotation",
+      "decided_on": "2026-10-02",
+      "instruction": "Room tags on floor plans must be readable inside their own room and must not overlap dimensions, other tags, text, walls, columns, doors or stairs (furniture overlap is tolerated). Resolve clashes by scoring candidate positions inside the tagged room: weighted overlap (annotation 1000, hard model elements 100, furniture 5) plus a distance penalty; move only if the cost improves. Pass order: leaders off -> lift tags -> room-tag resolver -> door-tag centring -> read-back. If a room is too small, keep the least-bad spot inside it and list it for manual review. Rejected approach: moving room tags out of their room into corridors with leaders. Method: skill revit-plan-annotation-cleanup."
+    },
+    {
+      "id": "RVT-041",
+      "title": "Door tags centred on the opening",
+      "category": "annotation",
+      "decided_on": "2026-10-02",
+      "instruction": "The centre of a door tag sits exactly on the door's insertion point (midpoint of the opening), with no leader. Report tags whose door is missing or unloaded."
+    },
+    {
+      "id": "RVT-042",
+      "title": "Every lift shaft gets a tag",
+      "category": "annotation",
+      "decided_on": "2026-10-02",
+      "instruction": "Every lift shaft room visible in a plan (host or linked) gets a room tag of the standard unit type."
+    },
+    {
+      "id": "RVT-043",
+      "title": "Area tags in too-small areas: short leader out (area plans only)",
+      "category": "annotation",
+      "decided_on": "2026-10-09",
+      "instruction": "On area plans (BUA, GFA, rentable area-calculation plans), first move a clashing area tag least-cost inside its area. Only if the area is too small for the tag (narrow facade terraces, small core rooms): turn the leader on, keep the tag horizontal, put the text in clear space outside the area (beyond the facade for perimeter areas, the nearest free area for core rooms) without overlapping any annotation, and put the leader end in the middle of the area. One short, straight leader, horizontal where possible. Clean tags are never moved; duplicate tags on one area are reported, not moved. Room tags on floor plans stay inside their room."
+    },
+    {
+      "id": "RVT-044",
+      "title": "Create STD templates from a view, not by duplicating the template",
+      "category": "views",
+      "decided_on": "2026-10-08",
+      "instruction": "View.Duplicate fails on templates and CopyElements loses Custom link overrides. Create the new template with CreateViewTemplate() from a view that uses the source template, then copy the non-controlled parameter ids and verify the link override count."
+    },
+    {
+      "id": "RVT-045",
+      "title": "Filter order: the top filter wins",
+      "category": "views",
+      "decided_on": "2026-10-08",
+      "instruction": "In View.GetOrderedFilters() the first filter wins. To reorder, remove and re-add filters; each re-added filter goes to the bottom."
+    },
+    {
+      "id": "RVT-046",
+      "title": "Link display limits of the API",
+      "category": "views",
+      "decided_on": "2026-10-08",
+      "instruction": "The API cannot set RVT-link display to Custom or edit a link's colour scheme or Custom display settings; these are UI steps for the user. Switching links to 'By Host View' can make linked content disappear, so test on one view first."
+    },
+    {
+      "id": "RVT-047",
+      "title": "Area boundaries on wall centrelines (shaft exception)",
+      "category": "areas",
+      "decided_on": "2026-10-02",
+      "instruction": "Area boundary lines go on wall centrelines only, never traced around columns or along wall faces. New areas take their names from the matching room names, and area parameters follow the criteria of the existing areas. Shaft exception: put shaft void boundaries on the shaft's inner wall faces so no Area remains inside a current shaft void, and assign the strip between the inner face and the shaft wall centreline to services (the model's function-of-space parameter = SERVICE). Remove obsolete boundary lines of former shafts while keeping valid adjoining divisions. Rejected approach: deriving boundaries from the room ClosedShell or face-of-wall outlines wrapped around columns. Non-room areas: RVT-004."
+    },
+    {
+      "id": "RVT-048",
+      "title": "Build boundary loops from linked wall centrelines",
+      "category": "areas",
+      "decided_on": "2026-10-08",
+      "instruction": "Room.GetBoundarySegments does not include segments from walls modelled in other links. Build closed loops from the LocationCurve centrelines of the walls in those links."
+    },
+    {
+      "id": "RVT-049",
+      "title": "Nested links: match by inverse transform and level band",
+      "category": "areas",
+      "decided_on": "2026-07-13",
+      "instruction": "get_BoundingBox(null) is null for nested link instances. Compute the local bounding box from the link document, transform it with GetTotalTransform(), and match points by inverse-transforming them into link coordinates with a Z band anchored to the link's own floor. Never match by world-aligned bounding boxes: rotated or stacked instances overlap."
+    },
+    {
+      "id": "RVT-050",
+      "title": "Edit families into new files",
+      "category": "families",
+      "decided_on": "2026-10-02",
+      "instruction": "document.EditFamily -> own Transaction in the family document (execution_mode=manual) -> SaveAs under a NEW name in the families folder the user named -> Close(false). Never overwrite the original .rfa."
+    },
+    {
+      "id": "RVT-051",
+      "title": "Reloading an existing family needs the UI",
+      "category": "families",
+      "decided_on": "2026-10-08",
+      "instruction": "LoadFamily from inside the runner can fail with 'document must not be modifiable'. A new family name may load by API; overwriting an existing family needs Insert > Load Family > 'Overwrite the existing version' in the UI. Verify by script afterwards."
+    },
+    {
+      "id": "RVT-052",
+      "title": "Curved elements are true curves, real system elements",
+      "category": "families",
+      "decided_on": "2026-09-30",
+      "instruction": "Curved walls and upstands follow the real curve as true curved wall elements. For sloped curved upstands use a mass + Wall by Face; give created elements a Comments value so they can be selected later. Rejected approach: approximating a curve with many short straight segments, or modelling it in-place."
+    },
+    {
+      "id": "RVT-053",
+      "title": "Grids are the master reference",
+      "category": "dimensions",
+      "decided_on": "2026-09-24",
+      "instruction": "Elements move to fit the grids, never the other way round. Correct a grid only after the user approves it. Doors and windows are measured from their host wall, never from grids, and are fixed only after all walls."
+    },
+    {
+      "id": "RVT-054",
+      "title": "Dimensions clean at 6 decimals",
+      "category": "dimensions",
+      "decided_on": "2026-09-24",
+      "instruction": "Dimension compliance means round(value, 6) is a multiple of the module (default 50 mm unless the project sets another): residual error below 5e-7 mm. Angles exact to 1e-11 degrees, measured with asin(|a x b|). Rejected approach: accepting dimensions as clean within 0.5 mm or any looser tolerance; fractions stayed visible in the check views."
+    },
+    {
+      "id": "RVT-055",
+      "title": "Follow the phased dimension-compliance procedure",
+      "category": "dimensions",
+      "decided_on": "2026-09-25",
+      "instruction": "Follow the phased procedure in skill revit-dimension-compliance: P0 audit -> P1 check views -> P2 as-is dimensions -> P3a walls / P3b doors / P3c windows / P3d slabs -> P4 verify, with an approval gate after each phase."
+    },
+    {
+      "id": "RVT-056",
+      "title": "User-entered coordinates are absolute targets",
+      "category": "workflow",
+      "decided_on": "2026-10-06",
+      "instruction": "Values the user types for survey points or coordinates are absolute targets, not 'shift by' amounts. Read the current value, compute target - current, apply only the difference, and read back. Rejected approach: treating the typed value as a relative shift."
+    },
+    {
+      "id": "RVT-057",
+      "title": "Short final report with counts",
+      "category": "reporting",
+      "decided_on": "2026-10-08",
+      "instruction": "End each task with a short report: what changed (counts), what was skipped and why, what needs manual review (ids), and what the user must do (sync, reload in other models). Offer a spreadsheet or Word record only if useful."
+    },
+    {
+      "id": "RVT-058",
+      "title": "Fixed tables stay fixed",
+      "category": "reporting",
+      "decided_on": "2026-09-25",
+      "instruction": "When the user asks for a table with fixed rows (for example a door types table), build a manual table (header-section rows, element body filtered to zero rows), not an element-driven schedule, and match the formatting of the user's reference exactly. Rejected approach: a schedule that pulls its rows from model elements."
+    },
+    {
+      "id": "RVT-059",
+      "title": "Elevator calculations: DBC occupancy and round up",
+      "category": "calculations",
+      "decided_on": "2026-11-12",
+      "instruction": "For every elevator calculation (Method 1 or Method 2) on a Dubai Building Code project, estimate population with the DBC Table D.5 occupancy rates (Studio 1.5, 1BR 1.8, 2BR 3, 3BR 4, 4BR 5, +1 per extra bedroom or maid's room), ask which units have a maid's room, round each floor's group population up to the next whole person, and use the actual floor-to-floor heights. Confirm the DBC edition the project uses."
+    },
+    {
+      "id": "RVT-060",
+      "title": "Recurring workflows become connector tools",
+      "category": "workflow",
+      "decided_on": "2026-08-23",
+      "instruction": "When a workflow repeats across models, prefer packaging it as a compiled Smart Connector tool (see skill revit-mcp-plugin-development) over sending long C# scripts each time: lower token cost, faster runs, testable code. Propose it; do not build or release it without the owner's go-ahead."
     }
   ]
 }

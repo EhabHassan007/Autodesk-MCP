@@ -25,3 +25,7 @@ Back up old template assignments, type values, filter order, and tag positions b
 Report templates and filters created, scale mapping, dimensions and tags changed, views switched, items skipped, backups written, and any UI reload steps.
 
 Verification status: guide-derived rollout method; apply to a test view and obtain user approval before broader use.
+
+## Detailed method (load only when needed)
+
+Read `references/apg-template-standardisation.md` when the task needs the worked method: capturing a reference view standard and rolling it out (STD templates, filter order, dimension types, tag families, test floor). It comes from the team's earlier Revit plugin and is adapted to this connector; revit-rules takes precedence where they differ.

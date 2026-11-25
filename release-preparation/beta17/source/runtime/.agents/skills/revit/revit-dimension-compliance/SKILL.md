@@ -32,3 +32,7 @@ Before each correction batch, preserve original positions and write a reviewable
 Report maximum shift and rotation, changed ids, skipped items, undimensionable axes, and final non-clean dimensions. Never claim compliance from transaction success alone.
 
 Verification status: operational guide captured; exact tolerances and live behavior must be validated against the current company standard and model.
+
+## Detailed method (load only when needed)
+
+Read `references/apg-dimension-check-compliance.md` when the task needs the worked method: the full phased procedure (P0-P4) with configuration, per-element methods, batch sizes and verification. It comes from the team's earlier Revit plugin and is adapted to this connector; revit-rules takes precedence where they differ.
