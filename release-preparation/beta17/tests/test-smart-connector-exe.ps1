@@ -8,7 +8,7 @@ $runtime = (Resolve-Path (Join-Path $PSScriptRoot '../source/runtime')).Path
 $t = Join-Path ([IO.Path]::GetTempPath()) ('connector-exe-' + [guid]::NewGuid().ToString('N'))
 $root = Join-Path $t 'root'
 $saved = $env:LOCALAPPDATA
-$process = $null; $job = $null
+$process = $null; $job = $null; $routeJobs = @()
 try {
     # 1. Build into an install-shaped folder: <root>\bin\SmartConnector.exe beside VERSION and the skill library.
     $exe = Join-Path $root 'bin\SmartConnector.exe'
@@ -276,10 +276,64 @@ try {
     $info = Invoke-Tool 'revision_cloud_info' @{ view_ids = @('12', '13') }
     Assert (-not $info.isError -and (@(($info.content[0].text | ConvertFrom-Json).fields) -join '|') -eq '12|13') ('revision_cloud_info sent the wrong fields: ' + $info.content[0].text)
     'PASS: Revit add-in pipe: answers, typed add-in errors, execute_csharp options, get_job and the revision cloud tools as the bridge sends them'
+
+    # 7. Two Revit windows: two registered sessions, each with its own model. A call without session_id goes to the session
+    #    whose active document is expected_document; get_job asks each session; session_id still wins. The stand-ins have
+    #    no windows, so the route to the window used last (reads without expected_document) is not tested here.
+    $standIn = {
+        param([string]$PipeName, [string]$Label, [string]$Document)
+        $encode = { param($s) [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($s)) }
+        $server = New-Object IO.Pipes.NamedPipeServerStream($PipeName, [IO.Pipes.PipeDirection]::InOut, 1)
+        while ($true) {
+            $server.WaitForConnection()
+            $reader = New-Object IO.StreamReader($server, [Text.Encoding]::UTF8, $false, 4096, $true)
+            $writer = New-Object IO.StreamWriter($server, (New-Object Text.UTF8Encoding($false)), 4096, $true); $writer.AutoFlush = $true
+            $line = $reader.ReadLine()
+            if ($line) {
+                $fields = $line -split "`t"
+                $decoded = @($fields | Select-Object -Skip 1 | ForEach-Object { [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($_)) })
+                if ($fields[0] -eq 'connection_status') { $writer.WriteLine('OK' + "`t" + (& $encode ((@{ document_id = $Document; busy = $false } | ConvertTo-Json -Compress)))) }
+                elseif ($fields[0] -eq 'get_job' -and $Label -eq 'A') { $writer.WriteLine('ERR' + "`t" + (& $encode ('[job_not_found] Job ' + $decoded[0] + ' was not found.'))) }
+                else { $writer.WriteLine('OK' + "`t" + (& $encode ((@{ served_by = $Label; operation = $fields[0]; fields = $decoded } | ConvertTo-Json -Compress)))) }
+            }
+            $reader.Dispose(); $writer.Dispose(); $server.Disconnect()
+        }
+    }
+    $sessionDirectory = Join-Path $env:LOCALAPPDATA 'BIM-CAD-MCP\runtime\revit-sessions'
+    New-Item -ItemType Directory -Force $sessionDirectory | Out-Null
+    foreach ($label in 'A', 'B') {
+        $pipeName = "BimCadMcp.Revit.2024.test$label"
+        $routeJobs += @(Start-Job -ScriptBlock $standIn -ArgumentList $pipeName, $label, "C:\Models\doc-$label.rvt")
+        # Any live process id will do: the connector only checks that the session's process is still running.
+        [IO.File]::WriteAllText((Join-Path $sessionDirectory "2024-$label.json"), (@{ session_id = "2024-$label"; pid = $PID; revit_version = '2024'; pipe_name = $pipeName; started_utc = '2026-01-01T00:00:00Z' } | ConvertTo-Json -Compress))
+    }
+    $ready = $false
+    for ($wait = 0; $wait -lt 100 -and -not $ready; $wait++) {
+        Start-Sleep -Milliseconds 100
+        $pipes = [IO.Directory]::GetFiles('\\.\pipe\')
+        $ready = ($pipes -contains '\\.\pipe\BimCadMcp.Revit.2024.testA') -and ($pipes -contains '\\.\pipe\BimCadMcp.Revit.2024.testB')
+    }
+    Assert $ready 'The two stand-in Revit sessions did not start'
+    $sessions = @(((Invoke-Tool 'list_sessions').content[0].text | ConvertFrom-Json).sessions)
+    Assert ($sessions.Count -eq 2 -and @($sessions | Where-Object online).Count -eq 2) ('list_sessions must report both Revit sessions online: ' + ($sessions | ConvertTo-Json -Compress))
+    $toB = Invoke-Tool 'execute_csharp' @{ expected_document = 'C:\Models\doc-B.rvt'; execution_mode = 'read'; allow_model_changes = $false; code = 'return "x";'; parameters_json = '{}'; transaction_name = 'T' }
+    $toBData = $toB.content[0].text | ConvertFrom-Json
+    Assert (-not $toB.isError -and $toBData.served_by -eq 'B' -and $toBData.routed_session_id -eq '2024-B') ('execute_csharp must go to the session whose active document is expected_document: ' + $toB.content[0].text)
+    $toA = Invoke-Tool 'set_parameter' @{ expected_document = 'c:\models\DOC-A.rvt'; element_id = '5'; parameter = 'Comments'; value = 'x' }
+    Assert (-not $toA.isError -and ($toA.content[0].text | ConvertFrom-Json).served_by -eq 'A') ('set_parameter must go to the session with that document, ignoring case as the add-in does: ' + $toA.content[0].text)
+    $nowhere = Invoke-Tool 'execute_csharp' @{ expected_document = 'C:\Models\doc-C.rvt'; execution_mode = 'read'; allow_model_changes = $false; code = 'return "x";'; parameters_json = '{}'; transaction_name = 'T' }
+    Assert ($nowhere.isError -and $nowhere.content[0].text -like '`[document_changed`] No open Revit window has C:\Models\doc-C.rvt*2024-A (C:\Models\doc-A.rvt)*') ('A document open in no session must be refused and name each session: ' + $nowhere.content[0].text)
+    $jobB = Invoke-Tool 'get_job' @{ job_id = 'j1' }
+    Assert (-not $jobB.isError -and ($jobB.content[0].text | ConvertFrom-Json).served_by -eq 'B') ('get_job without session_id must find the session that holds the job: ' + $jobB.content[0].text)
+    $pinned = Invoke-Tool 'execute_csharp' @{ session_id = '2024-A'; expected_document = 'C:\Models\doc-B.rvt'; execution_mode = 'read'; allow_model_changes = $false; code = 'return "x";'; parameters_json = '{}'; transaction_name = 'T' }
+    $pinnedData = $pinned.content[0].text | ConvertFrom-Json
+    Assert (-not $pinned.isError -and $pinnedData.served_by -eq 'A' -and $null -eq $pinnedData.routed_session_id) ('session_id must choose the session, unchanged: ' + $pinned.content[0].text)
+    'PASS: two Revit windows: routed by expected_document, get_job finds its session, session_id wins'
 }
 finally {
     $env:LOCALAPPDATA = $saved
     if ($process -and -not $process.HasExited) { try { $process.StandardInput.Close() } catch { }; if (-not $process.WaitForExit(5000)) { $process.Kill() } }
     if ($job) { Stop-Job $job -ErrorAction SilentlyContinue; Remove-Job $job -Force -ErrorAction SilentlyContinue }
+    foreach ($routeJob in $routeJobs) { Stop-Job $routeJob -ErrorAction SilentlyContinue; Remove-Job $routeJob -Force -ErrorAction SilentlyContinue }
     Remove-Item $t -Recurse -Force -ErrorAction SilentlyContinue
 }

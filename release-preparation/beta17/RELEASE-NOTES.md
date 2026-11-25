@@ -1,3 +1,14 @@
+Smart Connector for Autodesk Revit and AutoCAD 1.2.5
+
+New in 1.2.5 (two Revit windows open at once; everything from 1.2.4 below is included):
+- Fixed: with two Revit windows open, Claude and Codex could not work in Revit. Every Revit call that did not name a `session_id` was refused with "More than one Revit session is running", and the AI app had no way to tell which window the user meant. A call without `session_id` now goes to the window whose active document is the call's `expected_document` (every write names one), and otherwise, for reads, to the Revit window the user used last. The answer names the session it went to in `routed_session_id`, and `list_sessions` marks the window used last with `front: true`.
+- A write is still safe if the wrong window answers: the add-in refuses a write whose `expected_document` is not its active document. When no open window has that document active, the connector says so and lists each session with its active model.
+- `get_job` without `session_id` asks each Revit window for the job, since a job belongs to the window that ran it.
+- `session_id` still chooses the window when it is given. The connector's instructions and the `revit-model-operations-recovery` and `revit-revision-clouds` workflows now describe this instead of asking the user to close a window.
+- Only the connector changed; the Revit add-in is the same, so Revit need not be restarted.
+
+Not verified on a real PC: the connector compiles, and the offline test has two stand-in Revit sessions for the routing by `expected_document`, `get_job` and `session_id`; it has not yet run on Windows. The choice of the window used last (from the Windows window order) is not covered by the stand-ins and is not yet seen with two real Revit windows. The PowerShell fallback bridge keeps the old behaviour.
+
 Smart Connector for Autodesk Revit and AutoCAD 1.2.4
 
 New in 1.2.4 (update reminder at Windows sign-in; everything from 1.2.3 below is included):
@@ -103,4 +114,4 @@ Lean core: Smart Connector now runs nothing in the background. This removes the 
 - `verify_standards`: an `expected_counts` type of `total`, `all` or `any` (or none) counts every object; an unknown type is refused instead of being counted as zero.
 - Detail Generator, found in the first run on the office template: the viewport step is retried when AutoCAD answers "call rejected" (busy), and leader notes are spaced for the office label block's real text size so wrapped notes no longer overprint.
 
-SHA-256: AA3BD9BDB313A28C139D468A1D1F4995F119F6766AE3C24D06451C54549BDC58
+SHA-256: 9EE3F179CDFE135D45C6E8535D85445159CF3E2DED0F934EBF699F7CF974CB2C
