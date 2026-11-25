@@ -1,3 +1,12 @@
+Smart Connector for Autodesk Revit and AutoCAD 1.2.3
+
+New in 1.2.3 (following long Revit requests without waiting blind; everything from 1.2.2 below is included):
+- `get_job` now takes `wait_seconds` (1 to 110, with `job_id`). When a Revit request outlives its `execute_csharp` call, the AI app follows it with `get_job`, which used to answer at once: Claude and Codex then paused in a shell between checks (for example 45 s, then 90 s) and the result waited for the pause to end even when Revit had finished seconds earlier. With `wait_seconds` the Revit add-in holds the answer until the job finishes, is cancelled or expires, and answers within a quarter of a second of that; when the time is up it answers with the current state and progress, and the next `get_job` call waits again. The wait runs on the add-in's pipe thread, not on Revit's own thread, so Revit keeps working and `connection_status` and other `get_job` calls still answer meanwhile. `get_job` with `cancel=true` never waits.
+- The tool descriptions, the connector's instructions, the "still running" and "not started yet" job messages, the `revit-csharp-runner` and `revit-revision-clouds` workflows and the Revit timeout rule now tell the AI app to use `wait_seconds` and never to sleep or pause between `get_job` calls.
+- The new add-in is loaded the next time Revit starts: close Revit and open it again after the update. Until then, and with an add-in from an earlier version, `get_job` answers at once as before; the connector sends `wait_seconds` only when it is asked for, so the two still work together.
+
+Not verified in live Revit: the connector and the add-in compile and pass the offline tests (a stand-in add-in checks that `wait_seconds` reaches the pipe and that values above 110 are refused), not yet a long dry run in Revit followed with `get_job`.
+
 Smart Connector for Autodesk Revit and AutoCAD 1.2.2
 
 New in 1.2.2 (Claude Desktop from the Microsoft Store; everything from 1.2.1 below is included):
