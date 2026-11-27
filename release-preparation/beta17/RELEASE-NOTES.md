@@ -1,3 +1,13 @@
+Smart Connector for Autodesk Revit and AutoCAD 1.2.6
+
+New in 1.2.6 (3ds Max; everything from 1.2.5 below is included):
+- 3ds Max 2023-2027: a new bridge lets Claude and Codex read the open 3ds Max scene. Setup and Repair copy it to %APPDATA%\Autodesk\ApplicationPlugins\SmartConnector3dsMax.bundle when 3ds Max is installed; it starts with 3ds Max (restart 3ds Max after the update).
+- New tools: `max_list_sessions`, `max_scene_info`, `max_list_objects`, `max_get_object`, `max_section` (plan and section cuts of the model as polylines or an R12 DXF, in mm), `max_capture_viewport`, `max_export` (OBJ, FBX or DWG to a new file) and `execute_max_python` (read, or write inside one undo block). `connection_status` reports 3ds Max. New skill: `3dsmax-model-to-cad`.
+- Security: no network port. The bridge answers on a named pipe that refuses remote clients and admits only the signed-in Windows user, needs a random per-session token on every request, and refuses to start if another program holds its pipe name; the connector checks that the pipe belongs to the registered 3dsmax.exe before sending anything. Exports never overwrite and go to a local folder by default. Details: docs/3dsmax-bridge.md. To switch it off, create %LOCALAPPDATA%\BIM-CAD-MCP\runtime\max-bridge-disabled.
+- Error reports to the administrator record the product as 3ds Max and remove .max, .fbx, .obj, .3ds and .skp file names.
+
+Not verified on a real PC: the connector compiles (C# 5) and the bridge's protocol, token checks, busy handling, section geometry and file rules pass offline tests; the Windows pipe and the 3ds Max calls have not yet run in 3ds Max.
+
 Smart Connector for Autodesk Revit and AutoCAD 1.2.5
 
 New in 1.2.5 (two Revit windows open at once; everything from 1.2.4 below is included):
@@ -114,4 +124,4 @@ Lean core: Smart Connector now runs nothing in the background. This removes the 
 - `verify_standards`: an `expected_counts` type of `total`, `all` or `any` (or none) counts every object; an unknown type is refused instead of being counted as zero.
 - Detail Generator, found in the first run on the office template: the viewport step is retried when AutoCAD answers "call rejected" (busy), and leader notes are spaced for the office label block's real text size so wrapped notes no longer overprint.
 
-SHA-256: 08913633DDD4035AA03C73CB392CC556109516C11BF81970CE7F002893D1D954
+SHA-256: C0EB0CDBEFF47CFFB5097DE6BD6CAC77C9935C1E33A054F5E35569BF37784E20
