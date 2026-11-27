@@ -571,7 +571,8 @@ namespace SmartConnector
         internal static List<Dictionary<string, object>> ListAll(string product)
         {
             product = (product ?? "").Trim().ToLowerInvariant();
-            if (product.Length > 0 && product != "autocad" && product != "revit" && product != "all") throw new ToolException("product must be autocad, revit or all.");
+            if (product == "3dsmax") product = "3ds-max";
+            if (product.Length > 0 && product != "autocad" && product != "revit" && product != "3ds-max" && product != "all") throw new ToolException("product must be autocad, revit, 3dsmax or all.");
             if (product == "all") product = "";
             return All().Values.Where(s => !IsLink(s.Path) && (product.Length == 0 || s.Category == product))
                 .OrderBy(s => s.Category.Length > 0 ? s.Category : "zz", StringComparer.CurrentCultureIgnoreCase)

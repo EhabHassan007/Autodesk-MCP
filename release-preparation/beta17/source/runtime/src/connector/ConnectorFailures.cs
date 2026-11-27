@@ -67,7 +67,7 @@ namespace SmartConnector
             if (typed.Success) { code = typed.Groups[1].Value; text = text.Substring(typed.Length); }
             return Json.Object(
                 "tool", Regex.IsMatch(tool ?? "", "^[A-Za-z0-9_.:-]{1,100}$") ? tool : "unknown",
-                "product", product == "revit" || product == "autocad" ? product : "connector",
+                "product", product == "revit" || product == "autocad" || product == MaxBridge.Product ? product : "connector",
                 "code", code,
                 "message", Clean(text, Environment.UserName, Environment.MachineName),
                 "outcome", outcome,
@@ -88,7 +88,7 @@ namespace SmartConnector
             text = Regex.Replace(text, @"\\\\(?:[^\\/\n""'<>|]*[\\/])*[^\s\\/""'<>|]*", "<path>");
             text = Regex.Replace(text, @"(?<![A-Za-z])[A-Za-z]:[\\/](?:[^\\/\n""'<>|]*[\\/])*[^\s\\/""'<>|]*", "<path>");
             text = Regex.Replace(text, @"""[^""\n]{0,300}""|“[^”\n]{0,300}”|‘[^’\n]{0,300}’|(?<![A-Za-z])'[^'\n]{0,300}'(?![A-Za-z])", "<text>");
-            text = Regex.Replace(text, @"[^\s<>""'/\\|]+\.(?:dwg|dxf|dwt|rvt|rfa|rte|rft|ifc|nwc|nwd|pdf|xlsx?|docx?|csv|txt|json|png|jpe?g)\b", "<file>", RegexOptions.IgnoreCase);
+            text = Regex.Replace(text, @"[^\s<>""'/\\|]+\.(?:dwg|dxf|dwt|rvt|rfa|rte|rft|ifc|nwc|nwd|max|fbx|obj|3ds|skp|pdf|xlsx?|docx?|csv|txt|json|png|jpe?g)\b", "<file>", RegexOptions.IgnoreCase);
             text = Regex.Replace(text, @"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b|\b[0-9a-fA-F]{16,}\b", "<id>");
             if (windowsUser != null && windowsUser.Trim().Length >= 3) text = Regex.Replace(text, Regex.Escape(windowsUser.Trim()), "<user>", RegexOptions.IgnoreCase);
             if (pcName != null && pcName.Trim().Length >= 3) text = Regex.Replace(text, Regex.Escape(pcName.Trim()), "<pc>", RegexOptions.IgnoreCase);

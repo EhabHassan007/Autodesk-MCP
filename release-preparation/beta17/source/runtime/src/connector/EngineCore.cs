@@ -17,7 +17,7 @@ using System.Threading;
 //   [ENROLLMENT_*]                  the team step
 // and the same exit codes: 0, or 1 with the reason on stderr.
 //   SmartConnector.exe engine --action <Status|Install|Update|Test|Collect|TeamStatus|CheckUpdate|EnableNotifications|
-//       DisableNotifications|ConnectGitHub|UninstallAutoCadPanel> [--product All|AutoCAD|Revit] [--repository-path <folder>]
+//       DisableNotifications|ConnectGitHub|UninstallAutoCadPanel|Uninstall3dsMaxBridge> [--product All|AutoCAD|Revit] [--repository-path <folder>]
 //       [--skip-repository-update] [--install-git-if-missing] [--install-claude-desktop-if-missing]
 //       [--enrollment-path <file>] [--join-name <name>] [--join-email <email>] [--terms-version <version>]
 //       [--ai-clients ClaudeDesktop,ClaudeCode,Codex] [--skills On|Off] [--auto-updates On|Off]
@@ -34,7 +34,7 @@ namespace SmartConnector
 
     internal sealed class EngineOptions
     {
-        internal static readonly string[] Actions = { "Status", "Install", "Update", "Test", "Collect", "TeamStatus", "CheckUpdate", "EnableNotifications", "DisableNotifications", "ConnectGitHub", "UninstallAutoCadPanel", "ConnectAiApps" };
+        internal static readonly string[] Actions = { "Status", "Install", "Update", "Test", "Collect", "TeamStatus", "CheckUpdate", "EnableNotifications", "DisableNotifications", "ConnectGitHub", "UninstallAutoCadPanel", "Uninstall3dsMaxBridge", "ConnectAiApps" };
         internal static readonly string[] Products = { "All", "AutoCAD", "Revit" };
         internal static readonly string[] AllAiClients = { "ClaudeDesktop", "ClaudeCode", "Codex" };
 
@@ -237,10 +237,12 @@ namespace SmartConnector
                         return 0;
                     case "TeamStatus": TeamStatus(); return 0;
                     case "UninstallAutoCadPanel": UninstallAutoCadBundle(); return 0;
+                    case "Uninstall3dsMaxBridge": Uninstall3dsMaxBundle(); return 0;
                     case "Status":
                     case "Test":
                         if (_o.Product == "All" || _o.Product == "AutoCAD") TestAutoCadSetup();
                         if (_o.Product == "All" || _o.Product == "Revit") TestRevitSetup();
+                        if (_o.Product == "All") Test3dsMaxSetup();
                         TestAutodeskRegistration();
                         return 0;
                     case "Install": Install(); return 0;
@@ -332,6 +334,7 @@ namespace SmartConnector
                 }
             });
             if (WantsProduct("AutoCAD")) RunInstallStep("autocad", delegate { InstallAutoCadBundleStep(root); });
+            if (_o.Product == "All") RunInstallStep("3dsmax", delegate { Install3dsMaxBundleStep(root); });
             RunInstallStep("updates", delegate
             {
                 RemoveBackgroundTasks(root, true);
@@ -365,6 +368,7 @@ namespace SmartConnector
             List<Action> checks = new List<Action>();
             if (WantsProduct("AutoCAD")) checks.Add(TestAutoCadSetup);
             if (WantsProduct("Revit")) checks.Add(TestRevitSetup);
+            if (_o.Product == "All") checks.Add(Test3dsMaxSetup);
             checks.Add(TestAutodeskRegistration);
             foreach (Action check in checks)
             {
@@ -400,6 +404,7 @@ namespace SmartConnector
             if (WantsProduct("Revit") && TestRevit2024Installed()) InstallRevitAddin(root);
             else if (WantsProduct("Revit")) Step("Revit 2024 was not detected, so its add-in was skipped.");
             if (WantsProduct("AutoCAD")) InstallAutoCadBundleStep(root);
+            if (_o.Product == "All") Install3dsMaxBundleStep(root);
             // Not recorded as connected: this is the previous version's code; the new version reconnects once when it first starts.
             RegisterDetectedAiClients(root, choices.AiClients);
             RemoveBackgroundTasks(root, true);

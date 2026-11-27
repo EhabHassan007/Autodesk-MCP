@@ -23,7 +23,7 @@ export function cleanMessage(message, {user, pc, person} = {}) {
   t = t.replace(/\\\\(?:[^\\/\n"'<>|]*[\\/])*[^\s\\/"'<>|]*/g,'<path>');
   t = t.replace(/(?<![A-Za-z])[A-Za-z]:[\\/](?:[^\\/\n"'<>|]*[\\/])*[^\s\\/"'<>|]*/g,'<path>');
   t = t.replace(/"[^"\n]{0,300}"|“[^”\n]{0,300}”|‘[^’\n]{0,300}’|(?<![A-Za-z])'[^'\n]{0,300}'(?![A-Za-z])/g,'<text>');
-  t = t.replace(/[^\s<>"'/\\|]+\.(?:dwg|dxf|dwt|rvt|rfa|rte|rft|ifc|nwc|nwd|pdf|xlsx?|docx?|csv|txt|json|png|jpe?g)\b/gi,'<file>');
+  t = t.replace(/[^\s<>"'/\\|]+\.(?:dwg|dxf|dwt|rvt|rfa|rte|rft|ifc|nwc|nwd|max|fbx|obj|3ds|skp|pdf|xlsx?|docx?|csv|txt|json|png|jpe?g)\b/gi,'<file>');
   t = t.replace(/\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b|\b[0-9a-fA-F]{16,}\b/g,'<id>');
   if (user && user.trim().length >= 3) t = t.replace(new RegExp(escape(user.trim()),'gi'),'<user>');
   if (pc && pc.trim().length >= 3) t = t.replace(new RegExp(escape(pc.trim()),'gi'),'<pc>');
@@ -45,7 +45,7 @@ export function validateFailures(data, today) {
   return data.events.map(event => {
     if (!exactKeys(event,['tool','product','code','message','outcome','day','count'])) throw new Error('Invalid error report.');
     const {tool, product, code, message, outcome, day, count} = event;
-    if (typeof tool !== 'string' || !/^[A-Za-z0-9_.:-]{1,100}$/.test(tool) || !['revit','autocad','connector'].includes(product)
+    if (typeof tool !== 'string' || !/^[A-Za-z0-9_.:-]{1,100}$/.test(tool) || !['revit','autocad','3dsmax','connector'].includes(product)
       || typeof code !== 'string' || !/^[a-z_]{1,40}$/.test(code) || !['failed','recovered'].includes(outcome)
       || typeof message !== 'string' || !message.isWellFormed() || message.length > 300 || /[\x00-\x1f\x7f]/.test(message))
       throw new Error('Invalid error report.');
@@ -95,7 +95,7 @@ export async function recentFailures(db, today) {
 
 const FAILURE = {Name:'title',Product:'select',Tool:'rich_text','Error code':'rich_text',Message:'rich_text','Failures (30 days)':'number',
   'Recovered (30 days)':'number','People (30 days)':'number',Who:'rich_text',Versions:'rich_text','First seen':'date','Last seen':'date',Fingerprint:'rich_text'};
-const PRODUCT = {revit:'Revit',autocad:'AutoCAD',connector:'Connector'};
+const PRODUCT = {revit:'Revit',autocad:'AutoCAD','3dsmax':'3ds Max',connector:'Connector'};
 
 // Hourly copy into Notion. Only the columns above are written. "Status" is set to New when a row is created and is
 // never changed by the service afterwards: it belongs to whoever plans the correction.

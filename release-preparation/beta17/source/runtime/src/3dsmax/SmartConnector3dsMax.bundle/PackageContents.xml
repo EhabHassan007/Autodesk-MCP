@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Smart Connector bridge for 3ds Max. No compiled code: a post-start-up MAXScript starts a Python bridge
+     (Contents\python\smart_connector_max) that opens a local, owner-only named pipe for SmartConnector.exe.
+     The install engine (EngineAutodesk.cs, Install3dsMaxBundle) copies this bundle to %APPDATA%\Autodesk\ApplicationPlugins. -->
+<ApplicationPackage
+    SchemaVersion="1.0"
+    AutodeskProduct="3ds Max"
+    Name="Smart Connector for 3ds Max"
+    Description="Local bridge between 3ds Max and Smart Connector for Codex and Claude. Owner-only named pipe; no network access."
+    AppVersion="1.0.0"
+    FriendlyVersion="1.0.0"
+    ProductType="Application"
+    SupportedLocales="Enu"
+    AppNameSpace="smartconnector3dsmax.local"
+    Author="Smart Connector"
+    ProductCode="{6C1F3E2A-9B47-4C2D-8E51-3A7D0B9F4E12}"
+    UpgradeCode="{0E8B5D41-2F6C-4A93-B7D2-5C1E8A3F6B90}">
+  <CompanyDetails Name="Smart Connector" Url="https://github.com/EhabHassan007/Autodesk-MCP" Phone=" " />
+  <Components Description="post-start-up scripts parts">
+    <RuntimeRequirements OS="Win64" Platform="3ds Max" SeriesMin="2023" SeriesMax="2027" />
+    <ComponentEntry AppName="SmartConnectorMaxBridge" Version="1.0.0" ModuleName="./Contents/smart_connector_max_start.ms" />
+  </Components>
+</ApplicationPackage>
