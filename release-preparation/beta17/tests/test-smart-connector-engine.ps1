@@ -217,7 +217,7 @@ exit /b 0
     $run = Invoke-Engine -State $s -Arguments @('--action', 'Install', '--repository-path', $root, '--skills', 'Off', '--auto-updates', 'On')
     Assert ($run.Code -eq 0) ('Install failed: ' + (Show-Run $run))
     foreach ($pattern in '^\[PHASE\] files$', '^\[RESULT\] files=ok$', '^\[PHASE\] skills$', '^\[RESULT\] skills=skipped not selected$', '^\[PHASE\] team$', '^\[PHASE\] revit$',
-        '^\[RESULT\] revit=skipped Revit 2024 is not installed$', '^\[PHASE\] autocad$', '^\[RESULT\] autocad=skipped AutoCAD is not installed$', '^\[PHASE\] updates$', '^\[RESULT\] updates=ok$',
+        '^\[RESULT\] revit=skipped Revit 2024 is not installed$', '^\[PHASE\] autocad$', '^\[RESULT\] autocad=skipped AutoCAD is not installed$', '^\[PHASE\] 3dsmax$', '^\[RESULT\] 3dsmax=skipped 3ds Max is not installed$', '^\[PHASE\] updates$', '^\[RESULT\] updates=ok$',
         '^\[RESULT\] codex=ok$', '^\[RESULT\] claude_code=ok$', '^\[RESULT\] claude_desktop=ok Claude restarts to load it$',
         '\] \[ENROLLMENT_PENDING\] ', '\] Setup complete\. Restart Codex, Claude, and any running Revit session, then open AutoCAD or Revit\.$',
         '\] Codex has the Smart Connector registration\.$', '\] Claude Code has the Smart Connector registration\.$', 'Claude Desktop has the Smart Connector registration at ') {
@@ -225,7 +225,7 @@ exit /b 0
     }
     Assert (-not (Has-Line $run '^\[RESULT\] \w+=failed')) ('A step failed: ' + (Show-Run $run))
     $order = @($run.Lines | Where-Object { $_ -match '^\[PHASE\] ' })
-    Assert (($order -join ',') -eq '[PHASE] files,[PHASE] skills,[PHASE] team,[PHASE] revit,[PHASE] autocad,[PHASE] autocad,[PHASE] updates,[PHASE] codex,[PHASE] codex,[PHASE] claude_code,[PHASE] claude_desktop') ('Phases differ from Setup-BimCad.ps1: ' + ($order -join ','))
+    Assert (($order -join ',') -eq '[PHASE] files,[PHASE] skills,[PHASE] team,[PHASE] revit,[PHASE] autocad,[PHASE] autocad,[PHASE] 3dsmax,[PHASE] 3dsmax,[PHASE] updates,[PHASE] codex,[PHASE] codex,[PHASE] claude_code,[PHASE] claude_desktop') ('Phases differ from Setup-BimCad.ps1: ' + ($order -join ','))
     $codexLog = (Get-Content (Join-Path $s.Fake 'codex.log') -Raw).Replace('"', '')
     Assert ($codexLog.Contains("mcp add smart-connector -- $exe mcp")) "Codex was not registered with the program: $codexLog"
     $claudeLog = (Get-Content (Join-Path $s.Fake 'claude.log') -Raw).Replace('"', '')

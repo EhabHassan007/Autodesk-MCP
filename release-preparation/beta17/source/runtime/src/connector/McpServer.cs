@@ -401,7 +401,7 @@ namespace SmartConnector
             Dictionary<string, object> max = Product == "" || Product == MaxBridge.Product ? MaxBridge.ConnectionStatus() : Json.Object("available", false, "summary", "not included in this connection.");
             string summary = "AutoCAD: " + Json.GetString(autoCad, "summary") + " Revit: " + Json.GetString(revit, "summary") + " 3ds Max: " + Json.GetString(max, "summary");
             if (!(true.Equals(autoCad["available"]) || true.Equals(revit["available"]) || true.Equals(max["available"])))
-                throw new ToolException("Smart Connector is running, but none of AutoCAD, Revit and 3ds Max is reachable. " + summary);
+                throw new ToolException("Smart Connector is running, but neither AutoCAD nor Revit is reachable, and no 3ds Max bridge answers. " + summary);
             // Which program is answering: the compiled connector, not the PowerShell fallback (which lacks apply_plan, execute_autocad and generate_detail).
             return Json.Object("connected", true, "summary", summary, "bridge", Json.Object("kind", "exe", "version", Paths.Version, "tools", Tools.Count), "autocad", autoCad, "revit", revit, "max", max);
         }
