@@ -228,8 +228,8 @@ namespace SmartConnector
     internal static class McpServer
     {
         private static readonly string[] Protocols = { "2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25", "2026-07-28" };
-        private const string Instructions = "Before any Revit work call get_revit_rules and follow every rule it returns; the Revit model tools refuse to run until it has been called. Use list_skill_workflows and read_skill_workflow to load relevant shared guidance before CAD/BIM tasks; no separate skill upload is required to read this guidance. Authenticated Autodesk connector for Codex and Claude with AutoCAD and Revit tools. Model-changing calls are serialized across AI clients. For AutoCAD, read drawing_info before edits and save only when explicitly requested. For Revit, read document_info before writes, pass expected_document, and verify every write with a separate read. With several Revit windows open, a call without session_id goes to the window whose active document is expected_document, otherwise to the Revit window used last; its answer names that session in routed_session_id. Call list_sessions and say which model you are working on when the user may mean another window. Revit errors are typed: [compile_error] and [runtime_error] are problems in the submitted code, not a lost connection. After a timeout or an answer with completed=false never run the request again: call connection_status (it says whether Revit is busy) and get_job with wait_seconds, which waits on the connector and answers the moment the job finishes; never sleep or pause in a shell between get_job calls.";
-        private const string CombinedStatus = "Check whether the Smart Connector can reach AutoCAD and Revit. Reports AutoCAD (running full AutoCAD over COM, version, active drawing) and Revit (add-in sessions, active document, last error) separately. Succeeds when either product is reachable; a product that is closed is reported, not an error. Optional session_id selects a Revit session.";
+        private const string Instructions = "Before any Revit work call get_revit_rules and follow every rule it returns; the Revit model tools refuse to run until it has been called. Use list_skill_workflows and read_skill_workflow to load relevant shared guidance before CAD/BIM tasks; no separate skill upload is required to read this guidance. Authenticated Autodesk connector for Codex and Claude with AutoCAD, Revit and 3ds Max tools. Model-changing calls are serialized across AI clients. For AutoCAD, read drawing_info before edits and save only when explicitly requested. For Revit, read document_info before writes, pass expected_document, and verify every write with a separate read. With several Revit windows open, a call without session_id goes to the window whose active document is expected_document, otherwise to the Revit window used last; its answer names that session in routed_session_id. Call list_sessions and say which model you are working on when the user may mean another window. Revit errors are typed: [compile_error] and [runtime_error] are problems in the submitted code, not a lost connection. After a timeout or an answer with completed=false never run the request again: call connection_status (it says whether Revit is busy) and get_job with wait_seconds, which waits on the connector and answers the moment the job finishes; never sleep or pause in a shell between get_job calls. For 3ds Max, call max_scene_info first: lengths are returned in millimetres whatever the scene units; max_section cuts plan and section outlines from the model; pass expected_scene to execute_max_python and save only when the user asks.";
+        private const string CombinedStatus = "Check whether the Smart Connector can reach AutoCAD, Revit and 3ds Max. Reports AutoCAD (running full AutoCAD over COM, version, active drawing), Revit (add-in sessions, active document, last error) and 3ds Max (bridge sessions, open scene) separately. Succeeds when either product is reachable; a product that is closed is reported, not an error. Optional session_id selects a Revit session.";
 
         // Every Revit model tool needs the Revit rules to have been read in this session, and again after two hours.
         private static DateTime _revitRulesReadAt = DateTime.MinValue;
@@ -242,6 +242,8 @@ namespace SmartConnector
         // Offline DWG tools (LibreDWG, DwgOffline.cs): they work on closed .dwg files and need neither AutoCAD nor Revit.
         private static readonly HashSet<string> DwgNames = new HashSet<string>();
         private static readonly HashSet<string> RevitNames = new HashSet<string>();
+        // 3ds Max tools (MaxBridge.cs): a local bridge inside 3ds Max, reached over an owner-only named pipe.
+        private static readonly HashSet<string> MaxNames = new HashSet<string>();
 
         // "" = both products; "autocad" or "revit" = only that product's tools (plus connection_status and the skill tools).
         internal static string Product = "";
@@ -254,6 +256,7 @@ namespace SmartConnector
                 List<Dictionary<string, object>> tools = new List<Dictionary<string, object>>();
                 if (Product != "revit") foreach (Dictionary<string, object> tool in AutoCadBridge.Tools) { tools.Add(tool); AutoCadNames.Add((string)tool["name"]); }
                 if (Product != "revit") foreach (Dictionary<string, object> tool in DwgOffline.Tools) { tools.Add(tool); DwgNames.Add((string)tool["name"]); }
+                if (Product == "" || Product == MaxBridge.Product) foreach (Dictionary<string, object> tool in MaxBridge.Tools) { tools.Add(tool); MaxNames.Add((string)tool["name"]); }
                 foreach (Dictionary<string, object> source in RevitBridge.Tools)
                 {
                     if (Product == "autocad" && (string)source["name"] != "connection_status") continue;
@@ -267,8 +270,8 @@ namespace SmartConnector
                     tools.Add(tool); RevitNames.Add((string)tool["name"]);
                 }
                 tools.Add(Json.Object("name", "list_skill_workflows",
-                    "description", "List shared workflow guidance available through this connector: name, category and a one-line description. Pass product (autocad or revit) to list only that product's workflows. Read the relevant workflow before a task.",
-                    "inputSchema", Json.Object("type", "object", "properties", Json.Object("product", Json.Object("type", "string", "enum", new object[] { "autocad", "revit", "all" }, "description", "Only this product's workflows")), "required", new object[0], "additionalProperties", false),
+                    "description", "List shared workflow guidance available through this connector: name, category and a one-line description. Pass product (autocad, revit or 3dsmax) to list only that product's workflows. Read the relevant workflow before a task.",
+                    "inputSchema", Json.Object("type", "object", "properties", Json.Object("product", Json.Object("type", "string", "enum", new object[] { "autocad", "revit", "3dsmax", "all" }, "description", "Only this product's workflows")), "required", new object[0], "additionalProperties", false),
                     "annotations", Json.Object("readOnlyHint", true)));
                 tools.Add(Json.Object("name", "read_skill_workflow",
                     "description", "Read a shared Autodesk workflow or its supporting text file. This returns guidance and does not execute code or modify a model.",
@@ -360,6 +363,7 @@ namespace SmartConnector
                 else if (name == "connection_status") data = ConnectionStatus(arguments);
                 else if (DwgNames.Contains(name)) data = DwgOffline.Invoke(name, arguments);
                 else if (AutoCadNames.Contains(name)) data = WithWriteLock(name, delegate { return AutoCadBridge.Invoke(name, arguments); });
+                else if (MaxNames.Contains(name)) data = WithWriteLock(name, delegate { return MaxBridge.Invoke(name, arguments); });
                 else if (RevitNames.Contains(name))
                 {
                     if (name != "list_sessions" && name != "get_job" && DateTime.UtcNow - _revitRulesReadAt > RevitRulesFresh) throw new ToolException(RevitRulesFirst);
@@ -383,7 +387,7 @@ namespace SmartConnector
             {
                 Exception shown = exception is System.Reflection.TargetInvocationException && exception.InnerException != null ? exception.InnerException : exception;
                 // Reported to the administrator, cleaned of drawing and model content (ConnectorFailures.cs).
-                Failures.Failed(name, name == "connection_status" ? "connector" : AutoCadNames.Contains(name ?? "") ? "autocad" : RevitNames.Contains(name ?? "") ? "revit" : "connector", shown.Message);
+                Failures.Failed(name, name == "connection_status" ? "connector" : AutoCadNames.Contains(name ?? "") ? "autocad" : RevitNames.Contains(name ?? "") ? "revit" : MaxNames.Contains(name ?? "") ? MaxBridge.Product : "connector", shown.Message);
                 return Json.Object("content", new object[] { Json.Object("type", "text", "text", shown.Message) }, "isError", true);
             }
         }
@@ -394,11 +398,12 @@ namespace SmartConnector
         {
             Dictionary<string, object> autoCad = AutoCadBridge.ConnectionStatus();
             Dictionary<string, object> revit = RevitBridge.ConnectionStatus(arguments);
-            string summary = "AutoCAD: " + Json.GetString(autoCad, "summary") + " Revit: " + Json.GetString(revit, "summary");
-            if (!(true.Equals(autoCad["available"]) || true.Equals(revit["available"])))
-                throw new ToolException("Smart Connector is running, but neither AutoCAD nor Revit is reachable. " + summary);
+            Dictionary<string, object> max = Product == "" || Product == MaxBridge.Product ? MaxBridge.ConnectionStatus() : Json.Object("available", false, "summary", "not included in this connection.");
+            string summary = "AutoCAD: " + Json.GetString(autoCad, "summary") + " Revit: " + Json.GetString(revit, "summary") + " 3ds Max: " + Json.GetString(max, "summary");
+            if (!(true.Equals(autoCad["available"]) || true.Equals(revit["available"]) || true.Equals(max["available"])))
+                throw new ToolException("Smart Connector is running, but neither AutoCAD nor Revit is reachable, and no 3ds Max bridge answers. " + summary);
             // Which program is answering: the compiled connector, not the PowerShell fallback (which lacks apply_plan, execute_autocad and generate_detail).
-            return Json.Object("connected", true, "summary", summary, "bridge", Json.Object("kind", "exe", "version", Paths.Version, "tools", Tools.Count), "autocad", autoCad, "revit", revit);
+            return Json.Object("connected", true, "summary", summary, "bridge", Json.Object("kind", "exe", "version", Paths.Version, "tools", Tools.Count), "autocad", autoCad, "revit", revit, "max", max);
         }
 
         // Model-changing calls are serialized across every Codex and Claude window (and the PowerShell bridges).

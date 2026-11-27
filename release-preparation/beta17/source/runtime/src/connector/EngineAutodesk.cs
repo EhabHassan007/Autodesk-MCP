@@ -314,6 +314,89 @@ namespace SmartConnector
             catch (Exception exception) { Step("The Start menu shortcut could not be created: " + exception.Message); }
         }
 
+        // ---------- 3ds Max ----------
+
+        // 3ds Max 2023-2027 (the bridge needs Python 3 in 3ds Max and the post-start-up package format).
+        internal static int[] Get3dsMaxYears()
+        {
+            List<int> years = new List<int>();
+            for (int year = 2023; year <= 2027; year++)
+                if (File.Exists(Path.Combine(Env.ProgramFiles, "Autodesk", "3ds Max " + year, "3dsmax.exe"))) years.Add(year);
+            return years.ToArray();
+        }
+
+        private static string MaxBundleTarget { get { return Path.Combine(PluginsRoot, "SmartConnector3dsMax.bundle"); } }
+
+        // Copies the 3ds Max bridge package to this user's ApplicationPlugins folder (no admin rights). 3ds Max starts the
+        // bridge at its next start. The old copy is replaced as a whole, so a file removed from the package does not stay.
+        private void Install3dsMaxBundle(string root)
+        {
+            string source = Path.Combine(root, "src", "3dsmax", "SmartConnector3dsMax.bundle");
+            if (!File.Exists(Path.Combine(source, "PackageContents.xml"))) throw new EngineException("The 3ds Max bridge package is missing from this install.");
+            string target = MaxBundleTarget;
+            string staging = target + ".new-" + Guid.NewGuid().ToString("N").Substring(0, 8);
+            try
+            {
+                string sourceRoot = EngineText.Trimmed(source);
+                foreach (string file in Directory.GetFiles(source, "*", SearchOption.AllDirectories))
+                {
+                    string relative = file.Substring(sourceRoot.Length).TrimStart('\\', '/');
+                    // Only the package's own text files: never compiled Python caches or anything else that was left there.
+                    string extension = Path.GetExtension(file).ToLowerInvariant();
+                    if (extension != ".py" && extension != ".ms" && extension != ".xml") continue;
+                    string destination = Path.Combine(staging, relative);
+                    Directory.CreateDirectory(Path.GetDirectoryName(destination));
+                    File.Copy(file, destination, true);
+                }
+                if (Directory.Exists(target)) Directory.Delete(target, true);
+                Directory.Move(staging, target);
+            }
+            finally
+            {
+                try { if (Directory.Exists(staging)) Directory.Delete(staging, true); } catch (Exception) { }
+            }
+            Step("Installed the 3ds Max bridge at " + target + ". Restart 3ds Max to load it.");
+        }
+
+        private void Install3dsMaxBundleStep(string root)
+        {
+            Phase("3dsmax");
+            if (Get3dsMaxYears().Length == 0)
+            {
+                Step("3ds Max 2023-2027 was not detected, so its bridge was skipped.");
+                Result("3dsmax", "skipped", "3ds Max is not installed");
+                return;
+            }
+            try
+            {
+                Install3dsMaxBundle(root);
+                Result("3dsmax", "ok", "restart 3ds Max to load it");
+            }
+            catch (Exception exception)
+            {
+                // AutoCAD and Revit work without it; report and carry on.
+                Step("The 3ds Max bridge could not be installed: " + exception.Message);
+                Result("3dsmax", "failed", exception.Message);
+            }
+        }
+
+        private void Uninstall3dsMaxBundle()
+        {
+            if (Directory.Exists(MaxBundleTarget)) Directory.Delete(MaxBundleTarget, true);
+            Step("Removed the 3ds Max bridge. Restart 3ds Max to finish.");
+        }
+
+        private void Test3dsMaxSetup()
+        {
+            int[] years = Get3dsMaxYears();
+            Step(years.Length > 0 ? "3ds Max " + String.Join(", ", years) + " detected." : "3ds Max 2023-2027 was not detected.");
+            if (years.Length == 0) return;
+            Step(File.Exists(Path.Combine(MaxBundleTarget, "PackageContents.xml")) ? "The Smart Connector bridge is installed for 3ds Max." : "The Smart Connector bridge is not installed for 3ds Max yet.");
+            if (File.Exists(Path.Combine(Paths.LocalAppData, "BIM-CAD-MCP", "runtime", "max-bridge-disabled"))) Step("The 3ds Max bridge is switched off (max-bridge-disabled).");
+            Dictionary<string, object> status = MaxBridge.ConnectionStatus();
+            Step("3ds Max: " + Json.GetString(status, "summary"));
+        }
+
         // ---------- Revit ----------
 
         private static bool TestRevit2024Installed()
